@@ -29,6 +29,8 @@ export interface CdpConnection {
   send(method: string, params?: Record<string, unknown>, sessionId?: string, timeoutMs?: number): Promise<unknown>
   /** Listen to an event (of the browser, or of one page's session); the answer stops listening. A connection without events has none. */
   on?(method: string, sessionId: string | undefined, listener: (params: Record<string, unknown>) => void): () => void
+  /** Whether the connection is gone (closed, or Chrome closed it): it answers nothing again. A connection that cannot tell says nothing. */
+  isClosed?(): boolean
   close(): void
 }
 
@@ -331,8 +333,10 @@ export function connectCdp(endpoint: string, timeoutMs: number, signal?: AbortSi
           const set = listeners.get(key) ?? new Set()
           set.add(listener)
           listeners.set(key, set)
-          return () => { set.delete(listener) }
+          // A server keeps this connection for its life (sharedChrome): a set no one listens on is let go of.
+          return () => { set.delete(listener); if (set.size === 0 && listeners.get(key) === set) listeners.delete(key) }
         },
+        isClosed: () => closed,
         close() {
           socket.close()
         },
@@ -345,6 +349,8 @@ export function connectCdp(endpoint: string, timeoutMs: number, signal?: AbortSi
         const gone = message.method === 'Target.detachedFromTarget' && message.sessionId === undefined ? message.params?.sessionId : undefined
         if (typeof gone === 'string') {
           detached.add(gone)
+          // The sessions of tabs closed long ago are never sent to again: the oldest are let go of on a long-lived connection.
+          if (detached.size > 1_000) detached.delete(detached.values().next().value!)
           for (const [id, waiter] of pending) if (waiter.sessionId === gone) { pending.delete(id); waiter.reject(tabClosed()) }
         }
         for (const listener of listeners.get(`${message.sessionId ?? ''}|${message.method}`) ?? []) listener(message.params ?? {})

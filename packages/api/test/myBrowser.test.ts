@@ -57,11 +57,15 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; docu
   const kinds = new Map<string, 'scope' | 'page'>()
   const answerNow = (): Answer => answers[Math.min(polled, answers.length - 1)]!
   const hrefOf = (target: string) => page.href ?? navigated.get(target) ?? 'about:blank'
-  // Each connection is its own: one closed does not close the next (a server reads in the person's Chrome request after request).
-  const connect = async (): Promise<CdpConnection> => { connectionClosed = false; return {
+  // Each connection is its own: one closed does not close the next. `connects`: how many times Chrome asked its Allow;
+  // `sent`: commands sent so far.
+  let connects = 0
+  let sent = 0
+  const connect = async (): Promise<CdpConnection> => { connectionClosed = false; connects++; return {
     async send(method, params, sessionId) {
       const p = (params ?? {}) as Record<string, unknown>
       if (connectionClosed) { afterClose.push(method); throw new ChromeLoginError('Chrome closed the connection') }
+      sent++
       if (method === 'Browser.getVersion') return { product: 'Chrome/144.0.7000.0' }
       if (method === 'Target.createTarget' && page.refuseTabs === true && targets >= 1) throw new ChromeLoginError('Chrome refused the request: Failed to open a new tab')
       // A tab is Octocrawl's page asking to allow sites once that page is written into it; any other is a page read.
@@ -113,9 +117,11 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; docu
       throw new Error(`unexpected ${method}`)
     },
     ...(page.documentStatus === undefined ? {} : { on: (method: string, sessionId: string | undefined, listener: (params: Record<string, unknown>) => void) => { listeners.set(`${method}@${String(sessionId)}`, listener); return () => { listeners.delete(`${method}@${String(sessionId)}`) } } }),
+    isClosed: () => connectionClosed,
     close() { connectionClosed = true },
   } }
-  return { connect, written, created, activated, backgrounded, navigated, mostOpen: () => mostOpen, live, afterClose, closed: () => connectionClosed, regionReads: () => regionReads }
+  // quit(): Chrome closes the connection (it quit, or remote debugging was turned off).
+  return { connect, written, created, activated, backgrounded, navigated, mostOpen: () => mostOpen, live, afterClose, closed: () => connectionClosed, regionReads: () => regionReads, connects: () => connects, sent: () => sent, quit: () => { connectionClosed = true } }
 }
 
 describe('the my-browser lane', () => {
@@ -360,6 +366,21 @@ describe('the my-browser lane', () => {
     expect(chrome.written).toHaveLength(4)
   }, 30_000)
 
+  it('connects to Chrome once for the server\'s life: Chrome asks its Allow again only after it closed the connection', async () => {
+    const chrome = fakeChrome([{ answer: 'allowed', active: true }], { html: PAGE })
+    const app = await setup(chrome, { logins: true })
+    for (const path of ['a', 'b', 'c']) expect((await scrape(app, { url: `https://site.test/${path}`, lane: 'my-browser' })).body).toMatchObject({ status: 'success' })
+    // A batch, too, reads on the same connection.
+    const batch = await (await app.request('/v1/batches', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ urls: ['https://site.test/d'], lane: 'my-browser' }) })).json() as Record<string, any>
+    for (let i = 0; i < 500; i++) { const report = await (await app.request(`/v1/batches/${batch.id ?? batch.taskId}`)).json() as { status: string }; if (report.status === 'completed') break; await new Promise((resolve) => setTimeout(resolve, 20)) }
+    expect(chrome.connects()).toBe(1)
+    expect(chrome.closed()).toBe(false)
+    // Chrome quit, or remote debugging was turned off: the next read connects again.
+    chrome.quit()
+    expect((await scrape(app, { url: 'https://site.test/e', lane: 'my-browser' })).body).toMatchObject({ status: 'success' })
+    expect(chrome.connects()).toBe(2)
+  }, 30_000)
+
   it('does not remember a site without saved logins: each read asks, and its record says the click', async () => {
     const chrome = fakeChrome([{ answer: 'allowed', active: true }], { html: PAGE })
     const app = await setup(chrome)
@@ -577,27 +598,38 @@ describe('the my-browser lane in a batch', () => {
     expect([...chrome.navigated.values()]).not.toContain('https://elsewhere.test/x')
   }, 30_000)
 
-  it('leaves no tab open and sends nothing after closing the connection when the batch is cancelled, waiting or reading', async () => {
+  it('leaves no tab open and sends nothing more when the batch is cancelled, waiting or reading; the connection is closed with the engine', async () => {
+    // Nothing more sent once the batch has let go of its tabs (the page's watch included).
+    const quiet = async (chrome: ReturnType<typeof fakeChrome>) => {
+      await until(() => chrome.live.size === 0, 5_000)
+      const before = chrome.sent()
+      await new Promise((resolve) => setTimeout(resolve, 1_200))
+      return chrome.sent() - before
+    }
     // Cancelled while a page waits on its captcha.
     const reading = fakeChrome([{ answer: 'allowed', active: true }], { html: GATE })
     let app = await setup(reading)
     let started = await post(app, { urls: ['https://site.test/a'], lane: 'my-browser' })
     await until(() => reading.created.length >= 2)
     await app.request(`/v1/batches/${idOf(started.body)}/cancel`, { method: 'POST' })
-    await until(() => reading.closed())
-    expect(reading.closed()).toBe(true)
+    expect(await quiet(reading)).toBe(0)
     expect([...reading.live]).toEqual([])
+    // The engine's one connection to Chrome stays for the next read, and closes with the engine.
+    expect(reading.closed()).toBe(false)
+    await engine!.close(); engine = null
+    expect(reading.closed()).toBe(true)
     expect(reading.afterClose).toEqual([])
-    await engine!.close(); engine = null; await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true })
     // Cancelled while Octocrawl's page still waits for the person to allow the sites.
     const asking = fakeChrome([{ answer: '', active: false }], { html: PAGE })
     app = await setup(asking)
     started = await post(app, { urls: ['https://site.test/a'], lane: 'my-browser' })
     await until(() => asking.written.length >= 1)
     await app.request(`/v1/batches/${idOf(started.body)}/cancel`, { method: 'POST' })
-    await until(() => asking.closed(), 5_000)
-    expect(asking.closed()).toBe(true)
+    expect(await quiet(asking)).toBe(0)
     expect([...asking.live]).toEqual([])
+    await engine!.close(); engine = null
+    expect(asking.closed()).toBe(true)
     expect(asking.afterClose).toEqual([])
   }, 30_000)
 
