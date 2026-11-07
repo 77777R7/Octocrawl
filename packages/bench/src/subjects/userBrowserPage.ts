@@ -74,6 +74,12 @@ export interface UserBrowserRead {
   shownWhileHidden?: string
   /** The tab was opened behind the one the person was on and brought to the front only for a check (`backgroundTabs`); absent from a reader that did not say. */
   background?: boolean
+  /**
+   * The page was ready but held content back behind a sign-in, and was given time for the site to sign the person back
+   * in by itself (signInSettleMs): how long, whether what it held back came (`cleared`) or it was read with the line,
+   * and whether the tab was taken back to the page from where the sign-on ended. Absent when it was read at once.
+   */
+  signInWait?: { waitedMs: number; cleared: boolean; returned: boolean }
 }
 
 /** Under this confidence, the main content found in the whole document of a tab out of sight is a weak guess. */
@@ -97,7 +103,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
     ]),
     { at: 0, lane: LANE, event: 'identity_sent', detail: { mode: 'authed', headers: [], by: 'user_browser' } },
     { at: 0, lane: LANE, event: 'identity_unobserved', detail: { reason: `the person's own browser (${read.browser}) sent the request; its headers were not seen` } },
-    { at: wallMs, lane: LANE, event: 'user_browser_read', detail: { browser: read.browser, status: read.status, sawGate: read.sawGate, act: read.act, waitedMs: wallMs, ...(read.tabHidden === undefined ? {} : { tabHidden: read.tabHidden }), ...(read.hiddenWaitMs === undefined ? {} : { hiddenWaitMs: read.hiddenWaitMs }), ...(read.shownWhileHidden === undefined ? {} : { readAs: shownRead ? 'shown' : 'whole' }), ...(read.background === undefined ? {} : { background: read.background }) } },
+    { at: wallMs, lane: LANE, event: 'user_browser_read', detail: { browser: read.browser, status: read.status, sawGate: read.sawGate, act: read.act, waitedMs: wallMs, ...(read.tabHidden === undefined ? {} : { tabHidden: read.tabHidden }), ...(read.hiddenWaitMs === undefined ? {} : { hiddenWaitMs: read.hiddenWaitMs }), ...(read.shownWhileHidden === undefined ? {} : { readAs: shownRead ? 'shown' : 'whole' }), ...(read.background === undefined ? {} : { background: read.background }), ...(read.signInWait === undefined ? {} : { signInWait: read.signInWait }) } },
     ...steadyWaitEvents(read.settle, wallMs, LANE),
     ...[regionWaitEvent(read.region, wallMs, LANE)].filter((event): event is TraceEvent => event !== null),
   ]
