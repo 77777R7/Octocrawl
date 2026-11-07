@@ -23,6 +23,10 @@ let server: Server
 let base: string
 let root: string
 let chrome: BrowserContext
+/** The QR sign-in's codes a phone scanned; the codes the page showed, in order (heard from its polls, so the test never runs a script in the tab, which would count as the person's act); and how many times the page was loaded as a document. */
+const qrScanned = new Set<string>()
+const qrShown: string[] = []
+let qrLoads = 0
 
 const ARTICLE = `<article><h1>The member page</h1>${'<p>What is behind the check: a page of prose, long enough to be read as an article and not as a stub. </p>'.repeat(4)}</article>`
 /** A captcha its button passes, by setting `name` (one per page: the tests share one browser, and its cookies). */
@@ -60,6 +64,14 @@ beforeAll(async () => {
       if (cookie.includes('member=1')) return html(ARTICLE.replace('The member page', 'Your orders'))
       res.writeHead(302, { location: '/signin' }); res.end(); return
     }
+    // A QR sign-in: each load of it shows a new code; a phone scanning that code signs the page in, which then goes on by itself.
+    if (req.url === '/qrdoor') { if (cookie.includes('qr=1')) return html(ARTICLE.replace('The member page', 'Behind the QR code')); res.writeHead(302, { location: '/qr/signin' }); res.end(); return }
+    if (req.url === '/qr/signin') {
+      if (req.headers['sec-fetch-dest'] === 'document') qrLoads++
+      return html('<h1>Sign in</h1><p id="code"></p><script>window.code = Math.random().toString(36).slice(2); document.getElementById("code").textContent = window.code; setInterval(async () => { const r = await fetch("/qr/status?c=" + window.code); if ((await r.text()) === "in") location.href = "/qrdoor" }, 200)</script>')
+    }
+    if (req.url?.startsWith('/qr/status')) { const code = new URL(req.url, 'http://x').searchParams.get('c') ?? ''; if (!qrShown.includes(code)) qrShown.push(code); const scanned = qrScanned.has(code); res.writeHead(200, scanned ? { 'set-cookie': 'qr=1; path=/' } : {}); res.end(scanned ? 'in' : 'waiting'); return }
+    if (req.url?.startsWith('/qr/scan')) { qrScanned.add(new URL(req.url, 'http://x').searchParams.get('c') ?? ''); res.writeHead(204); res.end(); return }
     // A page that always sends you to sign in, in any browser the tests share.
     if (req.url === '/walled') { res.writeHead(302, { location: '/signin' }); res.end(); return }
     if (req.url === '/signin') return html('<h1>Sign in</h1><form><input name="user"><input type="password" name="pw"><button id="in" type="button" onclick="document.cookie=\'member=1; path=/\'; location.href=\'/\'">Sign in</button></form>')
@@ -204,6 +216,25 @@ describe('reading a page in the person\'s own Chrome once it has settled (ADR 00
         await expect(reader.read(`${base}/walled`, { unattended: true, pollMs: 50, loginWaitMs: 1_500, waitMs: 5_000 })).rejects.toThrow(/was not through within 5 s/)
       } finally { stop() }
       await expect.poll(() => signIn().length).toBe(0)
+    } finally {
+      reader.close()
+    }
+  }, 30_000)
+
+  // A read never reloads a sign-in nobody clicked on: a QR code a phone is scanning would be replaced. Six ways of seeing a
+  // sign-in done in another tab were tried and dropped for this and like reasons (docs/login-ux-tasks.md, L8).
+  it('a QR sign-in in the read\'s own tab is never reloaded, and the page is read once the code is scanned', async () => {
+    const reader = await openUserChrome({ userDataDir: join(root, 'chrome') })
+    try {
+      const reading = reader.read(`${base}/qrdoor`, { unattended: true, pollMs: 50, waitMs: 20_000 })
+      // The phone sees the first code the page shows, and takes a while to scan it.
+      await expect.poll(() => qrShown.length, { timeout: 10_000 }).toBeGreaterThan(0)
+      const code = qrShown[0]!
+      await new Promise((resolve) => setTimeout(resolve, 1_500))
+      await fetch(`${base}/qr/scan?c=${code}`)
+      const read = await reading
+      expect(read.html).toContain('Behind the QR code')
+      expect(qrLoads).toBe(1)
     } finally {
       reader.close()
     }
