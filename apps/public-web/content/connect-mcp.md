@@ -145,6 +145,8 @@ npx octocrawl serve
 
 It listens on `http://127.0.0.1:8787`, on this computer only, with every tool: scrape, map, crawl, batch, saved logins, handoff to your own Chrome, the Amazon.sg product tools and the Monitor and delivery tools, and no daily limit. Pages are read over HTTP; for pages that only appear in a browser, run `npx playwright install chromium` once and the browser lane is used too.
 
+A page behind your own sign-in can often be read here too, with no new login for a site you are already signed in to in Chrome. The agent is told to ask you first, then reads the page in that Chrome, or with a login you save with `npx octocrawl login import <site>` and save again when it expires. A site can still refuse. Saved logins stay on this computer. [Scrape a website with login](/blog/scrape-website-with-login/) shows each step.
+
 {{MCP_CLIENT_PICKER:local}}
 
 If the client reports no tools, check that `npx octocrawl serve` is still running; if a call fails to connect, the API is not on `127.0.0.1:8787` (pass `--base-url` to the server command). The [repository](https://github.com/77777R7/Octocrawl) also has a managed local service for macOS (`npm run first-use:local`) that adds the Monitor scheduler and the delivery worker behind `http://127.0.0.1:8791/mcp`; the Monitor guides use it. Then continue with [Monitor → HTTPS Webhook](/docs/guides/monitor-webhook/) or [Amazon.sg product JSON](/docs/guides/amazon-product/).
