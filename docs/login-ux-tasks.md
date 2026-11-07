@@ -195,11 +195,12 @@ ROADMAP：
 
 起因：Phase 1 的验收是"agent 第一次撞墙后不看文档就问出那句话"，这只能在真实客户端里看到。
 
-- [ ] **L6.1** 本地 `npx octocrawl serve`（loopback）加 `@octocrawl/mcp`，接 Claude Code。用本地 fixture 的登录墙和 quotes.toscrape.com 的登录页（按 D9）各跑一次：只给 agent URL，不提登录。记录：agent 是否在动用 Chrome 或登录前问了；问的那句话；用户点了几次（Chrome 的 Allow、Allow reading these sites、页面上的点击）；从撞墙到拿到页面几轮；结果里 `access.completion`、`access.route`、`access.sessionApplied` 的值。
-- [ ] **L6.2** 登录过期一轮：`octocrawl login remove` 之后再 import 一个已登出的会话（或等它过期），看 agent 对用户说的是不是"去 Chrome 重新登一下"而不是一串命令。
-- [ ] **L6.3** 第二个客户端（Cursor 或 Codex）各跑一次 L6.1；跑不了的写 unknown。
-- [ ] **L6.4** 记录写到 `research/access/runs/<YYYY-MM-DD>-login-ux-<commit>.md`：命令、commit、客户端版本、是否走代理、每轮 agent 的原话（去掉任何值）、点击次数、结论。记录里不出现 cookie、sessionSha256 以外的会话信息。
+- [x] **L6.1** 本地 `npx octocrawl serve`（loopback）加 `@octocrawl/mcp`，接 Claude Code。用本地 fixture 的登录墙和 quotes.toscrape.com 的登录页（按 D9）各跑一次：只给 agent URL，不提登录。记录：agent 是否在动用 Chrome 或登录前问了；问的那句话；用户点了几次（Chrome 的 Allow、Allow reading these sites、页面上的点击）；从撞墙到拿到页面几轮；结果里 `access.completion`、`access.route`、`access.sessionApplied` 的值。
+- [x] **L6.2** 登录过期一轮：`octocrawl login remove` 之后再 import 一个已登出的会话（或等它过期），看 agent 对用户说的是不是"去 Chrome 重新登一下"而不是一串命令。
+- [x] **L6.3** 第二个客户端（Cursor 或 Codex）各跑一次 L6.1；跑不了的写 unknown。
+- [x] **L6.4** 记录写到 `research/access/runs/<YYYY-MM-DD>-login-ux-<commit>.md`：命令、commit、客户端版本、是否走代理、每轮 agent 的原话（去掉任何值）、点击次数、结论。记录里不出现 cookie、sessionSha256 以外的会话信息。
 - 验收：记录存在；agent 在动用登录态前问了（是/否各写明）；用户的点击次数和轮数是实测数字，不是估计。
+- 2026-11-07 结果（记录：`research/access/runs/2026-11-07-login-ux-c2eb7629.md`）：到达 Octocrawl 的 5 次运行都先问了，问句里有站点名（Claude Code 4 次，Codex 1 次）。my-browser 从撞墙到读到页面跑通了，页面上的 Allow reading these sites 每次连接 1 次；Chrome 的对话框次数没数，写 unknown。`access.*` 三个字段这次没读到，写 unknown。quotes.toscrape.com/login 不算登录墙，这个站没测到问句。已登录时一次跑完的路径没有从头跑。Cursor 没装，写 unknown。
 - 指标：Phase 1 的完成标准（见下）。
 - 决定：D9。
 
