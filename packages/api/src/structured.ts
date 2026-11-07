@@ -1623,11 +1623,14 @@ export function checkVerificationFormats(req: Pick<ScrapeRequest, 'formats' | 'v
 function requestedFormats(req: ScrapeRequest, result?: ScrapeRun): readonly ScrapeFormat[] {
   if (req.formats !== undefined) return req.formats
   // MCP marks its compact request with debug=false. Keep REST/SDK legacy
-  // defaults, while returning adapter JSON (including incomplete identity
-  // failures) on the simple MCP path.
+  // defaults, while returning adapter JSON on the simple MCP path. An adapter
+  // that could not vouch for the page (its validation failed: an X home
+  // timeline is no profile or post) gives an incomplete JSON with nothing in
+  // it, so the page's Markdown comes beside it, as it does for a contract that
+  // checks Markdown.
   if (req.debug === false) {
     const adapterJson = result?.document?.adapter.id !== undefined && result.document.adapter.id !== 'generic'
-    if (adapterJson) return checksMarkdown(req) ? ['json', 'markdown'] : ['json']
+    if (adapterJson) return checksMarkdown(req) || result.document?.adapterValidation?.valid === false ? ['json', 'markdown'] : ['json']
     return ['markdown']
   }
   return ['markdown', 'links']
