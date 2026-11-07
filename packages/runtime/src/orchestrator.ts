@@ -61,7 +61,7 @@ import {
 import { abortableSleep, createExecutionScope, createSpendLedger, raceWithSignal, throwIfExecutionStopped } from '@w2l/http-core'
 import { paidCallExposureUsd, paidCallTotals, reportFromTaskAttempt } from './crawlReport.js'
 import { Frontier, type FrontierEnqueueResult, type FrontierItem, type FrontierOptions, type SoftBlockRetry } from './frontier.js'
-import { MAX_SLOW_DELAY_MS, RETRIED_SIGNALS, softBlockSignal } from './pacing.js'
+import { MAX_SLOW_DELAY_MS, RETRIED_SIGNALS, softBlockSignal, thinAgainst } from './pacing.js'
 import { canonicalizeUrl, hostOf } from './canonicalize.js'
 import type { TaskStore } from './taskStore.js'
 import { withRegexLedger, type RegexStats } from './regexCheck.js'
@@ -357,6 +357,8 @@ export class CrawlOrchestrator {
       pollTimer = setTimeout(() => { void pollCancellation() }, 100)
 
       const softBlockRetries = runningTask.batch === undefined ? 0 : runningTask.batch.retry?.softBlocks ?? BATCH_DEFAULT_SOFT_BLOCK_RETRIES
+      // The Markdown lengths of a batch's plain pages, by host: what a page that came with next to nothing is told apart by.
+      const pageLengths = new Map<string, number[]>()
       // The reads set aside and waiting to be read again, by canonical URL: the latest of each, and what its page has spent.
       const heldReads = new Map<string, { item: FrontierItem; read: SoftBlockRetry; result: FetchResult; audit: import('@w2l/contracts').LadderRunAudit | undefined; ledger: SpendLedger | undefined; settledUsd: number; paidBefore: readonly TraceEvent[] }>()
       // A read's charge: what its answer or attempts report, and no less than what its ledger settled, which holds every
@@ -472,8 +474,15 @@ export class CrawlOrchestrator {
             // longer wait), normal pages ease it back. The change goes on the page's record and, at once, on the task's pace
             // alone (never over its status or URL list, which a cancel or an append may be writing), so a status read or the
             // job's next slice sees the pace in force.
+            if (runningTask.batch !== undefined && runningTask.batch.includeTags === undefined && !cachedPage && result.status === 'success' && typeof result.markdown === 'string' && result.verification?.status !== 'passed' && result.warnings?.some((warning) => warning.code === 'redirected_off_page') !== true) {
+              const peers = pageLengths.get(item.host) ?? []
+              const median = thinAgainst(result.markdown.length, peers)
+              // A page that will not be read again, or reads the same twice, is one of the host's pages as they are.
+              if (median === null || softBlockRetries === 0 || (item.retries?.length ?? 0) > 0) pageLengths.set(item.host, [...peers, result.markdown.length].slice(-100))
+              if (median !== null) result = { ...result, warnings: [...(result.warnings ?? []), { code: 'thin_page', message: `This page has ${result.markdown.length} characters of Markdown where the other pages of ${item.host} in this batch have about ${median}: it may have come without its content.` }] }
+            }
             const signal = cachedPage ? null : softBlockSignal(result)
-            const paceChange = cachedPage ? null : frontier.noteResult(item.host, signal, this.clock.now(), item.retries?.at(-1)?.signal ?? null)
+            const paceChange = cachedPage || signal === 'thin_page' ? null : frontier.noteResult(item.host, signal, this.clock.now(), item.retries?.at(-1)?.signal ?? null)
             if (paceChange !== null) {
               result = { ...result, trace: [...result.trace, { at: result.usage.wallMs, lane: result.lane, event: 'pacing_adjusted', detail: { ...paceChange } }] }
               if (this.store.putTaskPacing !== undefined) await this.store.putTaskPacing(runningTask.id, frontier.pacing(), new Date(this.clock.now()).toISOString())

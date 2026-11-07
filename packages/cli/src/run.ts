@@ -23,7 +23,7 @@ import { COMMANDS, parseCommandLine, UsageError, usage, type Command, type CliOp
 import { login } from './login.js'
 import { nativeModuleHelp } from './nativeModule.js'
 
-export const CLI_VERSION = '0.8.6'
+export const CLI_VERSION = '0.8.7'
 
 export interface CliIo {
   env: NodeJS.ProcessEnv
@@ -246,10 +246,12 @@ function summaryLine(kind: 'crawl' | 'batch', report: CrawlReport, items: readon
   const notRead = items.length - read
   const offPage = items.filter((item) => item.warnings?.some((warning) => warning.code === 'redirected_off_page')).length
   const signedOut = items.filter((item) => item.warnings?.some((warning) => warning.code === 'sign_in_prompt')).length
+  const thin = items.filter((item) => item.warnings?.some((warning) => warning.code === 'thin_page')).length
   const parts = [`${report.status}`, `${read.toLocaleString('en-US')} of ${items.length.toLocaleString('en-US')} pages read`]
   if (notRead > 0) parts.push(`${notRead.toLocaleString('en-US')} not read (each item says why, with its agentHints)`)
   if (offPage > 0) parts.push(`${offPage.toLocaleString('en-US')} answered by another page of the site (redirected_off_page)`)
   if (signedOut > 0) parts.push(`${signedOut.toLocaleString('en-US')} read without your login: sign in again and run them again (sign_in_prompt)`)
+  if (thin > 0) parts.push(`${thin.toLocaleString('en-US')} far shorter than the site's other pages (thin_page)`)
   if (onStdout) parts.push('the report and every page are the JSON above (--out <dir> writes them as files)')
   return `octocrawl ${kind}: ${parts.join('; ')}`
 }
