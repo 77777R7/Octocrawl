@@ -6,6 +6,7 @@ import { hostedNetworkPolicy, identityBundleFrom, modeIdentity, parseBatchStartR
 import type { Channel, ChannelAdmission } from '@w2l/bench'
 import { createApiEngine, type ApiEngine } from '../src/engine.js'
 import { browserSlots, withBrowserSlots } from '../src/browserSlots.js'
+import { createExecutionScope, raceWithSignal } from '@w2l/http-core'
 
 // The pages a server renders at once (`browserPagesAtOnce`): HTTP pages flow on every worker, and a worker whose page
 // needs the browser waits for one of the browser's slots. Hosted job slices read 8 pages at once and render 2.
@@ -80,6 +81,48 @@ describe('the pages a server renders at once', () => {
     expect(await browser!.admit!('https://c.test/', {})).toMatchObject({ ok: false, reason: 'own' })
     refuse = false
     expect(await browser!.admit!('https://d.test/', {})).toMatchObject({ ok: true })
+  })
+
+  it('holds the page\'s deadline while it waits for a slot and says how long it waited', async () => {
+    const slots = browserSlots(1)
+    const identity = identityBundleFrom(modeIdentity('standard'))
+    const [browser] = withBrowserSlots([{ id: 'browser_local', identity, waitsFor: true, fetch: async (url) => page(url, 'browser_local') }], slots)
+    const holds: string[] = []
+    const execution = { holdDeadline: () => { holds.push('held'); return () => { holds.push('released'); return undefined } } }
+    const first = await browser!.admit!('https://a.test/', execution)
+    expect(first).toMatchObject({ ok: true, waitedMs: expect.any(Number) })
+    expect(holds).toEqual(['held', 'released'])
+    const waiting = browser!.admit!('https://b.test/', execution)
+    await sleep(60)
+    expect(holds).toEqual(['held', 'released', 'held'])
+    if (first.ok) await first.settle(null, true)
+    const second = await waiting
+    expect(holds).toEqual(['held', 'released', 'held', 'released'])
+    expect(second.ok && (second.waitedMs ?? 0) >= 50).toBe(true)
+    if (second.ok) await second.settle(null, true)
+  })
+
+  it('a page queued behind slow renders keeps its whole timeout for its own read, and its trace says how long it waited', async () => {
+    root = await mkdtemp(join(tmpdir(), 'w2l-browser-slots-'))
+    const channelsFor = (mode: 'standard' | 'research' | 'authed'): Channel[] => [
+      { id: 'http', identity: identityBundleFrom(modeIdentity(mode)), fetch: async (url) => stopped(url, 'http') },
+      // The rung reads its deadline as the real browser does: a scope of its own from the execution it is given, which must not have run out.
+      { id: 'browser_local', identity: identityBundleFrom(modeIdentity(mode)), waitsFor: true, fetch: async (url, _session, execution) => {
+        const own = createExecutionScope({ signal: execution?.signal, deadlineAt: execution?.deadlineAt })
+        try { await raceWithSignal(sleep(600), own.signal) } finally { own.dispose() }
+        return page(url, 'browser_local')
+      } },
+    ]
+    engine = createApiEngine({ taskRoot: join(root, 'tasks'), channelsFor, networkPolicy: { ...hostedNetworkPolicy(), perHostMinDelayMs: 0 }, hosted: true, workerCount: 4, browserPagesAtOnce: 1 })
+    // Three pages of 600 ms through one slot under a 1,000 ms timeout: the third waits 1,200 ms before it starts.
+    const { taskId } = await engine.startBatch(parseBatchStartRequest({ urls: ['a', 'b', 'c'].map((host) => `https://${host}.test/item`), timeout: 1_000 }))
+    for (;;) { const status = await engine.getBatch(taskId); if (status?.status === 'completed' || status?.status === 'failed') break; await sleep(20) }
+    const items = (await engine.getBatchItems(taskId, { limit: 10, debug: true }))!.items
+    expect(items.map((item) => `${item.status}:${item.failureReason ?? ''}`)).toEqual(['success:', 'success:', 'success:'])
+    const waits = items.map((item) => (item.trace ?? []).find((event) => event.event === 'slot_wait')?.detail?.waitedMs as number | undefined)
+    // The first page waited for nothing and says nothing; the last waited for the two before it.
+    expect(waits.filter((wait) => wait === undefined)).toHaveLength(1)
+    expect(Math.max(...waits.map((wait) => wait ?? 0))).toBeGreaterThan(1_000)
   })
 
   it('stops waiting for a slot when the read is cancelled', async () => {
