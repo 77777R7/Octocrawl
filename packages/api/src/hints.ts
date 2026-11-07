@@ -93,6 +93,8 @@ export function offPageHint(result: Pick<HintedResult, 'requestedUrl' | 'evidenc
 
 /** The hint a `sign_in_prompt` warning carries: the page came, without what a login shows, and how to get it. */
 export const SIGN_IN_PROMPT_HINT = 'the page came without what your login shows: sign in to the site again in that browser, then read this page again'
+/** The hint a `thin_page` warning carries: the page came almost empty, read twice if the batch read it again, and what to try. */
+export const THIN_PAGE_HINT = 'the page came far shorter than the other pages of this site in the batch: read it again later, or open it to see whether it really is that short'
 
 /** What hosted Octocrawl says of a file it gave no text for: it keeps none, so the file is had on the person's own computer. */
 export function hostedFileNotKeptHint(kind: string): string {
@@ -389,6 +391,7 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode' | 'waitFor'>, 
   // The site answered another page in place of the one asked for: the content is real, and it is not the requested page's.
   if (result.warnings?.some((warning) => warning.code === 'redirected_off_page')) hints.push(offPageHint(result))
   if (result.warnings?.some((warning) => warning.code === 'sign_in_prompt')) hints.push(SIGN_IN_PROMPT_HINT)
+  if (result.warnings?.some((warning) => warning.code === 'thin_page')) hints.push(THIN_PAGE_HINT)
   // The selection holds nothing to read: the answer stays a success, and what was left out of it is named.
   if (result.warnings?.some((warning) => warning.code === 'empty_selection')) hints.push(EMPTY_SELECTION_HINT)
   if (result.retryAt !== undefined) {

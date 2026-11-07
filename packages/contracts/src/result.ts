@@ -418,6 +418,10 @@ export interface FetchWarning {
    * handoff, or mode authed with a saved login) shows a line that holds content back behind a sign-in, "Log
    * in for contact details": the login did not reach the page, or has lapsed.
    * The message quotes the line; `readiness` reads it as `not_served`.
+   * `thin_page`: a batch page of 300 characters of Markdown or fewer, under a
+   * quarter of the median of at least five other plain pages of its host in
+   * the run, still so after any read again. A page that really is that short
+   * raises it too, so `readiness` does not read this code.
    * `empty_selection`: `includeTags` was asked and the Markdown shows nothing,
    * because no element was named or those named hold no text and no image
    * (script blocks are left out as always). The answer stays a `success` and
