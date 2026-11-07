@@ -33,6 +33,12 @@ describe('the page that asks the person to allow sites', () => {
     expect(html).toContain('<button id="allow">Allow reading these sites</button>')
   })
 
+  it('shows Octocrawl joined to Chrome, and says the reads are as the person', () => {
+    const html = page(['site.test'])
+    expect(html).toContain('class="mark chrome"')
+    expect(html).toContain('It reads as you, where you are signed in')
+  })
+
   it('stands still for reduced motion', () => {
     expect(page(['site.test'])).toContain('if (!still) window.requestAnimationFrame(frame)')
   })
