@@ -18,6 +18,8 @@ export interface JobsCloud {
   project: string
   bucket: GcsBucket
   workerUrl: string
+  /** What a task's OIDC token names and the worker checks: the service's own URL, also when `workerUrl` is a revision's tag URL (workerAudience). */
+  workerAudience: string
   tasksAccount: string
   enqueueSlice: (job: HostedJob, delaySeconds?: number) => Promise<void>
   enqueueExpiry: (job: HostedJob) => Promise<void>
@@ -40,6 +42,7 @@ export async function jobsCloudFromEnv(env: NodeJS.ProcessEnv, fetcher: typeof f
   if (!location || !queueName) throw new Error('W2L_JOBS_QUEUE must be location/queue')
   const workerUrl = env.W2L_JOBS_WORKER_URL!.trim().replace(/\/+$/, '')
   if (!workerUrl.startsWith('https://')) throw new Error('W2L_JOBS_WORKER_URL must be https')
+  const audience = workerAudience(workerUrl)
   const tasksAccount = env.W2L_JOBS_TASKS_ACCOUNT!.trim()
   const token = serviceAccessToken(fetcher)
   // Signed links are signed as the service's own account, through IAM, with no key in the image.
@@ -47,7 +50,7 @@ export async function jobsCloudFromEnv(env: NodeJS.ProcessEnv, fetcher: typeof f
   const signer = { email, signBlob: iamSignBlob(email, token, fetcher) }
   const bucket = new GcsBucket(env.W2L_JOBS_BUCKET!.trim(), token, fetcher, signer)
   const queue = new CloudTasksQueue({ project, location, queue: queueName, serviceAccount: tasksAccount }, token, fetcher)
-  const deliver = (id: string, path: string, body: unknown, at?: Date) => queue.enqueue({ id, url: `${workerUrl}${path}`, audience: workerUrl, body, deadlineSeconds: 900, ...(at === undefined ? {} : { scheduleTime: at }) }).then(() => {})
+  const deliver = (id: string, path: string, body: unknown, at?: Date) => queue.enqueue({ id, url: `${workerUrl}${path}`, audience, body, deadlineSeconds: 900, ...(at === undefined ? {} : { scheduleTime: at }) }).then(() => {})
   let switchRead: { at: number; on: boolean; allowed: ReadonlySet<string> | null } | null = null
   /** `hostedConfig/jobs`: the switch (`enabled`, absent: on) and the accounts that may start jobs (`allowedUids`, absent: every account). */
   const readSwitch = async () => {
@@ -68,7 +71,7 @@ export async function jobsCloudFromEnv(env: NodeJS.ProcessEnv, fetcher: typeof f
     return switchRead
   }
   return {
-    project, bucket, workerUrl, tasksAccount,
+    project, bucket, workerUrl, workerAudience: audience, tasksAccount,
     enqueueSlice: (job, delaySeconds = 0) => deliver(`${job.id}-${job.generation}`, `/internal/jobs/${job.id}/slice`, { generation: job.generation }, delaySeconds > 0 ? new Date(Date.now() + delaySeconds * 1000) : undefined),
     enqueueExpiry: (job) => deliver(`${job.id}-expire`, `/internal/jobs/${job.id}/expire`, {}, job.expireAt === null ? undefined : new Date(job.expireAt)),
     enqueueWebhook: (job) => deliver(`${job.id}-webhook`, `/internal/jobs/${job.id}/webhook`, {}),
@@ -76,4 +79,13 @@ export async function jobsCloudFromEnv(env: NodeJS.ProcessEnv, fetcher: typeof f
     async enabled() { return (await readSwitch()).on },
     async allows(uid) { const allowed = (await readSwitch()).allowed; return allowed === null || allowed.has(uid) },
   }
+}
+
+/**
+ * The audience Cloud Run checks a worker request's OIDC token against: the service's own URL. A tag URL
+ * (`https://<tag>---<service>-<hash>-<region>.a.run.app`) reaches one revision of the service and is a fine target, but as an
+ * audience Cloud Run refuses it with 401 before the worker sees the request (measured 2026-11-07 on w36slice).
+ */
+export function workerAudience(workerUrl: string): string {
+  return workerUrl.replace(/^https:\/\/[A-Za-z0-9-]+---/, 'https://')
 }
