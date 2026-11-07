@@ -168,7 +168,7 @@ export function scopePage(scope: SiteScope): string {
 <h1 class="row">Octocrawl asks to read pages in this Chrome</h1>
 <p class="task row"><code>${escape(scope.task)}</code></p>
 <div class="access row"><p class="kicker">${scope.hosts.length} ${scope.hosts.length === 1 ? 'site' : 'sites'} it may read</p><ul class="sites">${sites}</ul></div>
-<p class="note row">It reads as you, where you are signed in, only on these sites and only while this page stays open. A page that shows a check waits for you.</p>
+<p class="note row">It reads as you, where you are signed in, only on these sites and only while this page stays open. A page that asks you to sign in, or shows a check, waits for you.</p>
 <div class="actions row"><button id="allow">Allow reading these sites</button><button id="revoke">Revoke</button></div><p id="state" role="status"></p>
 </main>
 <script>

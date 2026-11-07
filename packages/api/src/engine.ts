@@ -136,7 +136,7 @@ import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitF
 import type { BrowserEngineName, BrowserIdentityChoice, BrowserKeeper, CaptchaSolving, ChannelAdmission, ChannelsFiltered, InstalledChromeTestSeams, PricedExit } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
 import { agentHintsFor, batchFailureHints, batchLoginWallHint, failureGroupOf, httpLaneAskedForBrowser, mapAgentHints, MAX_AGENT_HINTS, pinnedFastModeHints, withFailure, type BatchFailures, type FailureFacts, type FastModePin, type HintOffers } from './hints.js'
-import { HandoffNotThrough, openUserChrome, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
+import { HandoffNotThrough, LOGIN_WAIT_MS, openUserChrome, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
 import { importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
 import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
 import { JobWebhooks, webhookOf } from './jobWebhooks.js'
@@ -1583,7 +1583,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       try { allowed = await chrome.allow({ hosts, task: `scrape ${req.url}` }, { signal, log: approvalLog('scrape', null) }) }
       catch (error) { throw new HandoffUnavailableError(error instanceof Error ? error.message : String(error)) }
       try {
-        return await readAllowed(chrome, allowed, req.url, fetchOptions(req, req.formats), req.handoff?.waitMs, hooks, signal, started)
+        // A sign-in nobody is at holds the caller only briefly, so it can tell them; a wait it asked for is its own.
+        return await readAllowed(chrome, allowed, req.url, fetchOptions(req, req.formats), req.handoff?.waitMs, hooks, signal, started, undefined, req.handoff?.waitMs === undefined ? LOGIN_WAIT_MS : undefined)
       } finally {
         await allowed.close()
       }
@@ -1598,7 +1599,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * the check it still showed (`blocked`), Chrome refusing a command (`connection_error`), the site leading the tab
    * elsewhere each time it was taken back to the page (`redirect_limit`), or the wait over (`timeout`).
    */
-  async function readAllowed(chrome: UserChrome, allowed: AllowedSites, url: string, fetchOpts: FetchOptions, waitMs: number | undefined, hooks: HandoffHooks, signal: AbortSignal, started: number, hiddenWaitMs?: number): Promise<FetchResult> {
+  async function readAllowed(chrome: UserChrome, allowed: AllowedSites, url: string, fetchOpts: FetchOptions, waitMs: number | undefined, hooks: HandoffHooks, signal: AbortSignal, started: number, hiddenWaitMs?: number, loginWaitMs?: number): Promise<FetchResult> {
     try {
       const read = await chrome.read(url, {
         unattended: true,
@@ -1606,6 +1607,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         // What the person sees in their Chrome: not a panel the page keeps hidden (a sheet's shortcut list beside its grid).
         shownOnly: true,
         ...(hiddenWaitMs === undefined ? {} : { hiddenWaitMs }),
+        ...(loginWaitMs === undefined ? {} : { loginWaitMs }),
         ...(waitMs === undefined ? {} : { waitMs }),
         ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }),
         ...(hooks.onHidden === undefined ? {} : { onHidden: hooks.onHidden }),

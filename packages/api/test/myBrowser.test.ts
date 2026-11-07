@@ -31,7 +31,7 @@ type Answer = { answer: '' | 'allowed' | 'revoked'; active: boolean } | 'closed'
  * the first `shownFails` times the page has just moved on to another document, and the next `shownMoved` times was read on
  * another address.
  */
-function fakeChrome(answers: Answer[], page: { href?: string; html: string; documentStatus?: number; refuseTabs?: boolean; shown?: string; shownFails?: number; shownMoved?: number; hidden?: boolean }) {
+function fakeChrome(answers: Answer[], page: { href?: string; html: string; documentStatus?: number; refuseTabs?: boolean; shown?: string; shownFails?: number; shownMoved?: number; hidden?: boolean; touched?: boolean }) {
   const listeners = new Map<string, (params: Record<string, unknown>) => void>()
   const written: string[] = []
   const created: string[] = []
@@ -85,8 +85,8 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; docu
           if (p.contextId === 7) { polled++; return { result: { value: now.active } } }
           return { result: { value: now.answer } }
         }
-        // The page asked for: never clicked on, so the lane reads it without the person.
-        if (p.contextId === 7) return { result: { value: false } }
+        // The page asked for: never clicked on, so the lane reads it without the person; `touched`: they acted on it.
+        if (p.contextId === 7) return { result: { value: page.touched === true } }
         // The region view (ADR 0007): the page's text, which holds the ledger's rows.
         if (expression.includes('tableCount')) {
           regionReads++
@@ -117,7 +117,7 @@ describe('the my-browser lane', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  async function setup(chrome: ReturnType<typeof fakeChrome> | null, options: { hosted?: boolean } = {}) {
+  async function setup(chrome: ReturnType<typeof fakeChrome> | null, options: { hosted?: boolean; loginWaitMs?: number } = {}) {
     root = await mkdtemp(join(tmpdir(), 'w2l-my-browser-'))
     const userDataDir = join(root, 'chrome')
     await mkdir(userDataDir, { recursive: true })
@@ -125,7 +125,7 @@ describe('the my-browser lane', () => {
     engine = createApiEngine({
       taskRoot: join(root, 'tasks'),
       ...(options.hosted === true ? { hosted: true } : {}),
-      ...(chrome === null ? {} : { userChrome: { userDataDir, connect: chrome.connect } }),
+      ...(chrome === null ? {} : { userChrome: { userDataDir, connect: chrome.connect, ...(options.loginWaitMs === undefined ? {} : { loginWaitMs: options.loginWaitMs }) } }),
     })
     return createApp(engine)
   }
@@ -165,6 +165,45 @@ describe('the my-browser lane', () => {
     expect(body).toMatchObject({ status: 'success', lane: 'my_browser', verification: { status: 'passed' }, readiness: { state: 'ready', basis: ['verified'] } })
     expect(chrome.regionReads()).toBe(2)
     expect(body.trace).toContainEqual(expect.objectContaining({ lane: 'my_browser', event: 'region_wait', detail: expect.objectContaining({ ready: true, reads: 2 }) }))
+  })
+
+  // On 2026-11-07 a read of a site the person was not signed in to held the agent for 10 minutes with nothing said to them.
+  describe('a sign-in page in the person\'s Chrome', () => {
+    const SIGN_IN = '<html><head><title>Sign in</title></head><body><h1>Sign in to continue</h1><form><input type="password"></form></body></html>'
+    const allowed: Answer[] = [{ answer: 'allowed', active: true }]
+
+    it('nobody acted on goes back to the agent, and its tab stays open for the person', async () => {
+      const chrome = fakeChrome(allowed, { href: 'https://site.test/login', html: SIGN_IN })
+      const app = await setup(chrome, { loginWaitMs: 300 })
+      const { status, body } = await scrape(app, { url: 'https://site.test/a', lane: 'my-browser' })
+      expect(status).toBe(200)
+      expect(body.status).toBe('blocked')
+      expect(body.blockReason).toBe('login_wall')
+      expect(body.warning).toContain('tab stays open')
+      expect([...chrome.live]).toEqual(['tab2'])
+      expect(body.agentHints.join(' ')).toContain('ask them to sign in to it there')
+    })
+
+    it('someone is acting on is waited for', async () => {
+      const chrome = fakeChrome(allowed, { href: 'https://site.test/login', html: SIGN_IN, touched: true })
+      await setup(chrome, { loginWaitMs: 100 })
+      const opened = await openUserChrome({ userDataDir: join(root, 'chrome'), connect: chrome.connect })
+      try {
+        const sites = await opened.allow({ hosts: ['site.test'], task: 'scrape' })
+        await expect(opened.read('https://site.test/a', { unattended: true, allowedHosts: sites.hosts, loginWaitMs: 100, waitMs: 900 })).rejects.toThrow(/was not through within/)
+        await sites.close()
+      } finally { opened.close() }
+      expect([...chrome.live]).toEqual([])
+    })
+
+    it('keeps the wait a caller asked for', async () => {
+      const chrome = fakeChrome(allowed, { href: 'https://site.test/login', html: SIGN_IN })
+      const app = await setup(chrome, { loginWaitMs: 100 })
+      const { body } = await scrape(app, { url: 'https://site.test/a', lane: 'my-browser', handoff: { waitMs: 10_000 } })
+      expect(body.status).toBe('blocked')
+      expect(body.warning).not.toContain('tab stays open')
+      expect([...chrome.live]).toEqual([])
+    }, 20_000)
   })
 
   it('does not take Allow set by a script: the person\'s own click on the page is what allows the site', async () => {
