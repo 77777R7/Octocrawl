@@ -473,7 +473,7 @@ export class CrawlOrchestrator {
             // alone (never over its status or URL list, which a cancel or an append may be writing), so a status read or the
             // job's next slice sees the pace in force.
             const signal = cachedPage ? null : softBlockSignal(result)
-            const paceChange = cachedPage ? null : frontier.noteResult(item.host, signal, this.clock.now(), signal !== null && item.retries?.at(-1)?.signal === signal)
+            const paceChange = cachedPage ? null : frontier.noteResult(item.host, signal, this.clock.now(), item.retries?.at(-1)?.signal ?? null)
             if (paceChange !== null) {
               result = { ...result, trace: [...result.trace, { at: result.usage.wallMs, lane: result.lane, event: 'pacing_adjusted', detail: { ...paceChange } }] }
               if (this.store.putTaskPacing !== undefined) await this.store.putTaskPacing(runningTask.id, frontier.pacing(), new Date(this.clock.now()).toISOString())

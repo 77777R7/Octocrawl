@@ -395,6 +395,62 @@ describe('Frontier adaptive pacing: a host that answers with soft blocks is slow
     expect(frontier.dequeue(t0 + 200_250).item?.canonicalUrl).toBe(`${SEED}a`)
   })
 
+  it('stops easing at the wait in force when a page sent away comes back: a limit on rate, kept for the rest of the run, up to 8 s', () => {
+    const frontier = limited()
+    const t0 = 1_000
+    const up = (at: number) => { frontier.noteResult(HOST, 'redirected_off_page', at); return frontier.noteResult(HOST, 'redirected_off_page', at) }
+    const normal = (pages: number, at: number) => { let last = null; for (let i = 0; i < pages; i++) last = frontier.noteResult(HOST, null, at + i); return last }
+    expect(up(t0)?.delayMs).toBe(2_000)
+    expect(frontier.pacing()[HOST]?.adaptive?.floorMs).toBeUndefined()
+    frontier.noteResult(HOST, null, t0 + 60_000, 'redirected_off_page')
+    expect(frontier.pacing()[HOST]?.adaptive?.floorMs).toBe(2_000)
+    expect(normal(40, t0 + 60_001)).toBeNull()
+    expect(frontier.pacing()[HOST]?.adaptive).toMatchObject({ ceiling: 1, delayMs: 2_000, floorMs: 2_000 })
+    // Pushed back at that wait: the next one, and so on, no further than 8 s.
+    for (const delayMs of [4_000, 8_000, 16_000]) {
+      expect(up(t0 + 200_000)?.delayMs).toBe(delayMs)
+      frontier.noteResult(HOST, null, t0 + 300_000, 'redirected_off_page')
+    }
+    expect(frontier.pacing()[HOST]?.adaptive?.floorMs).toBe(8_000)
+    expect(normal(9, t0 + 300_001)).toMatchObject({ change: 'eased', delayMs: 8_000 })
+    expect(normal(30, t0 + 300_100)).toBeNull()
+    expect(frontier.hostDelayMs(HOST)).toBe(8_000)
+  })
+
+  it('sets no floor for what says nothing of a limit: a 429 or 503 that clears, a page that was never sent away, a page sent away alone', () => {
+    const cleared = limited()
+    cleared.noteResult(HOST, 'rate_limited', 1_000)
+    cleared.noteResult(HOST, 'rate_limited', 1_000)
+    cleared.noteResult(HOST, null, 2_000, 'rate_limited')
+    cleared.noteResult(HOST, null, 2_001)
+    expect(cleared.pacing()[HOST]?.adaptive?.floorMs).toBeUndefined()
+    for (let i = 0; i < 40; i++) cleared.noteResult(HOST, null, 3_000 + i)
+    expect(cleared.hostDelayMs(HOST)).toBe(250)
+    const alone = limited()
+    alone.noteResult(HOST, 'redirected_off_page', 1_000)
+    alone.noteResult(HOST, null, 2_000, 'redirected_off_page')
+    expect(alone.pacing()[HOST]?.adaptive).toBeUndefined()
+  })
+
+  it('a host that never pushes back after reading normally still comes back to its baseline', () => {
+    const frontier = limited()
+    frontier.noteResult(HOST, 'rate_limited', 1_000)
+    frontier.noteResult(HOST, 'rate_limited', 1_000)
+    for (let i = 0; i < 40; i++) frontier.noteResult(HOST, null, 1_100 + i)
+    expect(frontier.pacing()[HOST]?.adaptive).toBeUndefined()
+    expect(frontier.hostDelayMs(HOST)).toBe(250)
+  })
+
+  it('leaves a host that sends pages up alone for a minute when a push back starts, not on each slowdown of it', () => {
+    const frontier = limited()
+    const t0 = 1_000
+    const up = (at: number) => { frontier.noteResult(HOST, 'redirected_off_page', at); return frontier.noteResult(HOST, 'redirected_off_page', at) }
+    expect(up(t0)).toMatchObject({ change: 'slowed', delayMs: 2_000, untilMs: t0 + 60_000 })
+    expect(up(t0 + 60_000)).toMatchObject({ delayMs: 4_000, untilMs: t0 + 64_000 })
+    frontier.noteResult(HOST, null, t0 + 70_000)
+    expect(up(t0 + 71_000)).toMatchObject({ delayMs: 8_000, untilMs: t0 + 131_000 })
+  })
+
   it('a normal page never slows a host, and a robots.txt Crawl-delay above the adaptive wait wins', () => {
     const frontier = limited()
     for (let i = 0; i < 50; i++) expect(frontier.noteResult(HOST, null, 1_000 + i)).toBeNull()

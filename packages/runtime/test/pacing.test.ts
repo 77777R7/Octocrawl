@@ -23,7 +23,7 @@ describe('Frontier.noteResult: when a signal stops counting on a host', () => {
     const f = frontier()
     slowTo32s(f, 'redirected_off_page')
     expect(f.hostDelayMs(host)).toBe(32_000)
-    expect(f.noteResult(host, 'redirected_off_page', 1_000, true)).toMatchObject({ change: 'settled', delayMs: 0 })
+    expect(f.noteResult(host, 'redirected_off_page', 1_000, 'redirected_off_page')).toMatchObject({ change: 'settled', delayMs: 0 })
     expect(f.settled(host, 'redirected_off_page')).toBe(true)
     expect(f.pacing()[host]).toMatchObject({ settled: ['redirected_off_page'] })
     expect(f.pacing()[host]?.adaptive).toBeUndefined()
@@ -36,8 +36,8 @@ describe('Frontier.noteResult: when a signal stops counting on a host', () => {
     expect(first.settled(host, 'redirected_off_page')).toBe(false)
     const limited = frontier()
     slowTo32s(limited, 'rate_limited')
-    expect(limited.noteResult(host, 'redirected_off_page', 1_000, true)?.change).not.toBe('settled')
-    expect(limited.noteResult(host, 'rate_limited', 1_000, true)?.change).not.toBe('settled')
+    expect(limited.noteResult(host, 'redirected_off_page', 1_000, 'redirected_off_page')?.change).not.toBe('settled')
+    expect(limited.noteResult(host, 'rate_limited', 1_000, 'rate_limited')?.change).not.toBe('settled')
     expect(limited.settled(host, 'redirected_off_page')).toBe(false)
     // A wait two signals built up is neither's.
     const mixed = frontier()
@@ -45,14 +45,14 @@ describe('Frontier.noteResult: when a signal stops counting on a host', () => {
     mixed.noteResult(host, 'rate_limited', 1_000)
     mixed.noteResult(host, 'redirected_off_page', 1_000)
     expect(mixed.hostDelayMs(host)).toBe(32_000)
-    expect(mixed.noteResult(host, 'redirected_off_page', 1_000, true)?.change).not.toBe('settled')
+    expect(mixed.noteResult(host, 'redirected_off_page', 1_000, 'redirected_off_page')?.change).not.toBe('settled')
   })
 
   it('takes a settled signal for no news: it neither slows the host nor counts as a normal page', () => {
     const f = new Frontier({ seedUrl: 'https://fixture.test/', perHostMinDelayMs: 0, settledByHost: new Map([[host, ['redirected_off_page']]]) })
     // A 429 streak goes on through it, and slows the host as two in a row.
     expect(f.noteResult(host, 'rate_limited', 1_000)).toBeNull()
-    expect(f.noteResult(host, 'redirected_off_page', 1_000, true)).toBeNull()
+    expect(f.noteResult(host, 'redirected_off_page', 1_000, 'redirected_off_page')).toBeNull()
     expect(f.noteResult(host, 'rate_limited', 1_000)?.change).toBe('slowed')
   })
 })

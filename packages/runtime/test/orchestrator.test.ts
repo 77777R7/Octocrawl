@@ -740,6 +740,51 @@ describe('CrawlOrchestrator reads a batch page again after a soft block', () => 
     expect(pacing.adaptive?.slowdowns).toBeGreaterThan(0)
   })
 
+  async function limitedSite(pages: number, reads: number, windowMs: number, answers: (url: string, read: number) => boolean = () => true) {
+    const clock = new FakeClock()
+    const starts: number[] = []
+    let blockedUntil = 0
+    let blocks = 0
+    const urls = Array.from({ length: pages }, (_, i) => `${HOST}/exhibitor/${i}`)
+    const store = new MemoryTaskStore()
+    await store.putTask({ id: 'retry-limit', seedUrl: urls[0]!, taskDir: '/tmp/w2l-batch', mode: 'standard', status: 'pending', budget: DEFAULT_CRAWL_BUDGET, batch: { urls, formats: ['markdown'], includeLinks: false }, createdAt: 'x', updatedAt: 'x' })
+    const atom: ScrapeAtom = {
+      scrape: async (url) => {
+        starts.push(clock.t)
+        if (clock.t >= blockedUntil && starts.filter((at) => at >= blockedUntil && at > clock.t - windowMs).length > reads) { blockedUntil = clock.t + 45_000; blocks++ }
+        const answer = clock.t < blockedUntil || !answers(url, starts.length) ? off(url) : outcome(url, [])
+        clock.t += 3_000
+        return answer
+      },
+      close: async () => {},
+    }
+    await new CrawlOrchestrator({ store, atom, clock, workerCount: 1, perHostMinDelayMs: 250 }).run({ seedUrl: urls[0]!, taskDir: '/tmp/w2l-batch', resumeFrom: 'retry-limit', skipFetchedOnResume: true, maxDepth: 0 })
+    const steps = await store.listSteps('retry-limit')
+    return { clock, blocks, steps, sentAway: steps.filter((step) => (step.result?.warnings ?? []).length > 0).map((step) => step.url), pace: (await store.getTask('retry-limit'))!.pacing!['fixture.test']! }
+  }
+
+  it('reads a site with a limit on rate to the end: it stops easing back into the limit, and reads again after the block has passed', async () => {
+    // As www.english.ids-cologne.de answered on 2026-11-07: a 17th read within two minutes, and every read for 45 s goes to the home page; then it counts afresh.
+    const { clock, blocks, steps, sentAway } = await limitedSite(272, 16, 120_000)
+    expect(steps).toHaveLength(272)
+    expect(sentAway).toEqual([])
+    expect(blocks).toBeLessThanOrEqual(5)
+    expect(clock.t).toBeLessThan(45 * 60_000)
+  })
+
+  it('learns a limit that takes more pages to reach than easing back to the baseline does', async () => {
+    const { sentAway, pace } = await limitedSite(600, 60, 600_000)
+    expect(sentAway).toEqual([])
+    expect(pace.adaptive?.floorMs).toBe(8_000)
+  })
+
+  it('takes pages gone for what they are: pages sent away for good, two in a row, set no floor and leave the batch at its pace', async () => {
+    const { clock, sentAway, pace } = await limitedSite(100, 100_000, 600_000, (url) => !/\/(40|41|80|81)$/.test(url))
+    expect(sentAway).toHaveLength(4)
+    expect(pace.adaptive?.floorMs).toBeUndefined()
+    expect(clock.t).toBeLessThan(10 * 60_000)
+  })
+
   it('carries a signal the host settled into the next run', async () => {
     const store = new MemoryTaskStore()
     const urls = [`${HOST}/a`, `${HOST}/b`, `${HOST}/c`]
@@ -1251,7 +1296,7 @@ describe('adaptive pacing: a batch slows a host that pushes back', () => {
     const steps = [...(await store.listSteps('paced-1'))].sort((a, b) => a.url.localeCompare(b.url))
     const adjusted = steps.map((step) => step.result?.trace.filter((event) => event.event === 'pacing_adjusted').map((event) => event.detail) ?? [])
     expect(adjusted).toEqual([[], [{ host: 'paced.test', change: 'slowed', signal: 'rate_limited', ceiling: 1, delayMs: 2_000, untilMs: 3_250 }], [], []])
-    expect((await store.getTask('paced-1'))?.pacing).toEqual({ 'paced.test': { lastStartedAtMs: 5_250, crawlDelayMs: null, cooldownUntilMs: 3_250, adaptive: { ceiling: 1, delayMs: 2_000, signals: 0, okStreak: 2, slowdowns: 1, cause: 'rate_limited' } } })
+    expect((await store.getTask('paced-1'))?.pacing).toEqual({ 'paced.test': { lastStartedAtMs: 5_250, crawlDelayMs: null, cooldownUntilMs: 3_250, adaptive: { ceiling: 1, delayMs: 2_000, signals: 0, okStreak: 2, slowdowns: 1, cause: 'rate_limited', normalSince: true } } })
   })
 
   it('a resumed run on another orchestrator starts under the stored pace', async () => {

@@ -599,7 +599,7 @@ describe('persistent URL-array batch', () => {
     expect(parseBatchStartRequest({ urls: ['https://example.com/'], retry: { softBlocks: 0 } }).retry).toEqual({ softBlocks: 0 })
   })
 
-  it('slows a host after two pages in a row that the site answered with another page: one page at a time, two seconds apart, and the status says so', async () => {
+  it('slows a host after two pages in a row that the site answered with another page: one page at a time, the host left alone for a minute, and the status says so', async () => {
     // One page at a time on the host, so the two redirected pages answer one after the other: two signals in a row.
     const f = await fixture({ perHostConcurrency: 1 })
     const engine = f.engine()
@@ -608,10 +608,16 @@ describe('persistent URL-array batch', () => {
     f.setHold(async (path) => { starts.set(path, Date.now()) })
     const { client: w2l } = client(engine)
     const accepted = await w2l.batchScrape([`${f.origin}/moved/1`, `${f.origin}/moved/2`, `${f.origin}/item/3`, `${f.origin}/item/4`], { retry: { softBlocks: 0 } })
-    const report = await w2l.waitBatch(accepted.taskId, { timeoutMs: 30_000 })
-    expect(report).toMatchObject({ status: 'completed', succeeded: 4, redirectedOffPage: 2, pacing: { '127.0.0.1': { ceiling: 1, delayMs: 2_000, slowdowns: 1 } } })
-    // The two pages after the slowdown started two seconds apart, under the host's new pace.
-    expect(starts.get('/item/4')! - starts.get('/item/3')!).toBeGreaterThanOrEqual(1_900)
+    const deadline = Date.now() + 15_000
+    let status = await w2l.getBatch(accepted.taskId)
+    while (status.pacing?.['127.0.0.1']?.slowdowns !== 1 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      status = await w2l.getBatch(accepted.taskId)
+    }
+    expect(status).toMatchObject({ status: 'running', pacing: { '127.0.0.1': { ceiling: 1, delayMs: 2_000, slowdowns: 1 } } })
+    expect(Date.parse(status.pacing!['127.0.0.1']!.cooldownUntil!) - Date.now()).toBeGreaterThan(50_000)
+    expect(starts.has('/item/3')).toBe(false)
+    await w2l.cancelBatch(accepted.taskId)
   })
 
   it('lists items with the fields asked for alone (id, url, status and createdAt always), so a JSON batch comes back without markdown or evidence; an unknown field is refused by name', async () => {
