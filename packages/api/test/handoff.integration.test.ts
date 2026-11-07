@@ -53,6 +53,7 @@ beforeAll(async () => {
     if (req.url === '/trusted') return html(`${ARTICLE}<div style="display:none">The closed tab</div>`, 200, { 'content-security-policy': "require-trusted-types-for 'script'" })
     // A captcha until the person passes it: their browser then holds the cookie the page checks.
     if (req.url === '/gate') return cookie.includes('passed=1') ? html(ARTICLE) : html(captcha('passed'))
+    if (req.url === '/background-gate') return cookie.includes('bg=1') ? html(ARTICLE) : html(captcha('bg'))
     // Through the captcha, a page with nothing on it: not the page asked for.
     if (req.url === '/thin') return cookie.includes('thin=1') ? html('<p>ok</p>') : html(captcha('thin'))
     // Behind the captcha, a page with a search box that takes the focus and a sign-in box it hides.
@@ -195,6 +196,31 @@ describe('reading a page in the person\'s own Chrome', () => {
       expect(trusted.html).toContain('The member page')
       expect(trusted.html).not.toContain('The closed tab')
     } finally {
+      reader.close()
+    }
+  }, 60_000)
+})
+
+describe('reading a page in the person\'s own Chrome in a tab opened behind theirs', () => {
+  it('background: Chrome opens the tab behind the current one, the page with no check is read whole at once, and a check brings the tab to the front for the person', async () => {
+    // Playwright's Chromium reports every tab visible (document.visibilityState), so what is checked here is that Chrome
+    // takes the background tab, that the page is read without the wait for the tab, and that a check is still handed to
+    // the person; whether the person's tab stays in sight was checked by hand in Google Chrome 156 (2026-11-07).
+    const reader = await openUserChrome({ userDataDir: join(root, 'chrome') })
+    // The person gets to the check after the reader has seen it (a read every 50 ms), as a person would.
+    const stop = person(chrome, { '/background-gate': async (page) => { await page.waitForTimeout(700); await page.click('#pass') } })
+    try {
+      const started = Date.now()
+      const open = await reader.read(`${base}/open`, { unattended: true, shownOnly: true, background: true, pollMs: 50, waitMs: 20_000 })
+      expect(open.html).toContain('The open page')
+      expect(open).toMatchObject({ background: true, sawGate: null })
+      expect(open.hiddenWaitMs ?? 0).toBeLessThan(1_000)
+      expect(Date.now() - started).toBeLessThan(15_000)
+      const gated = await reader.read(`${base}/background-gate`, { unattended: true, shownOnly: true, background: true, pollMs: 50, waitMs: 20_000 })
+      expect(gated.html).toContain('The member page')
+      expect(gated).toMatchObject({ background: true, sawGate: 'captcha' })
+    } finally {
+      stop()
       reader.close()
     }
   }, 60_000)

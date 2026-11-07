@@ -20,13 +20,15 @@ type State = { href: string; ready?: string; status?: number | null; html: strin
  */
 function fakeChrome(states: Array<State | 'closed' | 'moving'>, navigate: () => unknown = () => ({}), slowMs: (read: number) => number = () => 0) {
   const calls: string[] = []
+  // What each tab was opened with (Target.createTarget's params).
+  const created: Record<string, unknown>[] = []
   let read = 0
   let shown = ''
   const connect = async (): Promise<CdpConnection> => ({
     async send(method, params, sessionId) {
       calls.push(sessionId === undefined ? method : `${method}@${sessionId}`)
       if (method === 'Browser.getVersion') return { product: 'Chrome/144.0.7000.0' }
-      if (method === 'Target.createTarget') return { targetId: `tab:${String((params as { url: string }).url)}` }
+      if (method === 'Target.createTarget') { created.push(params ?? {}); return { targetId: `tab:${String((params as { url: string }).url)}` } }
       if (method === 'Target.attachToTarget') return { sessionId: 's1' }
       if (method === 'Target.closeTarget') return {}
       if (method === 'Page.navigate') return navigate()
@@ -65,7 +67,7 @@ function fakeChrome(states: Array<State | 'closed' | 'moving'>, navigate: () => 
     },
     close() { calls.push('close') },
   })
-  return { calls, connect }
+  return { calls, created, connect }
 }
 
 const at = (href: string, html: string, extra: Partial<State> = {}): State => ({ href, html, ...extra })
@@ -92,6 +94,32 @@ describe('the person\'s Chrome', () => {
       'Target.getTargetInfo', 'Runtime.evaluate@s1', 'Page.createIsolatedWorld@s1', 'Runtime.evaluate@s1',
       'Target.getTargetInfo', 'Runtime.evaluate@s1', 'Runtime.evaluate@s1',
       ...Array(2).fill(['Target.getTargetInfo', 'Runtime.evaluate@s1']).flat(), 'Target.closeTarget', 'close'])
+  })
+
+  it('opens the tab behind the person\'s when asked, brings it to the front only once the page shows a check, and reads a page with none without a wait', async () => {
+    // A check: the tab, opened out of sight, comes to the front once, when the check shows; the person passes it there.
+    const chrome = fakeChrome([at('https://site.test/a', GATE, { hidden: true }), at('https://site.test/a', PAGE, { active: true })])
+    const reader = await openUserChrome({ userDataDir, connect: chrome.connect })
+    const read = await reader.read('https://site.test/a', { pollMs: 1, waitMs: 5_000, background: true })
+    reader.close()
+    expect(chrome.created).toEqual([{ url: 'about:blank', background: true }])
+    expect(chrome.calls.filter((call) => call === 'Target.activateTarget')).toHaveLength(1)
+    expect(chrome.calls.indexOf('Target.activateTarget')).toBeGreaterThan(chrome.calls.indexOf('Runtime.evaluate@s1'))
+    expect(read).toMatchObject({ html: PAGE, sawGate: 'captcha', background: true })
+    // No check: the tab is never brought to the front, and the page as it shows is not waited for; the whole document is read at once.
+    const quiet = fakeChrome([at('https://site.test/a', PAGE, { active: true, hidden: true })])
+    const toldHidden: string[] = []
+    const whole = await (await openUserChrome({ userDataDir, connect: quiet.connect })).read('https://site.test/a', { pollMs: 1, waitMs: 5_000, background: true, unattended: true, shownOnly: true, hiddenWaitMs: 30_000, hiddenNoticeMs: 0, onHidden: (url) => toldHidden.push(url) })
+    expect(quiet.calls).not.toContain('Target.activateTarget')
+    // Nor is the person told the tab is out of sight: it is where they asked it to be.
+    expect(toldHidden).toEqual([])
+    expect(whole).toMatchObject({ html: PAGE, tabHidden: true, background: true })
+    expect(whole.hiddenWaitMs).toBeLessThan(100)
+    // A sign-in page, which the gate may not name, brings the tab to the front too: the person must act on it.
+    const signIn = fakeChrome([at('https://site.test/login', '<html><body><form><input type="password"></form></body></html>', { hidden: true, secret: true }), at('https://site.test/a', PAGE, { active: true })])
+    const signed = await (await openUserChrome({ userDataDir, connect: signIn.connect })).read('https://site.test/a', { pollMs: 1, waitMs: 5_000, background: true })
+    expect(signIn.calls.filter((call) => call === 'Target.activateTarget')).toHaveLength(1)
+    expect(signed.html).toBe(PAGE)
   })
 
   it('reads a page that is through once it has settled: its text the same length on three reads and no loading indicator (ADR 0007)', async () => {

@@ -202,6 +202,12 @@ export interface ScrapeRequest extends PageOptions, RequestAttribution {
    */
   handoff?: { waitMs?: number }
   /**
+   * On lane `my-browser`: open the page's tab behind the one you are on in your Chrome and bring it to the front only
+   * when the page shows a check or a sign-in you must act on; the page is then read whole, as a tab out of sight is
+   * (`page_read_hidden`). Default false for one scrape (its tab comes to the front). Refused without the lane.
+   */
+  backgroundTabs?: boolean
+  /**
    * `my-browser`: read the page in the person's own Chrome, over remote
    * debugging, without W2L fetching it first. The person allows the
    * connection in Chrome, then the site in a page W2L opens there; the page
@@ -236,6 +242,14 @@ function readAccessChoice(rec: Record<string, unknown>, takesMyBrowser: boolean)
   if (access === 'my-browser' && !takesMyBrowser) throw new RequestError('access my-browser reads pages in your own Chrome, one you name at a time: a crawl does not take it; list the pages and send them as a batch', 'unsupported_parameter', { parameters: ['access'] })
   if (rec.lane !== undefined && access !== 'my-browser') throw new RequestError(`lane my-browser and access ${access} ask for two different routes: send one`, 'unsupported_parameter', { parameters: ['lane', 'access'] })
   return access === 'my-browser' ? { access, lane: 'my-browser' } : { access }
+}
+
+/** `backgroundTabs`: a boolean, taken with lane my-browser alone, where it says whether each page's tab opens behind the person's. */
+function readBackgroundTabs(rec: Record<string, unknown>, lane: 'my-browser' | undefined): boolean | undefined {
+  if (rec.backgroundTabs === undefined) return undefined
+  if (typeof rec.backgroundTabs !== 'boolean') throw new RequestError('backgroundTabs must be a boolean')
+  if (lane === undefined) throw new RequestError('backgroundTabs applies to lane my-browser alone: it opens each page behind the tab you are on in your own Chrome', 'unsupported_parameter', { parameters: ['backgroundTabs'] })
+  return rec.backgroundTabs
 }
 
 /** A recorded robots override for one URL of a batch. */
@@ -611,6 +625,13 @@ export interface BatchStartRequest extends PageOptions, RequestAttribution {
    * above 1 or a webhook (`unsupported_parameter`).
    */
   lane?: 'my-browser'
+  /**
+   * On lane `my-browser`: open each page in a tab behind the one you are on and bring a tab to the front only when its
+   * page shows a check or a sign-in you must act on, so the batch runs without taking your screen; each page is read
+   * whole at once, as a tab out of sight is (`page_read_hidden`). Default true on the lane; `false` brings each page's
+   * tab to the front as before. Refused without the lane.
+   */
+  backgroundTabs?: boolean
   formats?: readonly ScrapeFormat[]
   includeLinks?: boolean
   /** Recorded robots overrides, each for one URL of `urls`. A hosted server refuses the field (`unsupported_parameter`). */
@@ -1137,14 +1158,14 @@ function asRecord(body: unknown): Record<string, unknown> {
 
 export const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds', 'removeBase64Images', 'parsers', 'maxAge', 'minAge', 'storeInCache', 'lockdown', 'verify'] as const
 export const ATTRIBUTION_KEYS = ['origin', 'integration'] as const
-export const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', 'actions', 'handoff', 'lane', 'access', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+export const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', 'actions', 'handoff', 'lane', 'access', 'backgroundTabs', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** The lanes a request may ask for by name. */
 export const REQUEST_LANES = ['my-browser'] as const
 export const CRAWL_SCOPE_KEYS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'crawlEntireDomain', 'allowSubdomains', 'allowExternalLinks'] as const
 export const CRAWL_KEYS = ['url', 'mode', 'access', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', 'maxCredits', 'webhook', 'ignoreRobotsTxt', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** Firecrawl's extract scope flags a batch takes in their no-op form (`false`), each with the crawl option that does what `true` would ask for. */
 const BATCH_SCOPE_NOOP_KEYS = { allowExternalLinks: 'allowExternalLinks', includeSubdomains: 'allowSubdomains' } as const
-export const BATCH_KEYS = ['urls', 'mode', 'lane', 'access', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'retry', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'maxCredits', 'appendToId', 'webhook', 'actions', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+export const BATCH_KEYS = ['urls', 'mode', 'lane', 'access', 'backgroundTabs', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'retry', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'maxCredits', 'appendToId', 'webhook', 'actions', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** What a batch body may carry beside `appendToId`: the job's own options are not among them (the scope no-ops change nothing, so they may come along). */
 export const BATCH_APPEND_KEYS = ['urls', 'appendToId', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'robotsOverrides', ...ATTRIBUTION_KEYS] as const
 const ROBOTS_OVERRIDE_KEYS = ['reason', 'recordedBy'] as const
@@ -2205,6 +2226,7 @@ export function parseScrapeRequest(body: unknown): ScrapeRequest {
   if (rec.handoff !== undefined && typeof rec.handoff !== 'boolean' && (rec.handoff === null || typeof rec.handoff !== 'object' || Array.isArray(rec.handoff))) throw new RequestError('handoff must be true or { waitMs }')
   const handoff = rec.handoff === undefined || rec.handoff === false ? undefined : rec.handoff === true ? {} : parseBatchHandoffRequest(rec.handoff)
   const choice = readAccessChoice(rec, true)
+  const backgroundTabs = readBackgroundTabs(rec, choice.lane)
   const mode = readMode(rec.mode)
   const page = readPageOptions(rec, mode)
   checkMobileMode(mode, page.mobile)
@@ -2219,6 +2241,7 @@ export function parseScrapeRequest(body: unknown): ScrapeRequest {
     ...(robotsOverride === undefined ? {} : { robotsOverride }),
     ...(handoff === undefined ? {} : { handoff }),
     ...choice,
+    ...(backgroundTabs === undefined ? {} : { backgroundTabs }),
     ...readAttribution(rec),
   }
   checkScreenshotViewport(req.mobile, req.formats, req.actions)
@@ -2388,6 +2411,7 @@ export function parseBatchStartRequest(body: unknown): ParsedBatchStartRequest {
   if (mode === 'authed' && webhook !== undefined) throw new RequestError("webhook is not available in mode 'authed': pages read with your session are not sent to another address; read them from the batch")
   const choice = readAccessChoice(rec, true)
   if (choice.lane !== undefined && webhook !== undefined) throw new RequestError('webhook is not available on lane my-browser: pages read in your own Chrome are not sent to another address; read them from the batch', 'unsupported_parameter', { parameters: ['lane', 'webhook'] })
+  const backgroundTabs = readBackgroundTabs(rec, choice.lane)
   const page = readPageOptions(rec, mode)
   checkMobileMode(mode, page.mobile)
   const req: ParsedBatchStartRequest = {
@@ -2405,6 +2429,7 @@ export function parseBatchStartRequest(body: unknown): ParsedBatchStartRequest {
     ...(appendToId === undefined ? {} : { appendToId }),
     ...(webhook === undefined ? {} : { webhook }),
     ...choice,
+    ...(backgroundTabs === undefined ? {} : { backgroundTabs }),
     ...readAttribution(rec),
   }
   checkScreenshotViewport(req.mobile, req.formats, req.actions)

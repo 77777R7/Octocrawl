@@ -1584,7 +1584,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       catch (error) { throw new HandoffUnavailableError(error instanceof Error ? error.message : String(error)) }
       try {
         // A sign-in nobody is at holds the caller only briefly, so it can tell them; a wait it asked for is its own.
-        return await readAllowed(chrome, allowed, req.url, fetchOptions(req, req.formats), req.handoff?.waitMs, hooks, signal, started, undefined, req.handoff?.waitMs === undefined ? LOGIN_WAIT_MS : undefined)
+        return await readAllowed(chrome, allowed, req.url, fetchOptions(req, req.formats), req.handoff?.waitMs, hooks, signal, started, undefined, req.handoff?.waitMs === undefined ? LOGIN_WAIT_MS : undefined, req.backgroundTabs === true)
       } finally {
         await allowed.close()
       }
@@ -1599,10 +1599,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * the check it still showed (`blocked`), Chrome refusing a command (`connection_error`), the site leading the tab
    * elsewhere each time it was taken back to the page (`redirect_limit`), or the wait over (`timeout`).
    */
-  async function readAllowed(chrome: UserChrome, allowed: AllowedSites, url: string, fetchOpts: FetchOptions, waitMs: number | undefined, hooks: HandoffHooks, signal: AbortSignal, started: number, hiddenWaitMs?: number, loginWaitMs?: number): Promise<FetchResult> {
+  async function readAllowed(chrome: UserChrome, allowed: AllowedSites, url: string, fetchOpts: FetchOptions, waitMs: number | undefined, hooks: HandoffHooks, signal: AbortSignal, started: number, hiddenWaitMs?: number, loginWaitMs?: number, background = false): Promise<FetchResult> {
     try {
       const read = await chrome.read(url, {
         unattended: true,
+        // The tab behind the person's, brought to the front only for a check (backgroundTabs).
+        ...(background ? { background: true } : {}),
         allowedHosts: allowed.hosts,
         // What the person sees in their Chrome: not a panel the page keeps hidden (a sheet's shortcut list beside its grid).
         shownOnly: true,
@@ -1645,7 +1647,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * them is not read; nor is any after they revoked the sites, or when Chrome was not reached or the sites not
    * allowed. A run resumed later (a restart, a pause) asks again. Nothing is cached.
    */
-  function myBrowserBatchReader(urls: readonly string[], taskId: string, fetchOpts: FetchOptions): { scrape(url: string, context?: ExecutionContext): Promise<ScrapeOutcome>; close(): Promise<void> } {
+  function myBrowserBatchReader(urls: readonly string[], taskId: string, fetchOpts: FetchOptions, backgroundTabs: boolean): { scrape(url: string, context?: ExecutionContext): Promise<ScrapeOutcome>; close(): Promise<void> } {
     const hosts = [...new Set(urls.map((url) => new URL(url).host))]
     type Opened = { chrome: UserChrome; allowed: AllowedSites } | { refused: string; status: 'cancelled' | 'connection_error' }
     let opened: Promise<Opened> | null = null
@@ -1679,7 +1681,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         if (!connection.allowed.hosts.includes(new URL(url).host)) return unread(url, 'cancelled', `${new URL(url).host} is not among the sites you allowed for this run of the batch`, started)
         if (signal.aborted || context?.signal?.aborted === true) return unread(url, 'cancelled', `the batch stopped before ${url} was read`, started)
         // The task's cancel, or this engine shutting down, ends the read; the page's own timeout does not: the person's time is theirs.
-        const pending = readAllowed(connection.chrome, connection.allowed, url, fetchOpts, undefined, {}, AbortSignal.any([signal, ...(context?.signal === undefined ? [] : [context.signal])]), started, hiddenWaitedOut ? 0 : undefined)
+        const pending = readAllowed(connection.chrome, connection.allowed, url, fetchOpts, undefined, {}, AbortSignal.any([signal, ...(context?.signal === undefined ? [] : [context.signal])]), started, hiddenWaitedOut ? 0 : undefined, undefined, backgroundTabs)
         reading = pending
         try {
           const read = await pending
@@ -1831,7 +1833,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // pool and not cooling down. Mode authed's saved login keeps its own route: it never takes one.
     const egressFile = join(task.taskDir, EGRESS_FILE)
     // A batch on the my-browser lane reads its pages in the person's Chrome: no egress, no ladder, no cache.
-    const myBrowser = task.batch?.lane === 'my-browser' ? myBrowserBatchReader(task.batch.urls, task.id, fetchOptions(task.batch, task.batch.formats)) : null
+    // Each page's tab behind the person's unless the batch asked for them in front (backgroundTabs: false).
+    const myBrowser = task.batch?.lane === 'my-browser' ? myBrowserBatchReader(task.batch.urls, task.id, fetchOptions(task.batch, task.batch.formats), task.batch.backgroundTabs !== false) : null
     const firstEgress = egressPool === null || mode === 'authed' || myBrowser !== null ? undefined : bindTaskEgress(egressPool, egressFile)
     let switches = 0
     /** Everything a page goes out with, replaced as one on a switch: a page takes the lane whole when it starts. */
@@ -2472,6 +2475,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ...(invalidURLs === undefined ? {} : { invalidURLs }),
         ...(webhookConfig === undefined ? {} : { webhook: jobWebhooks.register(taskId, webhookConfig, req.webhookPayloadFormat) }),
         ...(req.lane === undefined ? {} : { lane: req.lane }),
+        ...(req.backgroundTabs === undefined ? {} : { backgroundTabs: req.backgroundTabs }),
         ...(req.access === undefined ? {} : { access: req.access }),
       }
       const task: Task = {

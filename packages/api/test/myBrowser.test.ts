@@ -35,6 +35,9 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; docu
   const listeners = new Map<string, (params: Record<string, unknown>) => void>()
   const written: string[] = []
   const created: string[] = []
+  // The tabs brought to the front, and the tabs opened behind the one the person is on (Target.createTarget background: true).
+  const activated: string[] = []
+  const backgrounded: string[] = []
   // Page tabs open at once, at most.
   let open = 0
   let mostOpen = 0
@@ -58,7 +61,7 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; docu
       if (connectionClosed) { afterClose.push(method); throw new ChromeLoginError('Chrome closed the connection') }
       if (method === 'Browser.getVersion') return { product: 'Chrome/144.0.7000.0' }
       if (method === 'Target.createTarget' && page.refuseTabs === true && targets >= 1) throw new ChromeLoginError('Chrome refused the request: Failed to open a new tab')
-      if (method === 'Target.createTarget') { const id = `tab${++targets}`; kinds.set(id, targets === 1 ? 'scope' : 'page'); created.push(id); live.add(id); if (targets > 1) mostOpen = Math.max(mostOpen, ++open); return { targetId: id } }
+      if (method === 'Target.createTarget') { const id = `tab${++targets}`; kinds.set(id, targets === 1 ? 'scope' : 'page'); created.push(id); live.add(id); if (p.background === true) backgrounded.push(id); if (targets > 1) mostOpen = Math.max(mostOpen, ++open); return { targetId: id } }
       if (method === 'Target.attachToTarget') return { sessionId: `s:${String(p.targetId)}` }
       if (method === 'Page.navigate') {
         const target = String(sessionId).replace(/^s:/, '')
@@ -67,7 +70,8 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; docu
         return {}
       }
       if (method === 'Target.closeTarget') { if (kinds.get(String(p.targetId)) === 'page' && live.has(String(p.targetId))) open--; live.delete(String(p.targetId)); return {} }
-      if (method === 'Target.activateTarget' || method === 'Network.enable' || method === 'Page.enable') return {}
+      if (method === 'Target.activateTarget') { activated.push(String(p.targetId)); return {} }
+      if (method === 'Network.enable' || method === 'Page.enable') return {}
       if (method === 'Page.createIsolatedWorld') return { executionContextId: 7 }
       const kind = kinds.get(String(sessionId ?? p.targetId).replace(/^s:/, ''))
       if (method === 'Target.getTargetInfo') {
@@ -105,7 +109,7 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; docu
     ...(page.documentStatus === undefined ? {} : { on: (method: string, sessionId: string | undefined, listener: (params: Record<string, unknown>) => void) => { listeners.set(`${method}@${String(sessionId)}`, listener); return () => { listeners.delete(`${method}@${String(sessionId)}`) } } }),
     close() { connectionClosed = true },
   })
-  return { connect, written, created, navigated, mostOpen: () => mostOpen, live, afterClose, closed: () => connectionClosed, regionReads: () => regionReads }
+  return { connect, written, created, activated, backgrounded, navigated, mostOpen: () => mostOpen, live, afterClose, closed: () => connectionClosed, regionReads: () => regionReads }
 }
 
 describe('the my-browser lane', () => {
@@ -117,7 +121,7 @@ describe('the my-browser lane', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  async function setup(chrome: ReturnType<typeof fakeChrome> | null, options: { hosted?: boolean; loginWaitMs?: number } = {}) {
+  async function setup(chrome: ReturnType<typeof fakeChrome> | null, options: { hosted?: boolean; loginWaitMs?: number; hiddenWaitMs?: number } = {}) {
     root = await mkdtemp(join(tmpdir(), 'w2l-my-browser-'))
     const userDataDir = join(root, 'chrome')
     await mkdir(userDataDir, { recursive: true })
@@ -125,7 +129,7 @@ describe('the my-browser lane', () => {
     engine = createApiEngine({
       taskRoot: join(root, 'tasks'),
       ...(options.hosted === true ? { hosted: true } : {}),
-      ...(chrome === null ? {} : { userChrome: { userDataDir, connect: chrome.connect, ...(options.loginWaitMs === undefined ? {} : { loginWaitMs: options.loginWaitMs }) } }),
+      ...(chrome === null ? {} : { userChrome: { userDataDir, connect: chrome.connect, ...(options.loginWaitMs === undefined ? {} : { loginWaitMs: options.loginWaitMs }), ...(options.hiddenWaitMs === undefined ? {} : { hiddenWaitMs: options.hiddenWaitMs }) } }),
     })
     return createApp(engine)
   }
@@ -155,6 +159,29 @@ describe('the my-browser lane', () => {
     // Octocrawl fetched nothing: no robots decision, no request of its own.
     expect(record.robotsDecision).toBeNull()
     expect(body.trace.some((event: { event: string }) => event.event === 'handoff_from')).toBe(false)
+  })
+
+  it('brings the page\'s tab to the front for one scrape, and opens it behind the person\'s with backgroundTabs: true', async () => {
+    const chrome = fakeChrome([{ answer: 'allowed', active: true }], { href: 'https://site.test/a', html: PAGE, hidden: true })
+    const app = await setup(chrome, { hiddenWaitMs: 200 })
+    // In front: the tab out of sight is waited for (the person is told to look at it), then read.
+    const front = await scrape(app, { url: 'https://site.test/a', lane: 'my-browser', debug: true })
+    expect(front).toMatchObject({ status: 200, body: { status: 'success' } })
+    expect(front.body.trace.find((e: { event: string }) => e.event === 'user_browser_read').detail.hiddenWaitMs).toBeGreaterThanOrEqual(200)
+    expect(chrome.activated).toEqual(['tab1', 'tab2'])
+    expect(chrome.backgrounded).toEqual([])
+    // Behind the person's tab: only the page that asks to allow the site comes to the front; the page is read whole at once.
+    await engine!.close(); engine = null; await rm(root, { recursive: true, force: true })
+    const behindChrome = fakeChrome([{ answer: 'allowed', active: true }], { href: 'https://site.test/a', html: PAGE, hidden: true })
+    const behindApp = await setup(behindChrome, { hiddenWaitMs: 200 })
+    const behind = await scrape(behindApp, { url: 'https://site.test/a', lane: 'my-browser', backgroundTabs: true, debug: true })
+    expect(behind).toMatchObject({ status: 200, body: { status: 'success' } })
+    expect(behind.body.warnings.map((w: { code: string }) => w.code)).toContain('page_read_hidden')
+    expect(behind.body.trace.find((e: { event: string }) => e.event === 'user_browser_read').detail).toMatchObject({ tabHidden: true, background: true })
+    expect(behind.body.trace.find((e: { event: string }) => e.event === 'user_browser_read').detail.hiddenWaitMs).toBeLessThan(200)
+    expect(behindChrome.activated).toEqual(['tab1'])
+    expect(behindChrome.backgrounded).toEqual(['tab2'])
+    expect(await scrape(behindApp, { url: 'https://site.test/a', backgroundTabs: true })).toMatchObject({ status: 400, body: { code: 'unsupported_parameter', details: { parameters: ['backgroundTabs'] } } })
   })
 
   it('waits in the person\'s Chrome for the region the request\'s contract needs, and records it (ADR 0007)', async () => {
@@ -353,20 +380,40 @@ describe('the my-browser lane in a batch', () => {
     expect(await later.json()).toMatchObject({ status: 'failed', failureReason: 'cache_miss' })
   }, 30_000)
 
-  it('waits once in a batch for a tab out of sight: the pages after the first are read whole at once', async () => {
+  it('with its tabs in front (backgroundTabs: false), waits once in a batch for a tab out of sight: the pages after the first are read whole at once', async () => {
     const chrome = fakeChrome([{ answer: '', active: false }, { answer: 'allowed', active: true }], { html: PAGE, hidden: true })
     const app = await setup(chrome, { hiddenWaitMs: 300 })
     const urls = ['https://site.test/a', 'https://site.test/b', 'https://site.test/c']
-    const started = await post(app, { urls, lane: 'my-browser' })
+    const started = await post(app, { urls, lane: 'my-browser', backgroundTabs: false })
     const { items } = await settled(app, started.body.id ?? started.body.taskId)
     const waited = urls.map((url) => {
       expect(items[url]).toMatchObject({ status: 'success', lane: 'my_browser' })
       expect(items[url]!.warnings.map((w: { code: string }) => w.code)).toContain('page_read_hidden')
       return items[url]!.trace.find((e: { event: string }) => e.event === 'user_browser_read').detail
     })
-    // One page waited the whole wait; the others, read after it, did not wait again.
+    // One page waited the whole wait; the others, read after it, did not wait again. Each page's tab was brought to the front.
     for (const detail of waited) expect(detail).toMatchObject({ tabHidden: true })
     expect(waited.filter((detail) => detail.hiddenWaitMs >= 300)).toHaveLength(1)
+    expect(chrome.activated).toEqual(['tab1', 'tab2', 'tab3', 'tab4'])
+    expect(chrome.backgrounded).toEqual([])
+  }, 30_000)
+
+  it('opens each page in a tab behind the one the person is on and brings none to the front: the pages are read whole at once, without the wait for the tab', async () => {
+    const chrome = fakeChrome([{ answer: '', active: false }, { answer: 'allowed', active: true }], { html: PAGE, hidden: true })
+    const app = await setup(chrome, { hiddenWaitMs: 300 })
+    const urls = ['https://site.test/a', 'https://site.test/b', 'https://site.test/c']
+    const started = await post(app, { urls, lane: 'my-browser' })
+    const { items } = await settled(app, started.body.id ?? started.body.taskId)
+    for (const url of urls) {
+      expect(items[url]).toMatchObject({ status: 'success', lane: 'my_browser' })
+      expect(items[url]!.warnings.map((w: { code: string }) => w.code)).toContain('page_read_hidden')
+      const detail = items[url]!.trace.find((e: { event: string }) => e.event === 'user_browser_read').detail
+      expect(detail).toMatchObject({ tabHidden: true, background: true })
+      expect(detail.hiddenWaitMs).toBeLessThan(300)
+    }
+    // Only the page that asks to allow the sites comes to the front; every page's tab opens behind the person's.
+    expect(chrome.activated).toEqual(['tab1'])
+    expect(chrome.backgrounded).toEqual(['tab2', 'tab3', 'tab4'])
   }, 30_000)
 
   it('says it waits for the person while they have not allowed the sites, and no longer once they have', async () => {
@@ -457,6 +504,8 @@ describe('the my-browser lane in a batch', () => {
     expect(await post(app, { urls: ['https://site.test/a'], lane: 'my-browser', webhook: 'https://hooks.example/x' })).toMatchObject({ status: 400, body: { details: { parameters: ['lane', 'webhook'] } } })
     expect(await post(app, { urls: ['https://site.test/a'], lane: 'my-browser', actions: [{ type: 'wait', milliseconds: 10 }] })).toMatchObject({ status: 400, body: { error: expect.stringContaining('page actions') } })
     expect(await post(app, { urls: ['https://site.test/a'], lane: 'my-browser', mode: 'authed' })).toMatchObject({ status: 400, body: { error: expect.stringContaining('mode authed does not apply') } })
+    expect(await post(app, { urls: ['https://site.test/a'], backgroundTabs: true })).toMatchObject({ status: 400, body: { code: 'unsupported_parameter', details: { parameters: ['backgroundTabs'] } } })
+    expect(await post(app, { urls: ['https://site.test/a'], lane: 'my-browser', backgroundTabs: 'yes' })).toMatchObject({ status: 400, body: { error: 'backgroundTabs must be a boolean' } })
   })
 })
 
