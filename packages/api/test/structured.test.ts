@@ -345,7 +345,7 @@ describe('format entries by type', () => {
 })
 
 describe('structured JSON extraction', () => {
-  it('defaults compact adapter responses to JSON, including unverified identities', async () => {
+  it('defaults compact adapter responses to JSON, with the Markdown beside it when the adapter could not vouch for the page', async () => {
     const response = {
       ...result, channelsTried: ['http'], ladderTrace: [], summary: { attempts: [], totalMs: 10 },
     } as unknown as ScrapeResponse
@@ -359,9 +359,11 @@ describe('structured JSON extraction', () => {
       ...response,
       document: { ...response.document!, adapterValidation: { valid: false, issues: ['subject_id_unverified'] } },
     }, { url: result.requestedUrl, debug: false }, {}, null, performance.now()) as CompactScrapeResponse
-    expect(bad.formats).toEqual(['json'])
+    // An adapter page it could not vouch for (an X home timeline is no profile or post): the JSON says so, and the page is still there to read.
+    expect(bad.formats).toEqual(['markdown', 'json'])
     expect(bad.json?.status).toBe('incomplete')
     expect(bad.json?.issues[0]?.code).toBe('subject_unverified')
+    expect(bad.markdown).toBe(result.markdown)
   })
   it('does not publish entities or custom fields when adapter identity is unverified', async () => {
     const unverified: FetchResult = {
