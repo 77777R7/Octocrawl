@@ -135,7 +135,7 @@ import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, de
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, verify, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { BrowserEngineName, BrowserIdentityChoice, BrowserKeeper, CaptchaSolving, ChannelAdmission, ChannelsFiltered, InstalledChromeTestSeams, PricedExit } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
-import { agentHintsFor, batchLoginWallHint, httpLaneAskedForBrowser, mapAgentHints, MAX_AGENT_HINTS, pinnedFastModeHints, type FastModePin, type HintOffers } from './hints.js'
+import { agentHintsFor, batchFailureHints, batchLoginWallHint, failureGroupOf, httpLaneAskedForBrowser, mapAgentHints, MAX_AGENT_HINTS, pinnedFastModeHints, withFailure, type BatchFailures, type FailureFacts, type FastModePin, type HintOffers } from './hints.js'
 import { HandoffNotThrough, openUserChrome, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
 import { importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
 import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
@@ -1299,9 +1299,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const waitingForPerson = userChrome === null || !offersHandoff(task) ? undefined
         : listsPages(task) ? (await stepsOf(store, taskId, 'errors')).filter((step) => handoffNeededIn(task, step)).length
           : Object.entries(await store.countBlockReasons(taskId)).reduce((sum, [reason, count]) => sum + (HANDOFF_REASONS[reason] === undefined ? 0 : count), 0)
-      // A finished batch says what to do about the pages behind a login in one line; a batch still running has more to read first, and a handoff waits for its end.
-      const behindLogin = isTerminalStatus(task.status) && ((await store.countBlockReasons(taskId)).login_wall ?? 0) > 0
-        ? (await stepsOf(store, taskId, 'errors')).filter((step) => step.result?.blockReason === 'login_wall') : []
+      // A finished batch says what to do about the pages behind a login in one line, and about the rest of its failed pages a line a reason; a batch still running has more to read first, and a handoff waits for its end.
+      const failedSteps = isTerminalStatus(task.status) && (counts.failed ?? 0) + (counts.blocked ?? 0) > 0 ? await stepsOf(store, taskId, 'errors') : []
+      const behindLogin = failedSteps.filter((step) => step.result?.blockReason === 'login_wall')
+      const failureLines = batchFailureHints(failuresOf(failedSteps, task), { hosted: options.hosted === true, handoff: waitingForPerson !== undefined, ...(task.batch.timeout === undefined ? {} : { timeout: task.batch.timeout }) })
       return {
         ...report, requested: task.batch.urls.length, completed, remaining: Math.max(0, task.batch.urls.length - completed),
         // A page read, with or without content, succeeded; what the errors report lists failed.
@@ -1323,7 +1324,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ...(task.status === 'running' || task.status === 'pending' ? { rate: await runningRate(store, taskId, latest, Math.max(0, task.batch.urls.length - completed)) } : {}),
         ...(task.batch.invalidURLs === undefined ? {} : { invalidURLs: task.batch.invalidURLs }),
         ...(waitingForPerson === undefined ? {} : { waitingForPerson }),
-        ...(behindLogin.length === 0 ? {} : { agentHints: [batchLoginWallHint(behindLogin.map((step) => step.url), { mode: task.mode, webhook: webhookOf(task) !== undefined, ...(task.batch.lane === undefined ? {} : { lane: task.batch.lane }) }, { ...taskHintOffers(task, behindLogin[0]!.url), handoff: waitingForPerson !== undefined && behindLogin.some((step) => handoffNeededIn(task, step)) })] }),
+        ...(behindLogin.length === 0 && failureLines.length === 0 ? {} : { agentHints: [
+          ...(behindLogin.length === 0 ? [] : [batchLoginWallHint(behindLogin.map((step) => step.url), { mode: task.mode, webhook: webhookOf(task) !== undefined, ...(task.batch.lane === undefined ? {} : { lane: task.batch.lane }) }, { ...taskHintOffers(task, behindLogin[0]!.url), handoff: waitingForPerson !== undefined && behindLogin.some((step) => handoffNeededIn(task, step)) })]),
+          ...failureLines,
+        ] }),
         ...(approvalsWaiting.has(taskId) ? { waitingForApproval: true as const } : {}),
         ...(webhook === undefined ? {} : { webhook }),
         ...resultFilesField(task),
@@ -2708,7 +2712,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
             status: ended?.status ?? 'failed', attemptId, newPages, budgetExceeded: attempt?.budgetExceeded ?? null,
             // Each page keeps its trace (the robots.txt and Crawl-delay evidence a page is judged by); the routing audit is left out.
             items: steps.map((step) => { const { audit: _audit, ...item } = toCrawlPage(step, ended!, false, taskHintOffers(ended!, step.url)); return item as CrawlPage }),
-            charges: steps.map((step) => ({ status: step.result?.status ?? step.status, lane: step.result?.lane ?? step.lane, failureReason: step.result?.failureReason ?? null, httpStatus: step.result?.evidence.httpStatus ?? null, robots: sliceRobots(step.result ?? null), modelCalled: (step.result?.json?.modelUsage?.attempts ?? 0) > 0, ...sliceServed(step) })),
+            charges: steps.map((step) => ({ ...failureFactsOf(step, ended!), lane: step.result?.lane ?? step.lane, httpStatus: step.result?.evidence.httpStatus ?? null, modelCalled: (step.result?.json?.modelUsage?.attempts ?? 0) > 0, ...sliceServed(step) })),
           }
         } finally { await after.close() }
       } finally {
@@ -3173,7 +3177,27 @@ export interface SliceResult {
  * RFC 9309, but not one the site wrote). `modelCalled`: the page's json model fallback called the model (its json's
  * `modelUsage` names an attempt).
  */
-export interface SliceCharge { status: string; lane: string | null; failureReason: string | null; httpStatus: number | null; robots: 'disallowed' | 'unreachable' | null; modelCalled: boolean; redirectedOffPage?: boolean; notServed?: boolean; retried?: boolean }
+export interface SliceCharge extends FailureFacts { host: string; lane: string | null; httpStatus: number | null; modelCalled: boolean; redirectedOffPage?: boolean; notServed?: boolean; retried?: boolean }
+/** The facts of one step a finished batch's failure lines are counted from (hints.ts failureGroupOf), and the page's host. */
+function failureFactsOf(step: StepRecord, task: Task): FailureFacts & { host: string } {
+  const result = step.result
+  return {
+    host: hostnameOf(step.url), status: result?.status ?? step.status, failureReason: result?.failureReason ?? null, blockReason: result?.blockReason ?? null, robots: sliceRobots(result),
+    browserDeclined: task.batch?.fastMode === true && result !== null && result.lane === 'http' && httpLaneAskedForBrowser(result),
+  }
+}
+function hostnameOf(url: string): string {
+  try { return new URL(url).hostname } catch { return url }
+}
+/** `failures` with every failed page of `steps` counted (hints.ts BatchFailures). */
+function failuresOf(steps: readonly StepRecord[], task: Task, failures: BatchFailures = {}): BatchFailures {
+  for (const step of steps) {
+    const facts = failureFactsOf(step, task)
+    const group = failureGroupOf(facts)
+    if (group !== null) failures = withFailure(failures, group, facts.host)
+  }
+  return failures
+}
 function sliceRobots(result: FetchResult | null): SliceCharge['robots'] {
   const refusal = result === null ? null : robotsRefusal(result)
   return refusal === null ? null : refusal.unreachable === null ? 'disallowed' : 'unreachable'

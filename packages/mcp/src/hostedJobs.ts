@@ -11,9 +11,11 @@
  * Committing a slice clears the lease and moves to the next generation, or finishes the job and promotes the next queued one.
  */
 
+import type { BatchFailures } from '@w2l/api'
+
 export type HostedJobKind = 'batch' | 'crawl'
 export type HostedJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'expired'
-const FINISHED: ReadonlySet<HostedJobStatus> = new Set(['completed', 'failed', 'cancelled', 'expired'])
+export const FINISHED: ReadonlySet<HostedJobStatus> = new Set(['completed', 'failed', 'cancelled', 'expired'])
 
 /** Days a finished job's results are served, then days its record stays to answer 410 before the TTL deletes it. */
 export const JOB_RETENTION_DAYS = 7
@@ -38,6 +40,10 @@ export interface HostedJob {
   counts: { pages: number; errors: number; slices: number; redirectedOffPage?: number; notServed?: number; retried?: number }
   /** Its pages by outcome so far (hostedJobWorker.ts pageOutcome), for its request line. */
   outcomes?: Record<string, number>
+  /** Its failed pages by reason so far, with the first sites seen (hints.ts BatchFailures), for its finished status's lines. Absent on a job that failed no page, and on one started before they were counted. */
+  failures?: BatchFailures
+  /** True when the start forced `fastMode` because the key has no browser lane: the finished status's lines then do not say to send the pages again without it. */
+  httpOnly?: true
   credits: { reserved: number; used: number; maxCredits: number | null }
   generation: number
   lease: { holder: string; expireAt: string } | null
@@ -151,9 +157,9 @@ export const JOB_LIST_MAX = 200
 
 const days = (from: Date, n: number) => new Date(from.getTime() + n * 86_400_000).toISOString()
 
-export function newHostedJob(input: { id: string; workspaceId: string; uid: string; keyId: string; requestKeyId?: string; kind: HostedJobKind; request: unknown; maxCredits: number | null; webhook?: HostedJobWebhook | null }, now = new Date()): HostedJob {
+export function newHostedJob(input: { id: string; workspaceId: string; uid: string; keyId: string; requestKeyId?: string; kind: HostedJobKind; request: unknown; maxCredits: number | null; webhook?: HostedJobWebhook | null; httpOnly?: boolean }, now = new Date()): HostedJob {
   return {
-    id: input.id, workspaceId: input.workspaceId, uid: input.uid, keyId: input.keyId, ...(input.requestKeyId === undefined ? {} : { requestKeyId: input.requestKeyId }), kind: input.kind, request: input.request, ...(input.webhook ? { webhook: input.webhook } : {}),
+    id: input.id, workspaceId: input.workspaceId, uid: input.uid, keyId: input.keyId, ...(input.requestKeyId === undefined ? {} : { requestKeyId: input.requestKeyId }), kind: input.kind, request: input.request, ...(input.webhook ? { webhook: input.webhook } : {}), ...(input.httpOnly === true ? { httpOnly: true as const } : {}),
     status: 'queued', failureReason: null, counts: { pages: 0, errors: 0, slices: 0, redirectedOffPage: 0, notServed: 0, retried: 0 }, credits: { reserved: 0, used: 0, maxCredits: input.maxCredits },
     generation: 0, lease: null, hosts: {}, createdAt: now.toISOString(), startedAt: null, finishedAt: null, expireAt: null, deleteAt: days(now, JOB_TOMBSTONE_DAYS),
   }

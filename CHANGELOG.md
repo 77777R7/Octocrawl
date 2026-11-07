@@ -32,6 +32,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **A finished batch says what to do about every failed page, a line a reason.** Its status (`GET /v1/batches/:id`, the MCP `get_batch` and `wait_batch`) carried a line for the pages that asked for a login and nothing for the rest: an agent read 28 failed items of a 124-URL batch to learn that 11 only needed the browser lane `fastMode` had declined, and 11 more had a robots.txt hosted Octocrawl could not reach. The status now groups the failed pages by what stopped them, most pages first, each with the step that reads them: a new batch without `fastMode`; what this server obeys for robots.txt and a challenge, and the route on your own computer; a longer `timeout` up to the server's ceiling; and one line for every other reason that points at `get_batch_errors`. Hosted jobs have the same lines, from counts the worker keeps as the job runs (`failures` on the job), so a 1,000-URL batch is summed without reading its items back; a job started before this change has none. Each item keeps its own hint.
+
 - **The page that asks you to allow sites shows its text in a dark Chrome.** The page Octocrawl opens in your Chrome before it reads there set a dark text colour and no background, so a dark Chrome showed two buttons on black, with the task and the sites invisible. It now has its own background, looks like octocrawl.dev, with Octocrawl and Chrome joined at the top and a glyph sea rolling below, and says how many sites it is asking for. What it asks, and what its buttons do, did not change.
 
 ## 0.8.7 — 2026-11-07

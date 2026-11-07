@@ -16,6 +16,9 @@ export { runApiServer } from './cli.js'
 // The result files a job ends with, and the CLI's `--out` writes: one column set for both.
 export { csvField, csvLine, evidenceRow, RESULT_COLUMNS, RESULT_CSV, RESULT_JSONL, resultFilesOf, writeResultFiles } from './resultFiles.js'
 export type { ResultPage } from './resultFiles.js'
+// A finished batch's failed pages by reason, counted by the engine's slice charges and the hosted worker alike (hints.ts).
+export { batchFailureHints, failureGroupOf, withFailure } from './hints.js'
+export type { BatchFailures, FailureFacts } from './hints.js'
 export { closeIdleOnlyWhenUnread } from './keepAlive.js'
 // The optional Patchright engine's loader, for the octocrawl commands' startup check (ADR 0005 enhanced_browser).
 export { loadImpit, loadPatchrightEngine } from '@w2l/bench'
