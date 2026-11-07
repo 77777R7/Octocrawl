@@ -9,6 +9,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 | Version | Date | What changed |
 | --- | --- | --- |
 | Unreleased | | |
+| 0.8.7 | 2026-11-07 | A page behind a login tells the agent to ask the person and names their own Chrome, and a page read without your login says so (`sign_in_prompt`); a finished job says where every page is; a hosted job reads 8 pages at once and waits for credits instead of failing; a batch waits out a site's limit on rate; a hosted refusal names hosted's own limits and the field |
 | 0.8.6 | 2026-11-07 | A batch reads a page again when the site pushed back, `retry.softBlocks` on by default; it counts and names the pages that are not what was asked for (`notServed`) and says its rate and how long it should take; the Evidence Record says what a saved login put into the browser; a hosted job's day counts only the pages it read |
 | 0.8.5 | 2026-11-06 | A task contract can say what a page must not show (`markdownExcludes`); the MCP instructions teach URLs first, then one `batch_scrape`; a hosted call with `access: "enhanced"` can read a site whose robots.txt the hosted network cannot reach; a hosted `screenshot` is refused for what the caller lacks, and a job's `screenshot` with `fastMode` at its start |
 | 0.8.4 | 2026-11-05 | The command line says on stderr when a result is not the page, and its help lists its own flags; `octocrawl serve` prints the command that connects Claude Code to it, and `@octocrawl/mcp` says at initialize when its API is not running; an `https://` URL of a site with no working HTTPS is read over `http://`; a batch or crawl slows a host that pushes back; `waitFor` with `fastMode` is refused by name; hosted Octocrawl's hints, dashboard, texts and logs say what happened and the next step |
@@ -30,6 +31,10 @@ Releases are listed newest first, by date. Each release opens with what matters 
 | 0.1.0 | 2026-09-18 | First cut of the identity ladder |
 
 ## Unreleased
+
+## 0.8.7 — 2026-11-07
+
+The published packages at 0.8.7. **A page behind a login now says what to do:** the hint and the MCP instructions tell an agent to ask the person first, naming the site, and give the routes this server has, the person's signed-in Chrome among them. A page read with your login that shows what a reader without one sees carries `sign_in_prompt` and reads as `not_served`, where it was `success`, so a session that lapsed mid-run shows. A finished job says where every page is, a hosted job reads 8 pages at once and waits for credits instead of failing, and a batch waits out a site's limit on rate.
 
 - **A finished batch says what to do about the pages that asked for a login, in one line.** `GET /v1/batches/:id` and the MCP `get_batch` and `wait_batch` tools now carry `agentHints` on a batch that has ended with pages at a `login_wall`: how many, on which sites (three named, then a count), and the routes this server has, so an agent asks the person once for the batch, not once a page. Each item keeps its own hint. Hosted jobs do not have it yet: their items do.
 - **A page waiting its turn for a browser slot keeps its whole timeout for its own read.** Where a server renders at most `browserPagesAtOnce` pages (hosted job slices: 2 of 8), a page queued behind slow renders no longer runs out of its `timeout` before it starts: its deadline stands still while it waits, never past the task's own, and the page's trace opens with `slot_wait` and the milliseconds waited (the ladder trace says `ladder_admission_waited`). On 2026-11-07 two of eleven browser pages of a hosted batch timed out at 30 s before any browser event.
