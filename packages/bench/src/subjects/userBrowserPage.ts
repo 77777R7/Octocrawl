@@ -72,6 +72,8 @@ export interface UserBrowserRead {
    * page folds away (an exhibitor's product groups) can outweigh the heading and text it shows.
    */
   shownWhileHidden?: string
+  /** The tab was opened behind the one the person was on and brought to the front only for a check (`backgroundTabs`); absent from a reader that did not say. */
+  background?: boolean
 }
 
 /** Under this confidence, the main content found in the whole document of a tab out of sight is a weak guess. */
@@ -95,7 +97,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
     ]),
     { at: 0, lane: LANE, event: 'identity_sent', detail: { mode: 'authed', headers: [], by: 'user_browser' } },
     { at: 0, lane: LANE, event: 'identity_unobserved', detail: { reason: `the person's own browser (${read.browser}) sent the request; its headers were not seen` } },
-    { at: wallMs, lane: LANE, event: 'user_browser_read', detail: { browser: read.browser, status: read.status, sawGate: read.sawGate, act: read.act, waitedMs: wallMs, ...(read.tabHidden === undefined ? {} : { tabHidden: read.tabHidden }), ...(read.hiddenWaitMs === undefined ? {} : { hiddenWaitMs: read.hiddenWaitMs }), ...(read.shownWhileHidden === undefined ? {} : { readAs: shownRead ? 'shown' : 'whole' }) } },
+    { at: wallMs, lane: LANE, event: 'user_browser_read', detail: { browser: read.browser, status: read.status, sawGate: read.sawGate, act: read.act, waitedMs: wallMs, ...(read.tabHidden === undefined ? {} : { tabHidden: read.tabHidden }), ...(read.hiddenWaitMs === undefined ? {} : { hiddenWaitMs: read.hiddenWaitMs }), ...(read.shownWhileHidden === undefined ? {} : { readAs: shownRead ? 'shown' : 'whole' }), ...(read.background === undefined ? {} : { background: read.background }) } },
     ...steadyWaitEvents(read.settle, wallMs, LANE),
     ...[regionWaitEvent(read.region, wallMs, LANE)].filter((event): event is TraceEvent => event !== null),
   ]
@@ -229,7 +231,8 @@ function withReadHiddenWarning(read: UserBrowserRead, shownRead: boolean, result
   const how = shownRead
     ? 'its content was read as the page showed there, since the whole document\'s main content was a weak guess (a list the page folds away), and a tab out of sight may show less than in front'
     : 'the whole document was read, which may hold what the page does not show'
-  const warning = { code: 'page_read_hidden', message: `The tab was out of sight in your Chrome when the page was read, ${waited}: ${how}.` }
+  const where = read.background === true ? 'The page was read in a tab opened behind the one you were on in your Chrome (backgroundTabs)' : `The tab was out of sight in your Chrome when the page was read, ${waited}`
+  const warning = { code: 'page_read_hidden', message: `${where}: ${how}.` }
   return { ...result, warnings: [...(result.warnings ?? []), warning] }
 }
 

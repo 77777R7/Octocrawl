@@ -98,6 +98,13 @@ export interface UserChromeReadOptions {
   shownOnly?: boolean
   /** With shownOnly, how long a tab out of sight is waited for to come in sight before the whole document is read. Default HIDDEN_WAIT_MS (30 s). */
   hiddenWaitMs?: number
+  /**
+   * Open the page's tab behind the one the person is on (Chrome's `background` tab) and leave it there: the tab comes
+   * to the front only once the page shows a check or a sign-in step they must act on. With shownOnly, a tab left
+   * behind is not waited for to come in sight: the whole document is read at once (`tabHidden`, hiddenWaitMs 0).
+   * Default false: the tab is brought to the front as it opens, the one the person is to act in.
+   */
+  background?: boolean
   /** The request's includeTags, excludeTags and blockAds: a page is through, or still held by a check, as the read of it then judges it. */
   includeTags?: readonly string[]
   excludeTags?: readonly string[]
@@ -493,8 +500,8 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
   if (isAborted(options.signal)) throw new HandoffNotThrough(`the read of ${url} was cancelled before Octocrawl read it`, null, 'cancelled')
   let targetId: string
   try {
-    // A blank tab first, so the page's own requests and responses are heard from its first one.
-    targetId = (await connection.send('Target.createTarget', { url: 'about:blank' }) as { targetId: string }).targetId
+    // A blank tab first, so the page's own requests and responses are heard from its first one; behind the person's tab when asked.
+    targetId = (await connection.send('Target.createTarget', { url: 'about:blank', ...(options.background === true ? { background: true } : {}) }) as { targetId: string }).targetId
   } catch (error) {
     throw ended(error)
   }
@@ -546,8 +553,15 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
       await connection.send('Network.enable', {}, sessionId)
       await connection.send('Page.enable', {}, sessionId)
     }
-    // The tab in front, in the person's window: the one they are to act in, not one left from before.
-    await connection.send('Target.activateTarget', { targetId }).catch(() => undefined)
+    // The tab in front, in the person's window: the one they are to act in, not one left from before. A tab opened behind
+    // theirs (background) stays there, and comes to the front once, when the page shows a check or a sign-in step.
+    let fronted = options.background !== true
+    const front = async (): Promise<void> => {
+      if (fronted) return
+      fronted = true
+      await connection.send('Target.activateTarget', { targetId }).catch(() => undefined)
+    }
+    if (options.background !== true) await connection.send('Target.activateTarget', { targetId }).catch(() => undefined)
     // Chrome answers Page.navigate when the page's response begins: a slow page is waited for in the reads, not here.
     let navigation: unknown = null
     const open = (returning: boolean) => {
@@ -617,10 +631,11 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
         clear = 0
         continue
       }
-      // A tab out of sight for a while: the person is looking at, and clicking in, another one.
+      // A tab out of sight for a while: the person is looking at, and clicking in, another one. Not said of a tab opened behind
+      // theirs on purpose (background): it is where they asked it to be, until a check brings it to the front.
       if (state.hidden === true) {
         hiddenSince ??= Date.now()
-        if (!toldHidden && Date.now() - hiddenSince >= (options.hiddenNoticeMs ?? 3_000)) { toldHidden = true; options.onHidden?.(url) }
+        if (!toldHidden && fronted && Date.now() - hiddenSince >= (options.hiddenNoticeMs ?? 3_000)) { toldHidden = true; options.onHidden?.(url) }
       } else {
         hiddenSince = null
         toldHidden = false
@@ -639,6 +654,9 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
       // What the page showed, as evidence: a generic bot check only on decisive markers, not a loading page's weak ones.
       if (full !== null && (full.reason !== 'bot_detected_generic' || decisive !== null)) sawGate ??= full.reason
       if (gate !== null && !told) { told = true; options.onWaiting?.(url, gate.reason) }
+      // A check, or a sign-in step the gate may not name (a login path, a password field): the person must act, so a tab
+      // opened behind theirs comes to the front now, and only now.
+      if (!fronted && (gate !== null || state.secret || onLoginPath(state.href, url))) await front()
       if (options.loginWaitMs !== undefined && heard.act === null && (gate?.reason === 'login_wall' || onLoginPath(state.href, url))) {
         loginSince ??= Date.now()
         if (Date.now() - loginSince >= options.loginWaitMs) {
@@ -694,7 +712,9 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
       if (options.shownOnly === true) {
         if (state.hidden === true) {
           hiddenWaitSince ??= Date.now()
-          if (Date.now() - hiddenWaitSince < (options.hiddenWaitMs ?? HIDDEN_WAIT_MS) && Date.now() - started + pollMs < waitMs) continue
+          // A tab opened behind the person's is where it was asked to be: not waited for.
+          const hiddenWaitMax = options.background === true ? 0 : options.hiddenWaitMs ?? HIDDEN_WAIT_MS
+          if (Date.now() - hiddenWaitSince < hiddenWaitMax && Date.now() - started + pollMs < waitMs) continue
         } else if (hiddenWaitSince !== null) {
           hiddenWaited = Date.now() - hiddenWaitSince
           hiddenEndedAt = Date.now()
@@ -780,6 +800,7 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
         tabHidden: state.hidden === true,
         ...(hiddenWaitMs === undefined ? {} : { hiddenWaitMs }),
         ...(shownWhileHidden === undefined ? {} : { shownWhileHidden }),
+        ...(options.background === true ? { background: true } : {}),
       }, tab: { targetId, sessionId, stops } }
     }
     // The check still holding the page when the wait ended: what the read is blocked by, which an earlier response

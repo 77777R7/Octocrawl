@@ -742,8 +742,9 @@ describe('MCP tools', () => {
   })
 
   it('takes on scrape, batch_scrape and crawl every key the request takes, verify among them, but origin and parsers', () => {
-    // origin is the host's own; parsers (PDF options) are not offered over MCP; maxCredits is offered by the hosted tools only (H2 M6).
-    const notOffered = ['origin', 'parsers', 'maxCredits']
+    // origin is the host's own; parsers (PDF options) are not offered over MCP; maxCredits is offered by the hosted tools only (H2 M6);
+    // backgroundTabs is a batch's default on lane my-browser, and the local tool list is at its size cap (toolSurface.test.ts).
+    const notOffered = ['origin', 'parsers', 'maxCredits', 'backgroundTabs']
     // The MCP server's own: debug, and scrape's markdownOffset, which chooses what the answer shows (results.ts).
     const mcpOnly = ['debug', 'markdownOffset']
     for (const [name, keys] of [['scrape', SCRAPE_KEYS], ['batch_scrape', BATCH_KEYS], ['crawl', CRAWL_KEYS]] as const) {
