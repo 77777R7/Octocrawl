@@ -546,7 +546,7 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
     expect(() => parseFirecrawlMapRequest({ url, sitemap: 'never' })).toThrow('sitemap must be include, skip, or only')
     const full = { url, search: 'protocol', includeSubdomains: true, ignoreQueryParameters: true, limit: 50, timeout: 10_000, origin: 'js-sdk@4.42.0', integration: 'nightly' }
     expect(parseFirecrawlMapRequest(full)).toEqual(full)
-    expect(() => parseFirecrawlMapRequest({ url, limit: 0 })).toThrow('limit must be an integer from 1 to 100000')
+    expect(() => parseFirecrawlMapRequest({ url, limit: 0 })).toThrow('limit must be a whole number, 1 or more')
     expect(() => parseFirecrawlMapRequest({ url, search: '' })).toThrow('search must be a string of 1 to 200 characters with at most 10 words')
     // What the shim does not map is refused by name, useIndex with the hint; the native scope keys are not Firecrawl map options.
     for (const key of ['useIndex', 'location', 'ignoreCache', 'threatProtection', 'auditMetadata', 'includePaths']) {

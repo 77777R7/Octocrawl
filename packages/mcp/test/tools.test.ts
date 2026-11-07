@@ -811,7 +811,7 @@ describe('MCP tools', () => {
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair()
     await Promise.all([createMcpServer(client).connect(serverSide), mcp.connect(clientSide)])
     try {
-      expectIsError(await mcp.callTool({ name: 'map', arguments: { url: 'https://example.com/', limit: 0 } }), 'invalid_request: limit must be an integer from 1 to 100000')
+      expectIsError(await mcp.callTool({ name: 'map', arguments: { url: 'https://example.com/', limit: 0 } }), 'invalid_request: limit must be a whole number, 1 or more')
       expectIsError(await mcp.callTool({ name: 'map', arguments: { url: 'https://example.com/', origin: 'x' } }), 'unsupported_parameter: unsupported parameter: origin')
       expectIsError(await mcp.callTool({ name: 'map', arguments: { url: 'https://example.com/', debug: 'yes' } }), 'invalid_request: debug must be a boolean')
     } finally {
