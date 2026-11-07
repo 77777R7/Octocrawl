@@ -164,6 +164,32 @@ function fakeFirestore(accounts: string[] = ['account-1']) {
   return { resource, docs, commits, fetcher, conflictOnce: () => { conflicts = 1 }, refuseNextWith: (status: number) => { refusal = status } }
 }
 
+describe('a top-up', () => {
+  it('adds bought credits once by its id, which the grant is spent before', async () => {
+    const store = new MemoryCreditsStore(10)
+    expect(await store.topUp('account-1', 25, 'order-1', OCT)).toEqual({ added: true, remaining: 35 })
+    expect(await store.topUp('account-1', 25, 'order-1', OCT)).toEqual({ added: false, remaining: 35 })
+    expect(await store.balance('account-1', OCT)).toBe(35)
+    const spent = await store.reserve('account-1', 12, [], OCT)
+    expect(spent).toMatchObject({ ok: true, reservation: { fromGrant: 10, fromPurchased: 2, remaining: 23 } })
+  })
+
+  it('writes the top-up to Firestore as one commit: its record, created once, and a server-side increment of the bought credits', async () => {
+    const firestore = fakeFirestore()
+    const store = new FirestoreCreditsStore('octocrawl-test', async () => 'token', 1_000, firestore.fetcher)
+    expect(await store.topUp('account-1', 5_000, 'trial-account-1', OCT)).toEqual({ added: true, remaining: 6_000 })
+    expect(firestore.docs.get(`${firestore.resource}/creditTopUps/trial-account-1`)!.fields).toMatchObject({ uid: { stringValue: 'account-1' }, amount: { integerValue: '5000' } })
+    expect(firestore.docs.get(`${firestore.resource}/credits/account-1`)!.fields.purchased).toEqual({ integerValue: '5000' })
+    // The same id again adds nothing, and a later month keeps the bought credits beside the new grant.
+    expect(await store.topUp('account-1', 5_000, 'trial-account-1', OCT)).toEqual({ added: false, remaining: 6_000 })
+    expect(await store.balance('account-1', new Date('2026-11-03T00:00:00Z'))).toBe(6_000)
+    expect(await store.reserve('account-1', 1_200, [], OCT)).toMatchObject({ ok: true, reservation: { fromGrant: 1_000, fromPurchased: 200, remaining: 4_800 } })
+    // No account, no top-up.
+    const gone = new FirestoreCreditsStore('octocrawl-test', async () => 'token', 1_000, fakeFirestore([]).fetcher)
+    await expect(gone.topUp('account-2', 10, 'order-9', OCT)).rejects.toThrow(/account/)
+  })
+})
+
 describe('the Firestore ledger', () => {
   it('starts no balance for an account without its record: a deleted account\'s key the API still has cached', async () => {
     const firestore = fakeFirestore([])

@@ -241,10 +241,14 @@ export const EMPTY_CRAWL_DISCOVERY: CrawlDiscovery = {
 
 /** Why a hosted job waits for the next UTC day (`paused` on its status): a day's pool of job pages has fewer left than its next slice takes. It goes on by itself at `resumesAt`. */
 export interface JobPause {
-  /** `account_daily_pages`: this account's pages of the day. `daily_pages`: the pages of every account together. */
-  reason: 'account_daily_pages' | 'daily_pages'
-  /** The day's pool, in pages read. */
+  /**
+   * `account_daily_pages`: this account's pages of the day. `daily_pages`: the pages of every account together. `credits`:
+   * the account's credits are used up; the job goes on when they come back, or sooner once more are added.
+   */
+  reason: 'account_daily_pages' | 'daily_pages' | 'credits'
+  /** The day's pool, in pages read; for `credits`, the credits the job's next page needs. */
   limit: number
+  /** When the job goes on by itself at the latest: the next UTC day for a pool, the 1st of the next month for credits. */
   resumesAt: string
   message: string
 }
@@ -293,6 +297,30 @@ export interface CrawlReport {
   webhook?: JobWebhookStatus
   /** The task's paid provider calls, every attempt counted, from its `paid_calls` (PA E5); absent when it made none. */
   paidCalls?: PaidCallTotals
+  /**
+   * A server on the person's computer, once the task has ended: the files it wrote beside the task's checkpoint with every
+   * page recorded. Absent while the task runs, and from hosted Octocrawl, which keeps no files and gives `export` instead.
+   */
+  resultFiles?: JobResultFiles
+  /**
+   * A hosted job, once it has ended: where its every page downloads as one file, and for how many seconds the link is good.
+   * The status read again gives a fresh link. Absent while the job runs, and from a server on the person's computer.
+   */
+  export?: JobExport
+}
+
+/** The files a local server writes when a job ends (`results.jsonl`, `results.csv`), by their absolute paths. */
+export interface JobResultFiles {
+  /** A page a line, as the job's item list gives them: the Evidence Record and Markdown of each, no trace. */
+  jsonl: string
+  /** A row a page, the CLI's evidence columns (docs/cli.md): the URL, status, reason, final URL, fetch time, HTTP status and hashes; no Markdown. */
+  csv: string
+}
+
+/** A finished hosted job's download: a signed link to one gzip JSONL file, a page a line, good for `expiresInSeconds`. */
+export interface JobExport {
+  url: string
+  expiresInSeconds: number
 }
 
 /**

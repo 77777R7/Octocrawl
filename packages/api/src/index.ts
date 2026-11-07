@@ -13,11 +13,15 @@ export { deliveryConfig, JOB_STREAMS_OFF_NOTICE, parseListen, parsePort } from '
 export { loadEngineConfig, preloadEngineModules, startCaptchaSolving, tunedPolicy } from './engineConfig.js'
 export type { EngineConfig } from './engineConfig.js'
 export { runApiServer } from './cli.js'
+// The result files a job ends with, and the CLI's `--out` writes: one column set for both.
+export { csvField, csvLine, evidenceRow, RESULT_COLUMNS, RESULT_CSV, RESULT_JSONL, resultFilesOf, writeResultFiles } from './resultFiles.js'
+export type { ResultPage } from './resultFiles.js'
 export { closeIdleOnlyWhenUnread } from './keepAlive.js'
 // The optional Patchright engine's loader, for the octocrawl commands' startup check (ADR 0005 enhanced_browser).
 export { loadImpit, loadPatchrightEngine } from '@w2l/bench'
 // The octocrawl-chrome service's browser lane (ADR 0005 hosted_chrome), for @w2l/mcp's hostedChrome.ts.
-export { BrowserLocalSubject, CompatAddressGuard, HOSTED_CHROME_PROFILE_ID, hostedChromeRefusal, RobotsOriginCache } from '@w2l/bench'
+export { BrowserLocalSubject, browserKeeper, CompatAddressGuard, HOSTED_CHROME_PROFILE_ID, hostedChromeRefusal, RobotsOriginCache } from '@w2l/bench'
+export type { BrowserKeeper } from '@w2l/bench'
 export type { GuardDial, GuardResolver, InstalledChromeTestSeams, PricedExit } from '@w2l/bench'
 // The operator's monthly ledger and its tariffs, for @w2l/mcp's hostedChromeMeter.ts (ADR 0005 hosted_chrome, D5).
 export { normalizeVendorTariff, openMonthlySpendLedger, paidCallFixedCost, tariffCeilingUsd, tariffCostUsd, tariffMonthlyFixedUsd } from '@w2l/http-core'

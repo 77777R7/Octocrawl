@@ -146,7 +146,9 @@ describe('POST /v1/map', () => {
     const url = `${origin}/docs/`
     expect(await hostedPost({ url, limit: 5_001 })).toEqual({ status: 400, body: { error: 'limit must be at most 5000 on this server', code: 'invalid_request' } })
     expect(await hostedPost({ url, timeout: 60_001 })).toEqual({ status: 400, body: { error: 'timeout must be at most 60000 on this server', code: 'invalid_request' } })
-    expect(await post({ url, limit: 0 })).toEqual({ status: 400, body: { error: 'limit must be an integer from 1 to 100000', code: 'invalid_request' } })
+    expect(await post({ url, limit: 100_001 })).toEqual({ status: 400, body: { error: 'limit must be at most 100000 on this server', code: 'invalid_request' } })
+    expect(await post({ url, timeout: 300_001 })).toEqual({ status: 400, body: { error: 'timeout must be at most 300000 on this server', code: 'invalid_request' } })
+    expect(await post({ url, limit: 0 })).toEqual({ status: 400, body: { error: 'limit must be a whole number, 1 or more', code: 'invalid_request' } })
     expect(await post({ url, mode: 'authed' })).toMatchObject({ status: 400, body: { error: 'mode authed is not available for map: a map reads public sitemaps and one public page' } })
     expect((await post({ url, useIndex: true })).body).toMatchObject({ code: 'unsupported_parameter', agentHints: ['Octocrawl keeps no URL index: a map reads the sitemaps the site declares and its start page, on the record; crawl reads further pages'] })
     expect(requests).toEqual([])

@@ -25,7 +25,7 @@ Hosted Octocrawl (`https://api.octocrawl.dev`, `https://mcp.octocrawl.dev/mcp`) 
 | The json model fallback, on a page where the model was called | +2 |
 | Blocked, nothing read, or refused | 0 |
 
-The monthly credits come back at 00:00 UTC on the 1st. An account with fewer than 5 credits left reads over HTTP only. Once none are left, a call is answered HTTP 429 until then. Each answer gives the credits it used and what is left, in `X-Credits-Used` and `X-Credits-Remaining`.
+The monthly credits come back at 00:00 UTC on the 1st. An account with fewer than 5 credits left reads over HTTP only. Once none are left, a call is answered HTTP 429 until then, and a crawl or batch that was running waits with its results kept, going on by itself when credits are back or added. Each answer gives the credits it used and what is left, in `X-Credits-Used` and `X-Credits-Remaining`.
 
 A json format's `modelFallback: true` has Claude Haiku 5.5 fill the required fields the page's own data left empty, for an account only. It costs 2 credits more on a page where the model was called, and nothing more where it was not: the json was complete without it, or the page was read without the model. A page is read without it when the account has fewer credits than the page and the 2 together, when the whole service's daily budget for the model ($5 a UTC day) is used up, or when the fallback is switched off; its json then has a `model_unavailable` issue that says which. A call without an account never calls the model. `X-Credits-Model` gives the model's part of `X-Credits-Used`. A crawl or batch job's pages are charged the same way.
 

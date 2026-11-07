@@ -37,7 +37,7 @@ async function start(options: { credits?: MemoryCreditsStore; enabled?: boolean;
   const segments = new Map<string, string[]>()
   const files: JobFiles = {
     segment: async (job, slice) => segments.get(`${job.id}/${slice}`) ?? null,
-    exportUrl: async (job) => `https://storage.example/${job.id}/export.jsonl.gz?signed`,
+    exportUrl: async (job, seconds) => `https://storage.example/${job.id}/export.jsonl.gz?signed${seconds === undefined ? '' : `&for=${seconds}`}`,
   }
   const enqueued: HostedJob[] = []
   const finished: HostedJob[] = []
@@ -85,6 +85,7 @@ describe('job files in GCS', () => {
     expect(await files.segment(job, 2)).toBeNull()
     expect(asked).toEqual(['w/ws_account-1/jobs/job-1/pages/00001.jsonl.gz', 'w/ws_account-1/jobs/job-1/pages/00002.jsonl.gz'])
     expect(await files.exportUrl(job)).toBe('signed:w/ws_account-1/jobs/job-1/export.jsonl.gz:900')
+    expect(await files.exportUrl(job, 86_400)).toBe('signed:w/ws_account-1/jobs/job-1/export.jsonl.gz:86400')
   })
 })
 
@@ -623,6 +624,18 @@ describe('hosted job routes', () => {
     store.jobs.set(taskId, { ...store.jobs.get(taskId)!, status: 'completed', finishedAt: new Date().toISOString(), expireAt: new Date(Date.now() + 86_400_000).toISOString() })
     expect(await (await call('GET', `/v1/jobs/${taskId}/export`, 'oc_one')).json()).toEqual({ url: `https://storage.example/${taskId}/export.jsonl.gz?signed`, expiresInSeconds: 900 })
     expect((await call('GET', `/v1/jobs/${taskId}/export`, 'oc_two')).status).toBe(404)
+  })
+
+  it('names a finished job\'s export in its status, by a link good for a day, and not before it ends', async () => {
+    const { call, store } = await start()
+    const { taskId } = await (await call('POST', '/v1/batches', 'oc_one', { urls: urls(1) })).json() as { taskId: string }
+    expect(await (await call('GET', `/v1/batches/${taskId}`, 'oc_one')).json()).not.toHaveProperty('export')
+    store.jobs.set(taskId, { ...store.jobs.get(taskId)!, status: 'completed', finishedAt: new Date().toISOString(), expireAt: new Date(Date.now() + 86_400_000).toISOString() })
+    const status = await (await call('GET', `/v1/batches/${taskId}`, 'oc_one')).json() as Record<string, unknown>
+    expect(status.export).toEqual({ url: `https://storage.example/${taskId}/export.jsonl.gz?signed&for=86400`, expiresInSeconds: 86_400 })
+    // The list of an account's jobs stays as it was: no link signed for each.
+    const listed = await (await call('GET', '/v1/jobs', 'oc_one')).json() as { items: Array<Record<string, unknown>> }
+    expect(listed.items.find((job) => job.taskId === taskId)).not.toHaveProperty('export')
   })
 
   it('refuses starts while jobs are switched off, and cancels a job whose first slice could not be queued', async () => {

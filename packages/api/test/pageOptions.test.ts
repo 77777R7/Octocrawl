@@ -14,6 +14,9 @@ const PAGES: Record<string, string> = {
   '/chrome': '<!doctype html><html><head><title>Hourly survey</title></head><body><header><a href="/">Harbour office</a> <a href="/login">Login</a></header>' +
     `<nav><a href="/tides">Tide tables</a></nav><main><article><h1>Hourly survey</h1><p>${PROSE}</p></article></main>` +
     '<footer><p>Published by the harbour office</p></footer><script>document.title = "never content"</script></body></html>',
+  // A page that reads well, with its structured data in a script block of the body and an element that holds nothing.
+  '/jsonld': `<!doctype html><html><head><title>Exhibitor</title></head><body><main><article><h1>Exhibitor</h1><p>${PROSE}</p><div id="blank"></div></article></main>` +
+    '<script type="application/ld+json">{"@type":"Organization","name":"Harbour office"}</script></body></html>',
   // A confident page whose table rows arrive by script: HTTP content that the ladder offers to the browser rung.
   '/table-shell': '<!doctype html><html><body><main><h1>Tide table, hourly</h1><p>Table 7. Release date 2026-09-23. Frequency: hourly. Station: north pier.</p>' +
     '<form><button>Apply</button><table><thead id="head"></thead><tbody id="body"></tbody></table></form></main></body></html>',
@@ -178,6 +181,32 @@ describe('onlyMainContent, waitFor and timeout on scrape, batch and crawl', () =
     expect(thin).toMatchObject({ status: 'success', failureReason: null, markdown: '', lane: 'http', channelsTried: ['http', 'browser_local'] })
     const read = (await post('/v1/scrape', { url, formats: ['markdown'], includeTags: ['table'] })).body
     expect(read).toMatchObject({ status: 'success', markdown: '', lane: 'http', channelsTried: ['http'] })
+  })
+
+  it('says so when includeTags selects nothing readable, and the empty answer stays a success', async () => {
+    const { origin, post, engine } = await setup(hangingBrowser)
+    const url = `${origin}/jsonld`
+    const said = { warnings: [expect.objectContaining({ code: 'empty_selection' })], agentHints: [expect.stringContaining('rawHtml')] }
+    // Script blocks are named and left out as always, an empty element holds nothing, and a selector may match nothing.
+    for (const [includeTags, html] of [[['script[type="application/ld+json"]'], '<body></body>'], [['#blank'], '<body><div id="blank"></div></body>'], [['table'], '']] as const) {
+      const empty = (await post('/v1/scrape', { url, formats: ['markdown', 'html'], includeTags, fastMode: true })).body
+      expect(empty).toMatchObject({ status: 'success', failureReason: null, readiness: { state: 'ready' }, markdown: '', html, lane: 'http', ...said })
+    }
+    // Without Markdown in the formats, on the compact answer, and with rawHtml, which holds what the hint points at.
+    const compact = (await post('/v1/scrape', { url, formats: ['html', 'rawHtml'], includeTags: ['script'], debug: false })).body
+    expect(compact).toMatchObject({ status: 'success', ...said })
+    expect(compact.rawHtml).toContain('application/ld+json')
+    const batch = await engine.startBatch({ urls: [url], formats: ['markdown'], includeTags: ['script'] })
+    await finished(() => engine.getBatch(batch.taskId))
+    expect((await engine.getBatchItems(batch.taskId))!.items[0]).toMatchObject({ status: 'success', markdown: '', ...said })
+    expect((await post('/fc/v1/scrape', { url, includeTags: ['script'] })).body).toMatchObject({ success: true, data: { markdown: '', warning: expect.stringContaining('includeTags') } })
+    // A selection that holds text, and a page read without one, say nothing of it.
+    for (const request of [{ includeTags: ['h1'] }, {}]) {
+      const read = (await post('/v1/scrape', { url, formats: ['markdown'], ...request })).body
+      expect(read.markdown).toContain('Exhibitor')
+      expect(read).not.toHaveProperty('warnings')
+      expect(read.agentHints ?? []).toEqual([])
+    }
   })
 
   it('keeps a blocked page blocked whatever includeTags names', async () => {

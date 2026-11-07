@@ -9,6 +9,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { isIP } from 'node:net'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { resultFilesOf, writeResultFiles } from './resultFiles.js'
+import { browserSlots, withBrowserSlots, type BrowserSlots } from './browserSlots.js'
 import {
   buildChannels,
   compatHostListed,
@@ -131,7 +133,7 @@ import {
 import { accessGrantRef, createExecutionScope, createSpendLedger, evaluateGovernance, type AccessAttestationInput, type AccessGrant, type CrawlPolicy } from '@w2l/http-core'
 import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, notServedSteps, READ_STATUSES, readinessOf, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, withRegexLedger, type RegexStats, type StepPageQuery } from '@w2l/runtime'
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, verify, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
-import type { BrowserEngineName, BrowserIdentityChoice, CaptchaSolving, ChannelAdmission, ChannelsFiltered, InstalledChromeTestSeams, PricedExit } from '@w2l/bench'
+import type { BrowserEngineName, BrowserIdentityChoice, BrowserKeeper, CaptchaSolving, ChannelAdmission, ChannelsFiltered, InstalledChromeTestSeams, PricedExit } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
 import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints, MAX_AGENT_HINTS, pinnedFastModeHints, type FastModePin, type HintOffers } from './hints.js'
 import { HandoffNotThrough, openUserChrome, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
@@ -142,7 +144,7 @@ import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runC
 import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlIntroduction } from '@w2l/runtime'
 import { FileSessionBrokerStore, FileSessionStore, hostedChromeRefusal, installedChromeRefusal, mergeListPages, publicSession, regionSpecOf, SessionBroker, type SessionStore } from '@w2l/bench'
 import { BLOCK_REASON, hostedVerifyRefusal, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, LIST_DEFAULTS, type AccessChoice, type BlockReason, type ListRun, type PageAction, type MonitorView, type MonitorRevision } from '@w2l/contracts'
-import type { ManagedSessionRef, PublicManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
+import type { JobResultFiles, ManagedSessionRef, PublicManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
 import { attributesFormat, checkVerificationFormats, customJsonFormat, listFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv, verifyScrapeResponse } from './structured.js'
 
 export interface CrawlWithSteps {
@@ -545,6 +547,17 @@ export interface ApiEngineOptions {
   batchMaxWallMs?: number | null
   /** Pages the orchestrator fetches at once per crawl, and the most a crawl's `maxConcurrency` may ask for. Default 4. */
   workerCount?: number
+  /**
+   * The pages this engine renders in a browser at once, across its scrapes and its jobs' pages: a worker whose page needs
+   * the browser waits for a slot while HTTP pages flow on the other workers (a hosted job slice renders 2 of the 8 pages it
+   * reads at once). Absent: as many as the workers read.
+   */
+  browserPagesAtOnce?: number
+  /**
+   * The process's browser keeper (@w2l/bench browserKeeper): the public browser rung's Chromium outlives this engine,
+   * launched once for the engines that come and go (a hosted job worker's slices). Absent: launched by this engine, closed with it.
+   */
+  browserKeeper?: BrowserKeeper
   /**
    * Asked before each page's json model fallback calls the model, where a call's context names no gate of its own: a
    * hosted job's slice passes the hosted switch, daily cap and credits here. Absent: the model is called whenever it is
@@ -1067,6 +1080,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const conditionalHttp = new ResilientHttpSubject('standard', networkPolicy, originScheduler, undefined, false, fileStore)
   const defaultMaxPages = options.defaultMaxPages ?? null
   const workerCount = Math.max(1, options.workerCount ?? DEFAULT_WORKER_COUNT)
+  /** The browser slots (browserPagesAtOnce), shared by every scrape and job page of this engine; null: no cap. */
+  const slots: BrowserSlots | null = options.browserPagesAtOnce === undefined ? null : browserSlots(options.browserPagesAtOnce)
   const newTaskId = options.taskIds ?? (() => crypto.randomUUID())
   // One robots.txt cache per mode, shared by the http rung and a crawl's sitemap reader, so a host's robots.txt is read once for both.
   const robotsCaches = new Map<string, RobotsOriginCache>()
@@ -1106,7 +1121,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     options.channelsFor ??
     ((mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced?: boolean) => {
       // One set of rungs per egress: each leaves through its proxy; pacing per origin stays shared (originScheduler).
-      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, vendorTariffs: accessGrant?.tariffs ?? {}, ...(accessGrant === null ? {} : { vendorGrant: accessGrantRef(accessGrant) }), browserEngine: options.browserEngine ?? 'playwright', browserIdentity: options.browserIdentity ?? 'declared', compatTransport: compatHosts.length > 0, compatAddressGuard: options.hosted === true, ...(enhanced === true ? { enhanced } : {}), ...(installedChrome ? { installedChrome, ...(options.installedChromeSeams === undefined ? {} : { installedChromeSeams: options.installedChromeSeams }) } : {}), ...(captchaSolving !== undefined && enhanced === true ? { captchaSolving } : {}) })
+      const channels = buildChannels(mode, { headed, ...(options.browserKeeper === undefined ? {} : { browserKeeper: options.browserKeeper }), networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, vendorTariffs: accessGrant?.tariffs ?? {}, ...(accessGrant === null ? {} : { vendorGrant: accessGrantRef(accessGrant) }), browserEngine: options.browserEngine ?? 'playwright', browserIdentity: options.browserIdentity ?? 'declared', compatTransport: compatHosts.length > 0, compatAddressGuard: options.hosted === true, ...(enhanced === true ? { enhanced } : {}), ...(installedChrome ? { installedChrome, ...(options.installedChromeSeams === undefined ? {} : { installedChromeSeams: options.installedChromeSeams }) } : {}), ...(captchaSolving !== undefined && enhanced === true ? { captchaSolving } : {}) })
       return options.httpOnly ? channels.filter(channel => HTTP_CHANNELS.has(channel.id)) : channels
     })
   const channelsByMode = new Map<string, Channel[]>()
@@ -1252,7 +1267,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         report.attemptId.length === 0 ? [] : await store.listSteps(taskId, report.attemptId)
       const task = await store.getTask(taskId)
       const webhook = task === null ? undefined : jobWebhooks.status(task)
-      return { report: webhook === undefined ? report : { ...report, webhook }, steps }
+      return { report: { ...report, ...(webhook === undefined ? {} : { webhook }), ...resultFilesField(task) }, steps }
     } finally {
       await store.close()
     }
@@ -1303,8 +1318,45 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ...(waitingForPerson === undefined ? {} : { waitingForPerson }),
         ...(approvalsWaiting.has(taskId) ? { waitingForApproval: true as const } : {}),
         ...(webhook === undefined ? {} : { webhook }),
+        ...resultFilesField(task),
       }
     } finally { await store.close() }
+  }
+
+  /** A server that keeps files writes a job's results beside its checkpoint when it ends; hosted Octocrawl keeps none and gives `export` instead. */
+  const writesResultFiles = options.hosted !== true && options.noFileStore !== true
+
+  /** The job's result files, once it has ended and they are written: a status says where they are. */
+  function resultFilesField(task: Task | null): { resultFiles?: JobResultFiles } {
+    if (!writesResultFiles || task === null || !isTerminalStatus(task.status)) return {}
+    const files = resultFilesOf(join(taskRoot, task.id))
+    return files === null ? {} : { resultFiles: files }
+  }
+
+  /**
+   * Write a finished job's `results.jsonl` and `results.csv`: every page recorded, every attempt, as listJobPages gives
+   * them. Done before anyone hears of the end, so the terminal event, the webhook and the next status name the files.
+   * A failure to write them is logged and keeps nothing else from happening: the pages stay in the checkpoint, and a
+   * status without `resultFiles` sends the reader to the item list. A job that ended before this server wrote files, or
+   * in a crash between its terminal row and the files, has none: nothing writes them later.
+   */
+  async function writeJobResultFiles(taskId: string): Promise<void> {
+    if (!writesResultFiles) return
+    const dir = join(taskRoot, taskId)
+    if (!existsSync(join(dir, 'checkpoint.sqlite'))) return
+    try {
+      await writeResultFiles(dir, async function* () {
+        for (let cursor: string | undefined; ;) {
+          const page = await loadCrawlPageList(taskId, { ...(cursor === undefined ? {} : { cursor }), limit: 50 }, 'all', true)
+          if (page === null) return
+          yield page.items.map(({ audit: _audit, ...item }) => ({ ...item, trace: [] }))
+          if (!page.hasMore || page.nextCursor === null) return
+          cursor = page.nextCursor
+        }
+      })
+    } catch (error) {
+      console.error(JSON.stringify({ severity: 'WARNING', event: 'result_files_not_written', taskId, error: error instanceof Error ? error.message : String(error) }))
+    }
   }
 
   /**
@@ -1318,6 +1370,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const current = await store.getTask(task.id)
     if (current === null || !isTerminalStatus(current.status)) return
     const kind = jobKindOf(current)
+    await writeJobResultFiles(current.id)
     const report = kind === 'batch' ? await loadBatch(current.id) : (await loadCrawlWithSteps(current.id))?.report ?? null
     if (report === null) return
     if (webhookOf(current) !== undefined) {
@@ -1675,7 +1728,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     try {
       const task = await store.getTask(taskId)
       if (task === null || task.batch === undefined) return null
-      if (inflight.has(taskId) || task.status === 'pending' || task.status === 'running' || task.status === 'paused') throw new CrawlStateError(`batch ${taskId} is ${task.status}: hand its items over when it has finished`)
+      if (task.status === 'pending' || task.status === 'running' || task.status === 'paused') throw new CrawlStateError(`batch ${taskId} is ${task.status}: hand its items over when it has finished`)
+      // The row is terminal and the run is still closing (its result files, its terminal event): the handoff starts once it has.
+      const closing = inflight.get(taskId)
+      if (closing !== undefined) await closing
       if (handoffs.has(taskId)) throw new CrawlStateError(`batch ${taskId} is already being handed over`)
       const unread = handoffUnread(task)
       if (unread !== null) throw new CrawlStateError(`batch ${taskId} asked for ${unread}, which a page read in your own Chrome cannot give: its stopped items are not handed over`)
@@ -1735,6 +1791,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           }
         }
         const through = items.filter((item) => item.through).length
+        // The pages the person got through to replace the stopped items: the result files say so too.
+        if (through > 0) await writeJobResultFiles(taskId)
         return { id: taskId, handedOff: items.length, through, notThrough: items.length - through, items }
       } finally {
         handoffs.delete(taskId)
@@ -1801,7 +1859,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
      * session are never cached.
      */
     const laneFor = (egress: Egress | undefined): Lane => {
-      const rungs = channelsForUrl(mode, task.seedUrl, selection ?? {}, selection?.formats ?? [], false, compat, egress, chrome)
+      const chosen = channelsForUrl(mode, task.seedUrl, selection ?? {}, selection?.formats ?? [], false, compat, egress, chrome)
+      // The rungs that render take one of the engine's browser slots each, when it caps them.
+      const rungs = slots === null ? chosen : { ...chosen, channels: withBrowserSlots(chosen.channels, slots) }
       const sessionFile = cookieSessionFileFor(task.taskDir, routeOf(egress))
       return { egress, rungs, ladder: ladderFor(rungs, egress), cookieSession: egressSessions && mode !== 'authed' ? new TaskCookieSession(sessionFile) : undefined }
     }
@@ -2051,7 +2111,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         : {}),
     }
     let turnHints: readonly string[] = []
-    const channels = context.browserTurn === undefined ? rungs.channels : withBrowserTurn(rungs.channels, context.browserTurn, (hints) => { turnHints = hints })
+    // A rung that renders takes one of the engine's browser slots, when it caps them, after the call's turn is granted.
+    const slotted = slots === null ? rungs.channels : withBrowserSlots(rungs.channels, slots)
+    const channels = context.browserTurn === undefined ? slotted : withBrowserTurn(slotted, context.browserTurn, (hints) => { turnHints = hints })
     const runner = new LadderRunner(channels, policy, historyFor(mode, scrapeEgress, req.access === 'enhanced'), null, sessionsFor(mode), { channelsFiltered: rungs.filtered, httpFallback: unproxied(scrapeEgress), ...(req.verify === undefined ? {} : { verify: req.verify }) })
     // A Monitor's capture (no record) neither reads nor fills the cache: a preview persists nothing.
     // The URL a scrape names; a Monitor's capture (no record) re-reads its URL on a schedule, as a crawler does.

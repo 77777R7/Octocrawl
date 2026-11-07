@@ -662,8 +662,8 @@ describe('parseMapRequest', () => {
   it('refuses mode authed, and a limit or timeout out of range, each with its message', () => {
     expect(thrown(() => parseMapRequest({ url, mode: 'authed' }))).toMatchObject({ status: 400, code: 'invalid_request', message: 'mode authed is not available for map: a map reads public sitemaps and one public page' })
     expect(() => parseMapRequest({ url, mode: 'fast' })).toThrow('mode must be standard or research')
-    for (const limit of [0, -1, 1.5, '50', 100_001, null]) expect(() => parseMapRequest({ url, limit }), String(limit)).toThrow(/^limit must be an integer from 1 to 100000$/)
-    for (const timeout of [999, 300_001, 1_500.5, '60000']) expect(() => parseMapRequest({ url, timeout }), String(timeout)).toThrow(/^timeout must be an integer number of milliseconds from 1000 to 300000$/)
+    for (const limit of [0, -1, 1.5, '50', null]) expect(() => parseMapRequest({ url, limit }), String(limit)).toThrow('limit must be a whole number, 1 or more')
+    for (const timeout of [999, 1_500.5, '60000']) expect(() => parseMapRequest({ url, timeout }), String(timeout)).toThrow('timeout must be a whole number of milliseconds, 1000 or more')
     expect(() => parseMapRequest({ url: 'ftp://example.com/' })).toThrow('url must be http(s)')
     expect(() => parseMapRequest({})).toThrow('url is required')
   })

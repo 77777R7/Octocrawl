@@ -28,6 +28,11 @@
 import type { QuotaEntry } from './hostedApi.js'
 
 export const DEFAULT_MONTHLY_CREDITS = 1_000
+/** Where a person asks for more credits than the grant, until packs are sold (docs/launch/2026-10-18-hosted-business-plan.md). */
+export const MORE_CREDITS_ADDRESS = 'hello@octocrawl.dev'
+export const MORE_CREDITS_HINT = `for more credits, write to ${MORE_CREDITS_ADDRESS} with a line on what you are reading`
+/** How often a job waiting for credits asks again, so credits added by hand or a trial pack get it going within the day. */
+export const CREDITS_RECHECK_SECONDS = 6 * 3_600
 export const CREDITS = { httpPage: 1, browserPage: 5, notFound: 1, map: 1, model: 2 } as const
 /** Usage records are kept this long, for the account page and questions about a charge. */
 export const USAGE_RETENTION_DAYS = 90
@@ -176,6 +181,12 @@ export interface CreditsStore {
   /** The credits the account has this month, taking nothing; a hosted job's start checks it covers a slice. */
   balance(uid: string, now?: Date): Promise<number>
   /**
+   * Adds `amount` bought credits to the account, once for `id` (an order's number, `trial-{uid}` for the operator's trial
+   * pack): a second call with the same id adds nothing and says so. Bought credits stay across months and are spent after
+   * the grant. Throws for an account that does not exist.
+   */
+  topUp(uid: string, amount: number, id: string, now?: Date): Promise<{ added: boolean; remaining: number }>
+  /**
    * A finished job's one request line, `at` its end and named by its job, so a later delivery writes the same line again.
    * Its `credits` were charged slice by slice, so nothing is settled here. False: the line was not written, the account
    * being gone or its record too busy.
@@ -229,6 +240,15 @@ export class MemoryCreditsStore implements CreditsStore {
   async balance(uid: string, now = new Date()): Promise<number> {
     const have = current(this.balances.get(uid) ?? null, utcMonth(now), this.monthlyGrant)
     return have.grant + have.purchased
+  }
+  readonly topUps = new Set<string>()
+  async topUp(uid: string, amount: number, id: string, now = new Date()): Promise<{ added: boolean; remaining: number }> {
+    if (this.topUps.has(id)) return { added: false, remaining: await this.balance(uid, now) }
+    this.topUps.add(id)
+    const month = utcMonth(now)
+    const have = current(this.balances.get(uid) ?? null, month, this.monthlyGrant)
+    this.balances.set(uid, { month, grant: have.grant, purchased: have.purchased + amount })
+    return { added: true, remaining: have.grant + have.purchased + amount }
   }
   async settle(reservation: Reservation, used: number, kind: UsageKind, now = new Date(), note?: RequestNote, perKind?: Partial<Record<UsageKind, number>>): Promise<{ remaining: number }> {
     if (reservation.id !== undefined) {
@@ -311,6 +331,26 @@ export class FirestoreCreditsStore implements CreditsStore {
     const balance = doc === null ? null : { month: doc.fields?.month?.stringValue ?? '', grant: integer(doc.fields?.grant, 'grant'), purchased: integer(doc.fields?.purchased, 'purchased') }
     const have = current(balance, utcMonth(now), this.monthlyGrant)
     return have.grant + have.purchased
+  }
+
+  async topUp(uid: string, amount: number, id: string, now = new Date()): Promise<{ added: boolean; remaining: number }> {
+    if (!validAccountId(uid)) throw new Error('account id is malformed')
+    if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error('a top-up is a positive number of credits')
+    // No colon: Firestore's REST path would read a trailing `:name` as a verb.
+    if (!/^[A-Za-z0-9_.-]{1,120}$/.test(id)) throw new Error('a top-up id is 1 to 120 letters, digits, _ . or -')
+    const token = await this.token()
+    if (await this.read(`creditTopUps/${id}`, token) !== null) return { added: false, remaining: await this.balance(uid, now) }
+    // One commit: the top-up's record, created once, the account's record (which must exist, as a first balance needs it),
+    // and the bought credits as a server-side increment, which needs no read and no month: a balance written this month or
+    // an earlier one keeps its grant as `current` reads it, and a balance not written yet is created with the credits alone.
+    const committed = await this.commit(token, [
+      { update: { name: `${this.resource}/users/${uid}`, fields: {} }, updateMask: { fieldPaths: [] }, updateTransforms: [{ fieldPath: 'createdAtMs', minimum: { integerValue: String(Number.MAX_SAFE_INTEGER) } }], currentDocument: { exists: true } },
+      { update: { name: `${this.resource}/creditTopUps/${id}`, fields: { uid: { stringValue: uid }, amount: { integerValue: String(amount) }, at: { timestampValue: now.toISOString() } } }, currentDocument: { exists: false } },
+      { update: { name: `${this.resource}/credits/${uid}`, fields: {} }, updateMask: { fieldPaths: [] }, updateTransforms: [{ fieldPath: 'purchased', increment: { integerValue: String(amount) } }] },
+    ], true)
+    if (committed === 'missing') throw new Error(`account ${uid} does not exist: no top-up`)
+    // The record was created meanwhile (a second worker, the same order): nothing added here.
+    return { added: committed !== 'retry', remaining: await this.balance(uid, now) }
   }
 
   async reserve(uid: string, amount: number, quotas: readonly QuotaEntry[], now = new Date(), id?: string): Promise<ReserveResult> {

@@ -35,11 +35,11 @@ import { scrapeSchemaWithout } from './toolsets.js'
 import { InFlightCalls, trackPost } from './inFlight.js'
 import { serveH2cToo } from './h2c.js'
 import { serveMcpPost, servesProtocolVersion, unsupportedProtocolVersion } from './serveHttp.js'
-import { CREDITS, DEFAULT_MONTHLY_CREDITS, mapCharge, scrapeCharge, secondsToNextGrant, type CreditsStore, type RequestNote, type Reservation } from './hostedCredits.js'
+import { CREDITS, DEFAULT_MONTHLY_CREDITS, mapCharge, scrapeCharge, secondsToNextGrant, type CreditsStore, type RequestNote, type Reservation, MORE_CREDITS_HINT } from './hostedCredits.js'
 import { asksModelFallback, MODEL_REFUSALS, type HostedModel } from './hostedModel.js'
 import { grantedCapabilities, HOSTED_ACCESS_ENGINE, type HostedAccessSource } from './hostedAccess.js'
 import { refusedFields } from './refusedFields.js'
-import { createJobRoutes, HOSTED_BATCH_KEYS, HOSTED_CRAWL_KEYS, isJobRoute, JOB_MAX_CRAWL_PAGES, JOB_WORKER_COUNT, type HostedJobsConfig } from './hostedJobRoutes.js'
+import { createJobRoutes, HOSTED_BATCH_KEYS, HOSTED_CRAWL_KEYS, isJobRoute, JOB_MAX_CRAWL_PAGES, JOB_BROWSER_PAGES, JOB_WORKER_COUNT, type HostedJobsConfig } from './hostedJobRoutes.js'
 
 /** What a key holder may do. `dailyLimit` counts scrape and map starts per UTC day. */
 export interface HostedKeyRecord {
@@ -282,7 +282,7 @@ export function hostedPolicy(base: NetworkPolicy, env: NodeJS.ProcessEnv = proce
 export function jobEngineOptions(taskRoot: string, extra: Partial<ApiEngineOptions> = {}): ApiEngineOptions {
   return {
     taskRoot, hosted: true, noFileStore: true, defaultMaxPages: JOB_MAX_CRAWL_PAGES, allowRobotsOverride: false, sessionsFile: null, userChrome: null,
-    workerCount: JOB_WORKER_COUNT, resumeOnStart: false, deferLaunch: true, ...HOSTED_ACCESS_ENGINE, ...extra,
+    workerCount: JOB_WORKER_COUNT, browserPagesAtOnce: JOB_BROWSER_PAGES, resumeOnStart: false, deferLaunch: true, ...HOSTED_ACCESS_ENGINE, ...extra,
     networkPolicy: hostedPolicy(extra.networkPolicy ?? hostedNetworkPolicy()),
   }
 }
@@ -584,6 +584,8 @@ export interface HostedApiConfig {
   accountsDaily?: number
   /** The credits an account gets a month, named in the hint that says to sign in (DEFAULT_MONTHLY_CREDITS). */
   monthlyCredits?: number
+  /** The operator's trial pack (W2L_TRIAL_CREDITS): credits added to an account once, the first time a call of its finds the credits used up. Absent or 0: none. */
+  trialCredits?: number
   /** The public address of this API, named in hints; e.g. https://api.octocrawl.dev */
   publicOrigin?: string
   networkPolicy?: NetworkPolicy
@@ -1172,6 +1174,13 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       modelRefusal = MODEL_REFUSALS.credits
       reserved = await reserve(base())
     }
+    // The account's first wall may bring the operator's trial pack: added once, by the account's id (or by another call a
+    // moment ago, whose credits this one sees), and the call asks again.
+    if (!reserved.ok && reserved.limited === 'credits' && (config.trialCredits ?? 0) > 0) {
+      const trial = await credits.topUp(uid, config.trialCredits!, `trial-${uid}`, now)
+      if (trial.added) log(JSON.stringify({ severity: 'INFO', event: 'hosted_trial_credits', uid, amount: config.trialCredits }))
+      if (trial.added || trial.remaining >= base()) reserved = await reserve(base())
+    }
     // Short of even that with the lease held: what the running browser reserved may come back, so this call hears of it.
     if (!reserved.ok && reserved.limited === 'credits' && browserTurn !== undefined) {
       const turn = await browserTurn()
@@ -1192,7 +1201,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       }
       const seconds = secondsToNextGrant(now)
       return refuse(c, 429, 'quota_exhausted', `this account's credits are used up (${reserved.remaining} left)`,
-        [`the monthly credits come back on the 1st at 00:00 UTC, in ${waitInWords(seconds)}`, LOCAL_HINT], { 'Retry-After': String(seconds), 'X-Credits-Remaining': String(reserved.remaining) }, { pool: 'credits' })
+        [`the monthly credits come back on the 1st at 00:00 UTC, in ${waitInWords(seconds)}`, MORE_CREDITS_HINT, LOCAL_HINT], { 'Retry-After': String(seconds), 'X-Credits-Remaining': String(reserved.remaining) }, { pool: 'credits' })
     }
     logQuotaThresholds(quotas, reserved.counts, day, log)
     logUsage(caller, path, day)

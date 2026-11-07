@@ -7,7 +7,7 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createApiEngine, defaultSessionsFile, parseListen, preloadEngineModules, runApiServer, startCaptchaSolving, type ApiEngine, type HandoffHooks } from '@w2l/api'
+import { createApiEngine, csvField, defaultSessionsFile, evidenceRow, parseListen, preloadEngineModules, RESULT_COLUMNS, runApiServer, startCaptchaSolving, type ApiEngine, type HandoffHooks, type ResultPage } from '@w2l/api'
 import {
   CONTENTFUL_STATUS,
   parseBatchStartRequest,
@@ -17,8 +17,6 @@ import {
   RequestError,
   type CrawlPage,
   type CrawlReport,
-  type EvidenceRecord,
-  type PageTable,
   withPoolProxy,
 } from '@w2l/contracts'
 import { COMMANDS, parseCommandLine, UsageError, usage, type Command, type CliOptions } from './flags.js'
@@ -213,13 +211,7 @@ async function runCommand(engine: ApiEngine, command: Command, urls: string[], b
 }
 
 /** A page as `--out` writes it: a crawl page or batch item (`url`), or a scrape response (`requestedUrl`). */
-type Page = {
-  url?: string; requestedUrl?: string; markdown?: string | null; tables?: readonly PageTable[]
-  status?: string; lane?: string | null; failureReason?: string | null; blockReason?: string | null; budgetExceeded?: string | null
-  cacheState?: string; cachedAt?: string; evidenceRecord?: EvidenceRecord | null; verification?: { status: string }
-  /** A scrape response gives the cache outcome here, not at the top level. */
-  metadata?: object | null
-}
+type Page = ResultPage
 
 /** Wait for a crawl or batch to end, then answer with its report and every page it recorded. */
 async function finish(engine: ApiEngine, kind: 'crawl' | 'batch', taskId: string, cli: CliOptions, io: CliIo): Promise<number> {
@@ -318,7 +310,7 @@ async function writeOut(dir: string, pages: readonly Page[], report: CrawlReport
     const stem = `${String(n + 1).padStart(4, '0')}-${slug(page.url ?? page.requestedUrl ?? '')}`
     const markdownFile = typeof page.markdown === 'string' ? `${stem}.md` : null
     if (markdownFile !== null) { await writeFile(join(dir, markdownFile), page.markdown!); markdowns++ }
-    rows.push(evidenceRow(page, markdownFile).map(csvField).join(','))
+    rows.push([...evidenceRow(page), markdownFile].map(csvField).join(','))
     for (const table of page.tables ?? []) {
       if (table.omitted !== undefined) continue
       await writeFile(join(dir, `${stem}.table-${table.tableIndex}.csv`), table.csv)
@@ -330,45 +322,10 @@ async function writeOut(dir: string, pages: readonly Page[], report: CrawlReport
 }
 
 /**
- * The columns of `results.csv`, in order: those of the Python client's
- * `to_pandas(include_markdown=False)` (python/src/w2l/frame.py), then the
- * Markdown file written beside it. A value W2L did not observe is empty, never 0.
+ * The columns of `results.csv`, in order: those a server writes when a job ends (RESULT_COLUMNS, docs/cli.md), then the
+ * Markdown file written beside it. A value Octocrawl did not observe is empty, never 0.
  */
-export const EVIDENCE_COLUMNS = [
-  'url', 'status', 'reason', 'final_url', 'fetched_at', 'http_status', 'lane', 'robots_decision',
-  'raw_sha256', 'markdown_sha256', 'extractor', 'source_commit', 'cache_state', 'cached_at', 'verification', 'markdown_file',
-] as const
-
-function evidenceRow(page: Page, markdownFile: string | null): Array<string | number | null | undefined> {
-  const record = page.evidenceRecord ?? null
-  const metadata = (page.metadata ?? {}) as { cacheState?: string; cachedAt?: string }
-  return [
-    page.url ?? page.requestedUrl,
-    page.status,
-    record !== null ? record.reason : (page.failureReason || page.blockReason || page.budgetExceeded),
-    record?.finalUrl,
-    record?.fetchedAt,
-    record?.httpStatus,
-    record !== null ? record.lane : page.lane,
-    record?.robotsDecision?.decision,
-    record?.rawSha256,
-    record?.outputSha256.markdown,
-    record?.extractor.version,
-    record?.extractor.commit,
-    page.cacheState ?? metadata.cacheState,
-    page.cachedAt ?? metadata.cachedAt,
-    // passed, failed or not_requested (ADR 0006); empty from a server that does not verify.
-    page.verification?.status ?? record?.verification?.status,
-    markdownFile,
-  ]
-}
-
-/** RFC 4180: a field with a comma, quote or line break is quoted, its quotes doubled; null is empty. */
-function csvField(value: string | number | null | undefined): string {
-  if (value === null || value === undefined) return ''
-  const text = String(value)
-  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
-}
+export const EVIDENCE_COLUMNS = [...RESULT_COLUMNS, 'markdown_file'] as const
 
 /** A file-name stem from a URL: host and path, letters, digits, dots and dashes only, at most 80 characters. */
 function slug(url: string): string {

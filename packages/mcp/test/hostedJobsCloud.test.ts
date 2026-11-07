@@ -45,6 +45,19 @@ describe('jobs in the cloud, from the environment', () => {
     expect(tasks[2]!.task.scheduleTime).toBeUndefined()
   })
 
+  it('addresses a tagged worker revision by its tag URL with the service\'s own URL as the token\'s audience, which is what Cloud Run checks', async () => {
+    // A tag URL as the audience is refused by Cloud Run before the worker sees the request (401, 2026-11-07, w36slice).
+    const { fetcher, tasks } = cloud(null)
+    const jobs = (await jobsCloudFromEnv({ ...ENV, W2L_JOBS_WORKER_URL: 'https://w36slice---octocrawl-jobs-abc.a.run.app' }, fetcher))!
+    expect(jobs.workerUrl).toBe('https://w36slice---octocrawl-jobs-abc.a.run.app')
+    expect(jobs.workerAudience).toBe('https://octocrawl-jobs-abc.a.run.app')
+    const job = { ...newHostedJob({ id: '6f1c2a4e-1b2c-4d3e-8f90-000000000002', workspaceId: 'ws_account-1', uid: 'account-1', keyId: 'k', kind: 'batch', request: {}, maxCredits: null }), generation: 1 }
+    await jobs.enqueueSlice(job)
+    expect(tasks[0]!.task.httpRequest).toMatchObject({ url: 'https://w36slice---octocrawl-jobs-abc.a.run.app/internal/jobs/6f1c2a4e-1b2c-4d3e-8f90-000000000002/slice', oidcToken: { audience: 'https://octocrawl-jobs-abc.a.run.app' } })
+    // The service URL itself is its own audience.
+    expect((await jobsCloudFromEnv(ENV, cloud(null).fetcher))!.workerAudience).toBe('https://octocrawl-jobs-abc.a.run.app')
+  })
+
   it('reads the switch, on when its document is absent, and at most every 30 s', async () => {
     expect(await (await jobsCloudFromEnv(ENV, cloud(null).fetcher))!.enabled()).toBe(true)
     const off = cloud({ fields: { enabled: { booleanValue: false } } })
