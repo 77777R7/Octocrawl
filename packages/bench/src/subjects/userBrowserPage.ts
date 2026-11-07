@@ -65,14 +65,26 @@ export interface UserBrowserRead {
    * `tabHidden`, the tab stayed out of sight and the whole document was read (`page_read_hidden`).
    */
   hiddenWaitMs?: number
+  /**
+   * With `tabHidden` and the whole document read, the page as it showed in that tab, when it could be read at once.
+   * Its content is read from it instead when the whole document's main content is a weak guess (the extractor's
+   * confidence under HIDDEN_WEAK_CONFIDENCE, or none found) and the page as it shows gives a surer one: a list the
+   * page folds away (an exhibitor's product groups) can outweigh the heading and text it shows.
+   */
+  shownWhileHidden?: string
 }
+
+/** Under this confidence, the main content found in the whole document of a tab out of sight is a weak guess. */
+export const HIDDEN_WEAK_CONFIDENCE = 0.5
 
 /** The result of a page read in the person's browser: in place of `prior`, the result the check stopped, or, with none, on the my-browser lane. */
 export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | null, options: FetchOptions): FetchResult {
   const LANE: UserBrowserLane = prior === null ? 'my_browser' : 'browser_local_authed'
-  const { html: body, finalUrl, wallMs } = read
+  const { finalUrl, wallMs } = read
+  const shownRead = readAsShownWhileHidden(read, options)
+  const body = shownRead ? read.shownWhileHidden! : read.html
   // The whole document: the raw body, and what a check is judged on, as the wait judged it; `body` may be the page as it shows.
-  const whole = read.document ?? body
+  const whole = read.document ?? read.html
   const status = read.status ?? 200
   const trace: TraceEvent[] = [
     ...(prior === null ? [] : [
@@ -83,7 +95,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
     ]),
     { at: 0, lane: LANE, event: 'identity_sent', detail: { mode: 'authed', headers: [], by: 'user_browser' } },
     { at: 0, lane: LANE, event: 'identity_unobserved', detail: { reason: `the person's own browser (${read.browser}) sent the request; its headers were not seen` } },
-    { at: wallMs, lane: LANE, event: 'user_browser_read', detail: { browser: read.browser, status: read.status, sawGate: read.sawGate, act: read.act, waitedMs: wallMs, ...(read.tabHidden === undefined ? {} : { tabHidden: read.tabHidden }), ...(read.hiddenWaitMs === undefined ? {} : { hiddenWaitMs: read.hiddenWaitMs }) } },
+    { at: wallMs, lane: LANE, event: 'user_browser_read', detail: { browser: read.browser, status: read.status, sawGate: read.sawGate, act: read.act, waitedMs: wallMs, ...(read.tabHidden === undefined ? {} : { tabHidden: read.tabHidden }), ...(read.hiddenWaitMs === undefined ? {} : { hiddenWaitMs: read.hiddenWaitMs }), ...(read.shownWhileHidden === undefined ? {} : { readAs: shownRead ? 'shown' : 'whole' }) } },
     ...steadyWaitEvents(read.settle, wallMs, LANE),
     ...[regionWaitEvent(read.region, wallMs, LANE)].filter((event): event is TraceEvent => event !== null),
   ]
@@ -162,7 +174,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
   const tables = tablesFormat(wholePageAsked(options) || delivered
     ? { html: body, options: { baseUrl: finalUrl, exclude: options.excludeTags, ...markdownOptions(options) } }
     : { html: extracted.mainHtml, options: { baseUrl: extracted.baseUrl, ...markdownOptions(options) } }, finalUrl, options, trace, LANE, wallMs)
-  return withSignInWarning(withEmptySelectionWarning(withOffPageWarning(withReadHiddenWarning(read, withStillChangingWarning(withStillLoadingWarning(withListCaveat({
+  return withSignInWarning(withEmptySelectionWarning(withOffPageWarning(withReadHiddenWarning(read, shownRead, withStillChangingWarning(withStillLoadingWarning(withListCaveat({
     ...base,
     status: 'success',
     failureReason: null,
@@ -194,12 +206,30 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
   }))))), options))
 }
 
-/** A read of the page as it shows that found its tab still out of sight: the whole document was read instead. */
-function withReadHiddenWarning(read: UserBrowserRead, result: FetchResult): FetchResult {
+/**
+ * Whether the content of a page read whole in a tab out of sight is read from the page as it showed there instead: the
+ * whole document's main content is a weak guess and the page as it shows gives a surer one. Not when the request names
+ * the content (includeTags) or asks for the whole page.
+ */
+function readAsShownWhileHidden(read: UserBrowserRead, options: FetchOptions): boolean {
+  if (read.tabHidden !== true || read.document !== undefined || read.shownWhileHidden === undefined) return false
+  if (selectionAsked(options) || wholePageAsked(options) || options.list?.itemSelector !== undefined) return false
+  const url = read.finalUrl
+  const fromWhole = extractTf.extract(read.html, { url, pruneSelectors: options.excludeTags, includeSelectors: contentSelectors(options, read.html.length), blockAds: options.blockAds })
+  if (!fromWhole.escalate && fromWhole.confidence >= HIDDEN_WEAK_CONFIDENCE) return false
+  const fromShown = extractTf.extract(read.shownWhileHidden, { url, pruneSelectors: options.excludeTags, includeSelectors: contentSelectors(options, read.shownWhileHidden.length), blockAds: options.blockAds })
+  return !fromShown.escalate && fromShown.confidence > (fromWhole.escalate ? -1 : fromWhole.confidence)
+}
+
+/** A read of the page as it shows that found its tab still out of sight: the whole document was read instead, or the page as it showed there. */
+function withReadHiddenWarning(read: UserBrowserRead, shownRead: boolean, result: FetchResult): FetchResult {
   if (read.tabHidden !== true || read.hiddenWaitMs === undefined) return result
   const seconds = Math.round(read.hiddenWaitMs / 100) / 10
   const waited = seconds > 0 ? `after waiting ${seconds} s for it to come in front` : 'without waiting for it to come in front'
-  const warning = { code: 'page_read_hidden', message: `The tab was out of sight in your Chrome when the page was read, ${waited}: the whole document was read, which may hold what the page does not show.` }
+  const how = shownRead
+    ? 'its content was read as the page showed there, since the whole document\'s main content was a weak guess (a list the page folds away), and a tab out of sight may show less than in front'
+    : 'the whole document was read, which may hold what the page does not show'
+  const warning = { code: 'page_read_hidden', message: `The tab was out of sight in your Chrome when the page was read, ${waited}: ${how}.` }
   return { ...result, warnings: [...(result.warnings ?? []), warning] }
 }
 

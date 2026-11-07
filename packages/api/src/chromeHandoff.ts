@@ -710,22 +710,30 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
       const regionOutcome = region !== null ? region.outcome() : undefined
       let html = state.html
       let whole: string | undefined
-      if (options.shownOnly === true && !readHidden) {
+      let shownWhileHidden: string | undefined
+      if (options.shownOnly === true) {
         // The page as it shows, read once it is through, beside the whole document the wait last read: a page that moved
-        // on between the two (another address, a new document) is read again, as in the wait.
+        // on between the two (another address, a new document) is read again, as in the wait. In a tab still out of
+        // sight the whole document is read, and the page as it shows is kept beside it when it could be read at once.
         try {
           const shown = await connection.send('Runtime.evaluate', { expression: SHOWN_HTML, returnByValue: true }, sessionId) as { result?: { value?: unknown }; exceptionDetails?: unknown }
-          if (shown.exceptionDetails !== undefined || typeof shown.result?.value !== 'string') { clear = 0; continue }
-          const now = JSON.parse(shown.result.value) as { href: string; shown: string }
-          if (now.href !== seen.href || heard.documents !== seen.documents) { clear = 0; continue }
-          html = now.shown
-          whole = state.html
+          const now = shown.exceptionDetails === undefined && typeof shown.result?.value === 'string' ? JSON.parse(shown.result.value) as { href: string; shown: string } : null
+          const same = now !== null && now.href === seen.href && heard.documents === seen.documents
+          if (readHidden) {
+            if (same) shownWhileHidden = now.shown
+          } else {
+            if (!same) { clear = 0; continue }
+            html = now.shown
+            whole = state.html
+          }
         } catch (error) {
           const left = gone(error)
           if (left !== null) throw left
-          world = null
-          clear = 0
-          continue
+          if (!readHidden) {
+            world = null
+            clear = 0
+            continue
+          }
         }
       }
       kept = true
@@ -745,6 +753,7 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
         ...(regionOutcome === undefined ? {} : { region: regionOutcome }),
         tabHidden: state.hidden === true,
         ...(hiddenWaitMs === undefined ? {} : { hiddenWaitMs }),
+        ...(shownWhileHidden === undefined ? {} : { shownWhileHidden }),
       }, tab: { targetId, sessionId, stops } }
     }
     // The check still holding the page when the wait ended: what the read is blocked by, which an earlier response
