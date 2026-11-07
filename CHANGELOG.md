@@ -31,6 +31,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **A hosted job that runs out of credits waits instead of failing.** Its status stays `running` with `paused: { reason: "credits", limit, resumesAt, message }`, the message naming hello@octocrawl.dev for more credits; the job asks again every 6 hours and at the 1st, keeps what it read and spends nothing meanwhile (until now it failed with `credits_exhausted`). A scrape refused for credits names the same address. Operators can add bought credits once by an id (`CreditsStore.topUp`, documented in docs/hosted-api.md), and `W2L_TRIAL_CREDITS` adds a one-time pack the first time an account hits the wall (default off).
 - **Hosted Octocrawl no longer names a path on its own server for a file.** A hosted read of a PDF, CSV or text file said it was `kept at /tmp/octocrawl-hosted/files/…`, in `agentHints`, `file.path` and the `artifacts` of `snapshot` and the Evidence Record, a place no client could read and that was swept after ten minutes. Hosted now saves no files: `file.path` is `null`, `artifacts` is empty, `file.sha256` still identifies the bytes, and a file with no Markdown names `npx octocrawl scrape <url>`, which saves it on your computer. A self-hosted `serve --hosted` server keeps its files as before.
 
 ## 0.8.6 — 2026-11-07

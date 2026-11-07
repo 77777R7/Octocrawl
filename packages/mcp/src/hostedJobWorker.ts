@@ -19,7 +19,7 @@ import { createApiEngine, type ApiEngineOptions, type HostedChromeOperator, type
 import { RequestError, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
 import { canonicalizeUrl, CHECKPOINT_FILENAME, foldCheckpoint, hostOf, SqliteTaskStore, webhookSignature, type WebhookTransport } from '@w2l/runtime'
 import { jobEngineOptions, logQuotaThresholds, type HostedLeases } from './hostedApi.js'
-import { CREDITS, scrapeCharge, type CreditsStore, type RequestNote, type Reservation, type UsageKind } from './hostedCredits.js'
+import { CREDITS, scrapeCharge, type CreditsStore, type RequestNote, type Reservation, type UsageKind, CREDITS_RECHECK_SECONDS, secondsToNextGrant } from './hostedCredits.js'
 import type { UploadResult } from './hostedCloud.js'
 import { asksModelFallback, MODEL_REFUSALS, type HostedModel } from './hostedModel.js'
 import { grantedCapabilities, type HostedAccessSource } from './hostedAccess.js'
@@ -84,6 +84,8 @@ export interface JobWorkerDeps {
   engineOptions?: () => Partial<ApiEngineOptions>
   /** A directory the worker may write task directories in. */
   workRoot: string
+  /** The operator's trial pack (W2L_TRIAL_CREDITS): credits added to an account once, the first time a job of its finds the credits used up. Absent or 0: none. */
+  trialCredits?: number
   limits?: Partial<WorkerLimits>
   log?: (line: string) => void
   now?: () => Date
@@ -96,6 +98,8 @@ export interface SliceOutcome { status: 200 | 500 | 503; outcome: string }
 /** Attempts at a job's webhook before it is recorded failed: about 20 minutes of the queue's backoff (10 s doubling to 10 min). */
 export const WEBHOOK_MAX_ATTEMPTS = 8
 const WEBHOOK_TIMEOUT_MS = 30_000
+/** When the next month's grant comes: 00:00 UTC on the 1st. */
+function nextGrantAt(now: Date): string { return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString() }
 const WEBHOOK_RETRYABLE = (status: number) => status === 408 || status === 425 || status === 429 || status >= 500
 
 /** Pages a slice may store past its limit: the engine's workers (JOB_WORKER_COUNT) less one. */
@@ -240,14 +244,31 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
       pages = left <= reservedPages ? left : Math.max(1, reservedPages - SLICE_HEADROOM)
       reserved = await deps.credits.reserve(job.uid, reservedPages * price, pools(reservedPages), now(), reservationId)
     }
+    // The account's first wall may bring the operator's trial pack: added once, by the account's id (or by another slice or
+    // call a moment ago, whose credits this slice sees), and the slice asks again.
+    if (!reserved.ok && reserved.limited === 'credits' && (deps.trialCredits ?? 0) > 0) {
+      const trial = await deps.credits.topUp(job.uid, deps.trialCredits!, `trial-${job.uid}`, now())
+      if (trial.added) line('hosted_job_trial_credits', { amount: deps.trialCredits })
+      if (trial.added || trial.remaining >= price) reserved = await deps.credits.reserve(job.uid, reservedPages * price, pools(reservedPages), now(), reservationId)
+      if (!reserved.ok && reserved.limited === 'credits' && reserved.remaining >= price) {
+        reservedPages = Math.floor(reserved.remaining / price)
+        pages = left <= reservedPages ? left : Math.max(1, reservedPages - SLICE_HEADROOM)
+        reserved = await deps.credits.reserve(job.uid, reservedPages * price, pools(reservedPages), now(), reservationId)
+      }
+    }
     if (!reserved.ok) {
       if (reserved.limited === 'quota') {
         line('hosted_job_daily_pool', { pool: reserved.id })
         const paused = { pool: reserved.id === `${day}-jobs` ? 'all' as const : 'account' as const, limit: reserved.limit, until: new Date(nextUtcMidnight(now())).toISOString() }
         return await pass((j) => ({ ...unchanged(j), paused }), secondsToUtcMidnight(now()))
       }
-      const reason = reserved.limited === 'account' ? 'account_deleted' : 'credits_exhausted'
-      return await pass((j) => ({ ...j, status: 'failed', failureReason: reason }))
+      if (reserved.limited === 'account') return await pass((j) => ({ ...j, status: 'failed', failureReason: 'account_deleted' }))
+      // The credits are used up: the job waits for them, as it waits for the day's pool, instead of failing with what it
+      // read (`credits_exhausted`, until 2026-11-07). It asks again every CREDITS_RECHECK_SECONDS, so credits added by hand
+      // get it going within the day, and at the latest when the month's grant comes; its status says so and where more come from.
+      line('hosted_job_credits_paused', { remaining: reserved.remaining, needs: price })
+      const paused = { pool: 'credits' as const, limit: price, until: nextGrantAt(now()) }
+      return await pass((j) => ({ ...unchanged(j), paused }), Math.min(secondsToNextGrant(now()), CREDITS_RECHECK_SECONDS))
     }
     logQuotaThresholds(pools(reservedPages), reserved.counts, day, log)
     // Until the slice commits it read nothing it can be held to: a slice that dies gives all of it back.

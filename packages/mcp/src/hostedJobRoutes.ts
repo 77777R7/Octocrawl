@@ -6,6 +6,7 @@
  */
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { CREDITS_RECHECK_SECONDS, MORE_CREDITS_HINT } from './hostedCredits.js'
 import { gunzipSync } from 'node:zlib'
 import { batchFloorSeconds, batchRate, CRAWL_SCOPE_KEYS, evaluateHostname, hostedNetworkPolicy, hostedVerifyRefusal, parseBatchStartRequest, parseCrawlPageFields, parseCrawlStartRequest, projectCrawlPage, readWebhook, RequestError, type CrawlPageField, type JobPause, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
 import type { CreditsStore } from './hostedCredits.js'
@@ -43,6 +44,12 @@ export function readHostedWebhook(value: unknown): Omit<HostedJobWebhook, 'secre
 function jobPause(job: HostedJob, nowMs: number): JobPause | null {
   const paused = job.paused
   if (paused === undefined || paused === null || (job.status !== 'queued' && job.status !== 'running') || Date.parse(paused.until) <= nowMs) return null
+  if (paused.pool === 'credits') {
+    return {
+      reason: 'credits', limit: paused.limit, resumesAt: paused.until,
+      message: `This account's credits are used up, and the job's next page needs ${paused.limit}. The job keeps what it read and goes on by itself when the monthly credits come back at ${paused.until}, or within ${CREDITS_RECHECK_SECONDS / 3_600} hours once more are added: nothing is lost, no credit is spent while it waits, and it need not be cancelled. ${MORE_CREDITS_HINT}.`,
+    }
+  }
   const whose = paused.pool === 'account' ? 'This account has' : 'All accounts together have'
   return {
     reason: paused.pool === 'account' ? 'account_daily_pages' : 'daily_pages', limit: paused.limit, resumesAt: paused.until,

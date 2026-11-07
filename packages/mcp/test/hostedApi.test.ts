@@ -1016,6 +1016,7 @@ it('an account with fewer credits than a browser page reads over HTTP alone, and
   expect(refusal.code).toBe('quota_exhausted')
   expect(refusal.error).toContain('credits are used up')
   expect(refusal.agentHints.join(' ')).toContain('on the 1st')
+  expect(refusal.agentHints.join(' ')).toContain('hello@octocrawl.dev')
 })
 
 it('an account\'s MCP tool calls spend its credits through the same gate, and a server without a ledger refuses its key', async () => {

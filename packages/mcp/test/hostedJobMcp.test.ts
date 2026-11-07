@@ -265,6 +265,11 @@ describe('hosted job tools over MCP', () => {
     const paused = { reason: 'account_daily_pages', limit: 2_000, resumesAt: until, message: expect.stringContaining('need not be cancelled') }
     expect(structured(await client.callTool({ name: 'get_batch', arguments: { id } })).paused).toEqual(paused)
     expect(structured(await client.callTool({ name: 'wait_batch', arguments: { id, timeoutMs: 1 } })).paused).toEqual(paused)
+    // A job waiting for credits says so too, and where more come from.
+    store.jobs.set(id, { ...store.jobs.get(id)!, status: 'running', paused: { pool: 'credits', limit: 1, until } })
+    const credits = structured(await client.callTool({ name: 'get_batch', arguments: { id } })).paused as { reason: string; message: string }
+    expect(credits).toMatchObject({ reason: 'credits', limit: 1, resumesAt: until })
+    expect(credits.message).toContain('hello@octocrawl.dev')
   })
 
   it('measures a hosted batch\'s rate from its first slice, not from its wait in the queue, and says none for a crawl or a job that ended', () => {
