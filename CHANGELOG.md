@@ -32,6 +32,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **The page that asks you to allow sites shows its text in a dark Chrome.** The page Octocrawl opens in your Chrome before it reads there set a dark text colour and no background, so a dark Chrome showed two buttons on black, with the task and the sites invisible. It now has its own background, looks like octocrawl.dev, with Octocrawl and Chrome joined at the top and a glyph sea rolling below, and says how many sites it is asking for. What it asks, and what its buttons do, did not change.
+
 ## 0.8.7 — 2026-11-07
 
 The published packages at 0.8.7. **A page behind a login now says what to do:** the hint and the MCP instructions tell an agent to ask the person first, naming the site, and give the routes this server has, the person's signed-in Chrome among them. A page read with your login that shows what a reader without one sees carries `sign_in_prompt` and reads as `not_served`, where it was `success`, so a session that lapsed mid-run shows. A finished job says where every page is, a hosted job reads 8 pages at once and waits for credits instead of failing, and a batch waits out a site's limit on rate.

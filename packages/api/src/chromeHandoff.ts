@@ -37,6 +37,7 @@ import { extractTf } from '@w2l/extract-tf'
 import { classifyGate, type GateVerdict } from '@w2l/http-core'
 import { isLoginPath, LOADING_PROBE, REGION_WAIT_MAX_MS, RegionTracker, sessionCoversHost, STEADY_WAIT_MAX_MS, type RegionSpec, type SteadyOutcome, type UserBrowserRead } from '@w2l/bench'
 import { chromeEndpoint, chromeUserDataDir, ChromeLoginError, connectCdp, type CdpConnection } from './chromeLogin.js'
+import { scopePage } from './scopePage.js'
 
 export interface UserChromeOptions {
   /** Chrome's user data directory; default the stable channel's for this OS. */
@@ -270,23 +271,6 @@ function isAborted(signal: AbortSignal | undefined): boolean {
 
 /** The page's answer: `allowed` or `revoked` once the person clicked, else empty. */
 const ANSWER = `document.documentElement.dataset.octocrawl || ''`
-
-/** The page that asks the person to allow the sites, written into a blank tab of their Chrome. */
-function scopePage(scope: SiteScope): string {
-  const escape = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
-  const sites = scope.hosts.map((host) => `<li><code>${escape(host)}</code></li>`).join('')
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Octocrawl asks to read pages</title>
-<style>body{font:15px/1.5 system-ui,sans-serif;max-width:40rem;margin:3rem auto;padding:0 1rem;color:#111}button{font:inherit;padding:.5rem 1rem;margin-right:.5rem}#state{margin-top:1rem;font-weight:600}</style></head>
-<body><h1>Octocrawl asks to read pages in this Chrome</h1>
-<p>Task: ${escape(scope.task)}</p><p>Sites it may read, signed in as you where you are:</p><ul>${sites}</ul>
-<p>It reads only pages on these sites, only while this page stays open. A page that shows a check waits for you.</p>
-<button id="allow">Allow reading these sites</button><button id="revoke">Revoke</button><p id="state"></p>
-<script>
-const root = document.documentElement, state = document.getElementById('state')
-document.getElementById('allow').onclick = () => { if (root.dataset.octocrawl !== 'revoked') { root.dataset.octocrawl = 'allowed'; state.textContent = 'Allowed. Close this page or click Revoke to stop.' } }
-document.getElementById('revoke').onclick = () => { root.dataset.octocrawl = 'revoked'; state.textContent = 'Revoked. Octocrawl reads nothing more here.' }
-</script></body></html>`
-}
 
 async function allowSites(connection: CdpConnection, scope: SiteScope, options: { waitMs?: number; pollMs?: number; signal?: AbortSignal; log?: ApprovalLog }): Promise<AllowedSites> {
   const waitMs = options.waitMs ?? 600_000
