@@ -98,7 +98,7 @@ describe('hosted job tools over MCP', () => {
     const instructions = (await connect('oc_account')).getInstructions() ?? ''
     expect(instructions).toMatch(/Crawls and batches run here as jobs/)
     expect(instructions.length).toBeLessThan(2_000)
-    expect((await connect(null)).getInstructions()).toMatch(/Crawls, batches, Monitors and saved logins run on a server on the person's computer/)
+    expect((await connect(null)).getInstructions()).toMatch(/Crawls, batches and Monitors run on a server on the person's computer/)
     // A connection without the browser lane is not offered what needs it.
     const http = (await (await connect('oc_http')).listTools()).tools.find((tool) => tool.name === 'batch_scrape')!
     expect((http.inputSchema as { properties: Record<string, unknown> }).properties).not.toHaveProperty('waitFor')

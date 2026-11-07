@@ -52,7 +52,7 @@ export function serverInstructions(toolNames: Iterable<string>, surface: Instruc
     if (has('scrape')) {
       lines.push(surface.readOnly === true
         ? 'This server is read-only: its tools only read, and scrape takes no actions, lane, handoff or mode authed, so nothing runs as the person.'
-        : 'lane my-browser, handoff and mode authed read pages in the person\'s own Chrome or with their saved login: ask the person first and name the site.')
+        : 'A login wall Octocrawl recognises comes back blocked (login_wall). lane my-browser, handoff and mode authed read as them, in their own Chrome or with their saved login: ask the person first, naming the site, and say when a page was read as them. A yes covers that site for this conversation.')
       lines.push('fastMode: true reads over HTTP alone; waitFor above 0 starts in the browser, for a page known to need scripts.')
     }
     if (has('scrape', 'map')) lines.push('If this server\'s API is hosted Octocrawl (api.octocrawl.dev) rather than npx octocrawl serve on this computer, only scrape and map run there.')
@@ -72,8 +72,8 @@ export function serverInstructions(toolNames: Iterable<string>, surface: Instruc
       lines.push(`${spends} ${lane}`)
     }
     lines.push(has('crawl', 'batch_scrape')
-      ? 'Crawls and batches run here as jobs on the account, a slice at a time: at most 500 pages a crawl, 1,000 URLs a batch, each page priced as a scrape, results kept 7 days. Monitors and saved logins run on a server on the person\'s computer: npx octocrawl serve.'
-      : 'Crawls, batches, Monitors and saved logins run on a server on the person\'s computer: npx octocrawl serve.')
+      ? 'Crawls and batches run here as jobs on the account, a slice at a time: at most 500 pages a crawl, 1,000 URLs a batch, each page priced as a scrape, results kept 7 days. Monitors and logins need a local server, not this one: npx octocrawl serve; ask first, naming the site.'
+      : 'Crawls, batches and Monitors run on a server on the person\'s computer: npx octocrawl serve. So do logins, on that server and not through this one: ask first, naming the site.')
   }
   return lines.join('\n\n')
 }
