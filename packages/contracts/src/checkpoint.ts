@@ -162,8 +162,8 @@ export interface HostPacing {
 /**
  * How a task paces a host that pushed back (AIMD): two soft-block signals in a row (a 429 or 503, a challenge page, a page
  * delivered in place of the one asked for, a failed task contract) hold the host to one page at a time and double the
- * wait between page starts (2 s the first time, at most 120 s); every ten normal pages in a row halve the wait, and at the
- * baseline the host's ceiling comes back. Signals come from the pages' results alone, never from a guess about the site.
+ * wait between page starts (2 s the first time, at most 120 s); every ten normal pages in a row halve the wait, down to
+ * `floorMs` when a page sent away has come back, and at the baseline the host's ceiling comes back. Signals come from the pages' results alone, never from a guess about the site.
  */
 export interface AdaptivePacing {
   /** Pages in flight at once on the host while slowed: 1. */
@@ -178,6 +178,10 @@ export interface AdaptivePacing {
   slowdowns: number
   /** The signal behind every slowdown of this pace; absent when two signals share it, or on a pace stored before it was kept. */
   cause?: string
+  /** A normal page was read since the last slowdown: the next one is a new push back, not the same one going on. */
+  normalSince?: boolean
+  /** The shortest wait the pace eases to, ms: the wait in force when a page sent away came back. Absent until one has. */
+  floorMs?: number
 }
 
 /**

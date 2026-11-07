@@ -26,6 +26,18 @@ export const FIRST_SLOW_DELAY_MS = 2_000
 /** The longest wait a slowdown sets, ms. */
 export const MAX_SLOW_DELAY_MS = 120_000
 /**
+ * How long a host that sent two pages up in a row is left alone, ms. A limit on rate answers that way for a while, whatever
+ * is read: 45 s or so on www.english.ids-cologne.de (2026-11-07, eight times in 272 pages), where a read inside that time
+ * came back the same, however often it was tried. One page sent up costs no such wait: it may be that page alone.
+ */
+export const BLOCK_HOLD_MS = 60_000
+/**
+ * The longest wait taken for a host's limit on rate, ms: www.english.ids-cologne.de never pushed back at it, in 272 pages. A
+ * page that comes back is a sign of such a limit and no proof: a site that sends pages up at random gives the same sign, and
+ * this is what that site pays, 450 pages an hour. A limit tighter than this is still waited out, one hold at a time.
+ */
+export const MAX_FLOOR_MS = 8_000
+/**
  * The wait at which a signal that may have nothing to do with pace can stop counting, ms. A host slowed to it has had
  * more than a minute of slow reading. If a page read again still answers the same, the pace is not why, where a limit on rate clears
  * (www.english.ids-cologne.de, 2026-11-04: pages came back after about 40 s). Once settled the signal is not looked at

@@ -44,7 +44,7 @@ import { DEFAULT_NETWORK_POLICY, type AdaptivePacing, type HostPacing } from '@w
 import { hostMatchesAllowlist } from '@w2l/http-core'
 import { canonicalizeUrl, hostOf, visitKey } from './canonicalize.js'
 import { compilePathFilter, type PathFilter } from './pathFilter.js'
-import { FIRST_SLOW_DELAY_MS, MAX_SLOW_DELAY_MS, OK_PAGES_TO_RECOVER, SETTLE_DELAY_MS, SETTLING_SIGNALS, SIGNALS_TO_SLOW, type SoftBlockSignal } from './pacing.js'
+import { BLOCK_HOLD_MS, FIRST_SLOW_DELAY_MS, MAX_FLOOR_MS, MAX_SLOW_DELAY_MS, OK_PAGES_TO_RECOVER, SETTLE_DELAY_MS, SETTLING_SIGNALS, SIGNALS_TO_SLOW, type SoftBlockSignal } from './pacing.js'
 
 export interface FrontierItem {
   url: string
@@ -333,18 +333,21 @@ export class Frontier {
 
   /**
    * A page on `host` ended with `signal` (null: a normal page). The second signal in a row slows the host: one page at a
-   * time, the wait doubled (2 s the first time, at most 120 s) and the host left alone for that wait from `nowMs`. Ten
-   * normal pages in a row halve the wait; at the baseline the host runs as the policy allows again. `readAgain`: the page
-   * answered the same on its read before; at SETTLE_DELAY_MS, a wait this signal alone set, that ends the signal on the host. The change, if any.
+   * time, the wait doubled (2 s the first time, at most 120 s) and the host left alone for that wait from `nowMs`, or for
+   * BLOCK_HOLD_MS when pages sent away start a new push back. Ten normal pages in a row halve the wait; at the baseline the
+   * host runs as the policy allows again. `earlier`: what the page's read before this one answered. The same again, at
+   * SETTLE_DELAY_MS, a wait this signal alone set, ends the signal on the host. A page sent away that now answers normally on a
+   * slowed host is taken for a limit on rate, not a page gone: the wait in force becomes the host's floor (`floorMs`, at most
+   * MAX_FLOOR_MS), and halving stops there, so the run does not walk back into the limit. The change, if any.
    */
-  noteResult(host: string, signal: SoftBlockSignal | null, nowMs: number, readAgain = false): PacingChange | null {
+  noteResult(host: string, signal: SoftBlockSignal | null, nowMs: number, earlier: SoftBlockSignal | null = null): PacingChange | null {
     // A signal that stopped counting is no news either way: not a push back, and not a normal page.
     if (signal !== null && this.settled(host, signal)) return null
     const current = this.adaptive.get(host)
     if (signal !== null) {
       // Slowed this far by this signal, and the page itself, read again, still the same: the pace is not why. A page that
       // came back, or one that only reports the signal for the first time, says nothing of the kind.
-      if (readAgain && SETTLING_SIGNALS.has(signal) && current !== undefined && current.cause === signal && current.delayMs >= SETTLE_DELAY_MS) {
+      if (earlier === signal && SETTLING_SIGNALS.has(signal) && current !== undefined && current.cause === signal && current.delayMs >= SETTLE_DELAY_MS) {
         this.settledSignals.set(host, new Set([...(this.settledSignals.get(host) ?? []), signal]))
         this.adaptive.delete(host)
         this.cooldownUntilMs.delete(host)
@@ -357,10 +360,12 @@ export class Frontier {
         return null
       }
       const delayMs = Math.min(MAX_SLOW_DELAY_MS, Math.max(FIRST_SLOW_DELAY_MS, (current?.slowdowns ?? 0) === 0 ? 0 : (current?.delayMs ?? 0) * 2))
-      const untilMs = nowMs + delayMs
+      // A slowdown with no normal page since the last one is the same push back going on: its hold has been sat out.
+      const newPushBack = (current?.slowdowns ?? 0) === 0 || current?.normalSince === true
+      const untilMs = nowMs + (signal === 'redirected_off_page' && newPushBack ? Math.max(delayMs, BLOCK_HOLD_MS) : delayMs)
       // The wait is this signal's alone only while every slowdown was.
       const cause = (current?.slowdowns ?? 0) === 0 || current?.cause === signal ? { cause: signal } : {}
-      this.adaptive.set(host, { ceiling: 1, delayMs, signals: 0, okStreak: 0, slowdowns: (current?.slowdowns ?? 0) + 1, ...cause })
+      this.adaptive.set(host, { ceiling: 1, delayMs, signals: 0, okStreak: 0, slowdowns: (current?.slowdowns ?? 0) + 1, ...cause, ...(current?.floorMs === undefined ? {} : { floorMs: current.floorMs }) })
       this.cooldownUntilMs.set(host, Math.max(this.cooldownUntilMs.get(host) ?? 0, untilMs))
       return { host, change: 'slowed', signal, ceiling: 1, delayMs, untilMs }
     }
@@ -371,17 +376,20 @@ export class Frontier {
       return null
     }
     const okStreak = current.okStreak + 1
+    const floorMs = earlier === 'redirected_off_page' ? Math.max(current.floorMs ?? 0, Math.min(current.delayMs, MAX_FLOOR_MS)) : current.floorMs
+    const floor = floorMs === undefined ? {} : { floorMs }
     if (okStreak < OK_PAGES_TO_RECOVER) {
-      this.adaptive.set(host, { ...current, signals: 0, okStreak })
+      this.adaptive.set(host, { ...current, signals: 0, okStreak, normalSince: true, ...floor })
       return null
     }
     const baseline = this.baselineDelayMs(host)
-    const delayMs = Math.max(baseline, Math.floor(current.delayMs / 2))
+    const delayMs = Math.max(baseline, floorMs ?? 0, Math.floor(current.delayMs / 2))
     if (delayMs <= baseline) {
       this.adaptive.delete(host)
       return { host, change: 'restored', signal: null, ceiling: this.perHostConcurrency, delayMs: baseline }
     }
-    this.adaptive.set(host, { ...current, delayMs, signals: 0, okStreak: 0 })
+    this.adaptive.set(host, { ...current, delayMs, signals: 0, okStreak: 0, normalSince: true, ...floor })
+    if (delayMs === current.delayMs) return null
     return { host, change: 'eased', signal: null, ceiling: current.ceiling, delayMs }
   }
 
