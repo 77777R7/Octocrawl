@@ -26,7 +26,7 @@ export interface McpServerOptions {
   /** A line added after the instructions: what the server found at start (its API not answering) that the first call will meet. */
   instructionsNote?: string
   /** Told each tool call's end: the tool, how long it took, whether its answer was cut to the budget, and whether it ended as a tool error (hosted's `hosted_mcp_call` line). */
-  onCall?: (call: { tool: string; ms: number; truncated: boolean; error: boolean }) => void
+  onCall?: (call: { tool: string; ms: number; truncated: boolean; error: boolean; failure?: unknown }) => void
   /** Said after "this server offers ..." when a client calls a tool this deployment leaves out: where the tool does run, or how to list it. */
   unavailableHint?: string | ((tool: string) => string | undefined)
   /** The API this server calls, named when it cannot be reached (a local server's base URL). */
@@ -112,7 +112,7 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
       let contract: VerifyContract | undefined
       let progress: ProgressReporter | undefined
       const startedAt = Date.now()
-      const told = (truncated: boolean, error: boolean): void => { try { options.onCall?.({ tool: request.params.name, ms: Date.now() - startedAt, truncated, error }) } catch { /* the observer's own fault */ } }
+      const told = (truncated: boolean, error: boolean, failure?: unknown): void => { try { options.onCall?.({ tool: request.params.name, ms: Date.now() - startedAt, truncated, error, ...(failure === undefined ? {} : { failure }) }) } catch { /* the observer's own fault */ } }
       try {
         options.authorizeCall?.(request.params.name,request.params.arguments ?? {})
         const args = options.normalizeCall?.(request.params.name, request.params.arguments ?? {}) ?? request.params.arguments ?? {}
@@ -136,7 +136,7 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
         if (signal.aborted) throw requestCancelled()
         if (error instanceof Error && error.message.startsWith('unknown tool: ')) throw withErrorCode(error)
         // A call that did not run is a tool result the client hands the model (docs/mcp-client-ux-tasks.md W5).
-        told(false, true)
+        told(false, true, error)
         return toolErrorResult(error, request.params.name, options.apiUrl)
       }
       if (signal.aborted) throw requestCancelled()

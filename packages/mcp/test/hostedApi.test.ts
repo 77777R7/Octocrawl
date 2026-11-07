@@ -1767,3 +1767,59 @@ it('logs who was refused and why, each MCP call by tool, and the caller on a pha
   // The address's HMAC is cut to the 16 characters the other lines log, never the whole digest.
   expect(String(refusals[0]!.pool)).toMatch(/^keyless-[0-9a-f]{16}$/)
 })
+
+it('logs which field a 400 named and every 4xx the inner API answers, never a value sent (2026-11-05 audit: invalid_request did not say which field)', async () => {
+  const lines: string[] = []
+  const { url } = await start({ keylessDaily: 100, log: (line) => lines.push(line) })
+  const refusals = () => lines.flatMap((line) => { try { return [JSON.parse(line) as Record<string, unknown>] } catch { return [] } }).filter((line) => line.event === 'hosted_refused')
+  const refused = async (path: string, body: unknown) => {
+    lines.length = 0
+    const response = await post(url, path, body)
+    expect(response.status).toBe(400)
+    return { body: await response.json() as Record<string, unknown>, lines: refusals() }
+  }
+
+  const type = await refused('/v1/scrape', { url: `${origin}/page`, waitFor: 'secret-value-1' })
+  expect(type.lines).toEqual([expect.objectContaining({ severity: 'INFO', status: 400, code: 'invalid_request', path: '/v1/scrape', caller: 'keyless', fields: ['waitFor'] })])
+
+  // A key hosted does not know is named as sent, and its value is not; the answer carries the same details as a local server's.
+  const unknown = await refused('/v1/scrape', { url: `${origin}/page`, location: { country: 'secret-value-2' } })
+  expect(unknown.lines).toEqual([expect.objectContaining({ code: 'unsupported_parameter', fields: ['location'] })])
+  expect(unknown.body.details).toEqual({ parameters: ['location'] })
+
+  // A refusal of this server's own, and the map route, whose 400 the inner API writes.
+  const lane = await refused('/v1/scrape', { url: `${origin}/page`, formats: ['screenshot'] })
+  expect(lane.lines).toEqual([expect.objectContaining({ code: 'invalid_request', fields: ['formats'] })])
+  const map = await refused('/v1/map', { url: `${origin}/page`, limit: -1 })
+  expect(map.lines).toEqual([expect.objectContaining({ code: 'invalid_request', path: '/v1/map', fields: ['limit'] })])
+
+  // Nothing to name: the field stays unknown, not empty.
+  lines.length = 0
+  const broken = await fetch(`${url}/v1/scrape`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{' })
+  expect(broken.status).toBe(400)
+  expect(refusals()).toEqual([expect.objectContaining({ code: 'invalid_json', fields: null })])
+
+  // An inner 404 is one line, with no fields; a refusal of the gate's own stays one line too.
+  lines.length = 0
+  expect((await fetch(`${url}/v1/scrapes/no-such-scrape`)).status).toBe(404)
+  expect(refusals()).toEqual([expect.objectContaining({ status: 404, code: 'not_found', path: '/v1/scrapes/no-such-scrape' })])
+  expect(refusals()[0]).not.toHaveProperty('fields')
+  lines.length = 0
+  expect((await fetch(`${url}/v1/monitors`)).status).toBe(403)
+  expect(refusals()).toHaveLength(1)
+
+  // A tool reads its own arguments first: what it refuses never reaches the gate, and its call's line says which field.
+  lines.length = 0
+  const transport = new StreamableHTTPClientTransport(new URL(`${url}/mcp`))
+  const client = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
+  try {
+    await client.connect(transport)
+    const result = await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page`, maxFileBytes: 'secret-value-3' } })
+    expect(result.isError).toBe(true)
+  } finally { await client.close() }
+  expect(refusals()).toEqual([])
+  const calls = lines.flatMap((line) => { try { return [JSON.parse(line) as Record<string, unknown>] } catch { return [] } }).filter((line) => line.event === 'hosted_mcp_call')
+  expect(calls).toEqual([expect.objectContaining({ tool: 'scrape', error: true, fields: ['maxFileBytes'] })])
+  expect(calls[0]).not.toHaveProperty('failure')
+  expect(lines.join('\n')).not.toMatch(/secret-value/)
+})

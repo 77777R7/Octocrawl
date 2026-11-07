@@ -769,7 +769,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: T
     const rec = args !== null && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : null
     const id = rec?.id
     if (typeof id !== 'string' || id.length === 0) throw new RequestError('id is required')
-    return client.getCrawl(id, request)
+    return withResultsHint('get_crawl', await client.getCrawl(id, request))
   }
   if (name === 'get_crawl_pages' || name === 'get_crawl_errors') {
     const input = readCrawlQuery(args)
@@ -826,19 +826,45 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: T
   if (name === 'get_batch' || name === 'wait_batch' || name === 'cancel_batch') {
     const rec = args !== null && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : null
     if (typeof rec?.id !== 'string' || !rec.id) throw new RequestError('id is required')
-    if (name === 'get_batch') return client.getBatch(rec.id, request)
+    if (name === 'get_batch') return withResultsHint('get_batch', await client.getBatch(rec.id, request))
     if (name === 'cancel_batch') return client.cancelBatch(rec.id, request)
-    return waitForTask('wait_batch', rec, request, (options) => client.waitBatch(rec.id as string, options), () => client.getBatch(rec.id as string, request),
-      (report) => { const batch = report as CrawlReport & { completed?: number; requested?: number }; return typeof batch.completed === 'number' ? { progress: batch.completed, ...(typeof batch.requested === 'number' ? { total: batch.requested } : {}), message: `${batch.completed}${typeof batch.requested === 'number' ? `/${batch.requested}` : ''} pages done` } : null })
+    return withResultsHint('wait_batch', await waitForTask('wait_batch', rec, request, (options) => client.waitBatch(rec.id as string, options), () => client.getBatch(rec.id as string, request),
+      (report) => { const batch = report as CrawlReport & { completed?: number; requested?: number }; return typeof batch.completed === 'number' ? { progress: batch.completed, ...(typeof batch.requested === 'number' ? { total: batch.requested } : {}), message: `${batch.completed}${typeof batch.requested === 'number' ? `/${batch.requested}` : ''} pages done` } : null }))
   }
   if (name === 'wait_crawl') {
     const rec = readRecord(args)
     if (typeof rec.id !== 'string' || !rec.id) throw new RequestError('id is required')
-    return waitForTask('wait_crawl', rec, request, (options) => client.waitCrawl(rec.id as string, options), () => client.getCrawl(rec.id as string, request),
-      (report) => ({ progress: report.pagesFetched, message: `${report.pagesFetched} pages fetched` }))
+    return withResultsHint('wait_crawl', await waitForTask('wait_crawl', rec, request, (options) => client.waitCrawl(rec.id as string, options), () => client.getCrawl(rec.id as string, request),
+      (report) => ({ progress: report.pagesFetched, message: `${report.pagesFetched} pages fetched` })))
   }
   if ((TOOL_NAMES as readonly string[]).includes(name)) return callMonitorTool(client,name,readRecord(args),request)
   throw new RequestError(`unknown tool: ${name}`)
+}
+
+/**
+ * A job's status with the hint that says where its every page is, once it has ended: the files a server on the person's
+ * computer wrote (`resultFiles`), or a hosted job's download link (`export`). A status without either, a job still
+ * running among them, is answered as it came.
+ */
+function withResultsHint(name: 'get_batch' | 'wait_batch' | 'get_crawl' | 'wait_crawl', status: unknown): unknown {
+  if (status === null || typeof status !== 'object') return status
+  const { resultFiles, export: download, agentHints } = status as { resultFiles?: { jsonl?: unknown; csv?: unknown }; export?: { url?: unknown; expiresInSeconds?: unknown }; agentHints?: unknown }
+  const pages = name.endsWith('crawl') ? 'get_crawl_pages' : 'get_batch_items'
+  const read = name.endsWith('crawl') ? 'get_crawl' : 'get_batch'
+  const hint = typeof resultFiles?.jsonl === 'string' && typeof resultFiles.csv === 'string'
+    ? `every page is on this computer: ${resultFiles.jsonl} (a page a line, as ${pages} lists them) and ${resultFiles.csv} (a row a page, its evidence columns); ${pages} reads a few at a time`
+    : typeof download?.url === 'string' && typeof download.expiresInSeconds === 'number'
+      ? `every page read so far downloads at export.url: one gzip JSONL file, a page a line, as ${pages} lists them; the link is good for ${linkLife(download.expiresInSeconds)}, and ${read} gives a fresh one; ${pages} reads a few at a time`
+      : null
+  if (hint === null) return status
+  return { ...status, agentHints: [...(Array.isArray(agentHints) ? agentHints : []), hint] }
+}
+
+/** How long a link lives, in the unit that reads well: hours from one hour, minutes below. */
+function linkLife(seconds: number): string {
+  if (seconds >= 3_600) { const hours = Math.round(seconds / 3_600); return `${hours} hour${hours === 1 ? '' : 's'}` }
+  const minutes = Math.max(1, Math.round(seconds / 60))
+  return `${minutes} minute${minutes === 1 ? '' : 's'}`
 }
 
 /**

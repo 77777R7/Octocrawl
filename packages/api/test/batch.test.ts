@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer, type Server } from 'node:http'
@@ -10,6 +11,7 @@ import { buildChannels } from '@w2l/bench'
 import { W2L, type BatchAccepted } from '@w2l/sdk'
 import { createApp } from '../src/app.js'
 import { createApiEngine, type ApiEngine, type ApiEngineOptions } from '../src/engine.js'
+import { RESULT_COLUMNS } from '../src/resultFiles.js'
 
 describe('persistent URL-array batch', () => {
   const cleanup: Array<() => Promise<void>> = []
@@ -497,6 +499,52 @@ describe('persistent URL-array batch', () => {
     expect(moved.evidenceRecord).toMatchObject({ finalUrl: `${f.origin}/`, redirectChain: { urls: [`${f.origin}/moved/2`, `${f.origin}/`] } })
     expect(moved.agentHints?.some((hint) => hint.includes(`in place of ${f.origin}/moved/2`))).toBe(true)
     expect(items.find((item) => item.url === `${f.origin}/item/1`)).toMatchObject({ status: 'success', readiness: { state: 'ready' } })
+  })
+
+  it('writes results.jsonl and results.csv beside the checkpoint when a batch ends, names them in its status, and not before', async () => {
+    const f = await fixture()
+    const engine = f.engine()
+    cleanup.push(() => engine.close())
+    const { client: w2l } = client(engine)
+    const accepted = await w2l.batchScrape([`${f.origin}/item/1`, `${f.origin}/missing/2`, `${f.origin}/moved/3`])
+    const report = await w2l.waitBatch(accepted.taskId)
+    expect(report.status).toBe('completed')
+    const dir = join(f.root, accepted.taskId)
+    expect(report.resultFiles).toEqual({ jsonl: join(dir, 'results.jsonl'), csv: join(dir, 'results.csv') })
+    // A page a line, as get_batch_items lists them: the failed page too, without its trace.
+    const lines = (await readFile(join(dir, 'results.jsonl'), 'utf8')).split('\n').filter((line) => line.length > 0)
+    expect(lines).toHaveLength(3)
+    const pages = lines.map((line) => JSON.parse(line) as { url: string; status: string; markdown?: string; trace?: unknown[]; evidenceRecord?: { finalUrl: string } })
+    expect(pages.map((page) => page.status).sort()).toEqual(['failed', 'success', 'success'])
+    expect(pages.find((page) => page.url === `${f.origin}/item/1`)?.markdown).toContain('Fixture item 1')
+    expect(pages.every((page) => page.trace === undefined || page.trace.length === 0)).toBe(true)
+    // One row a page, the CLI's evidence columns without the Markdown file it alone writes.
+    const csv = (await readFile(join(dir, 'results.csv'), 'utf8')).split('\r\n').filter((line) => line.length > 0)
+    expect(csv[0]).toBe(RESULT_COLUMNS.join(','))
+    expect(csv).toHaveLength(4)
+    const rows = csv.slice(1).map((line) => Object.fromEntries(line.split(',').map((value, i) => [RESULT_COLUMNS[i], value])))
+    expect(rows.find((row) => row.url === `${f.origin}/moved/3`)).toMatchObject({ status: 'success', final_url: `${f.origin}/`, http_status: '200' })
+    expect(rows.find((row) => row.url === `${f.origin}/missing/2`)).toMatchObject({ status: 'failed', http_status: '404' })
+    // A batch still running names no files.
+    f.setSlow(true)
+    const running = await w2l.batchScrape([`${f.origin}/item/2`])
+    await new Promise<void>((resolve) => f.setStarted(resolve))
+    expect((await w2l.getBatch(running.taskId)).resultFiles).toBeUndefined()
+    expect(existsSync(join(f.root, running.taskId, 'results.jsonl'))).toBe(false)
+    f.release()
+    expect((await w2l.waitBatch(running.taskId)).resultFiles).toBeDefined()
+  })
+
+  it('writes no result files on a hosted engine, which keeps no files', async () => {
+    const f = await fixture()
+    const engine = f.engine({ hosted: true, noFileStore: true })
+    cleanup.push(() => engine.close())
+    const { client: w2l } = client(engine)
+    const accepted = await w2l.batchScrape([`${f.origin}/item/1`])
+    const report = await w2l.waitBatch(accepted.taskId)
+    expect(report.status).toBe('completed')
+    expect(report.resultFiles).toBeUndefined()
+    expect(existsSync(join(f.root, accepted.taskId, 'results.jsonl'))).toBe(false)
   })
 
   it('counts every read page that is not the page asked for, and names each beside the errors, which stay the items that failed', async () => {
