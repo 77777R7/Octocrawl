@@ -8,6 +8,13 @@ import type { VerifyContract } from './verify.js'
 export interface ExecutionContext {
   signal?: AbortSignal
   deadlineAt?: number
+  /** The deadline a held deadline may not move past when released (the task's), when the context is a page's scope. */
+  deadlineCeilingAt?: number
+  /**
+   * Stop the deadline's clock until the release is called, and move the deadline on by the time held (createExecutionScope):
+   * a wait that is not the page's own, for a browser slot, does not spend the page's timeout. Absent on a plain context.
+   */
+  holdDeadline?: () => () => number | undefined
   /** A page read again after a soft block: from the site, never from the cache, and not kept in it. */
   fresh?: boolean
   /** Persist publisher cooldown immediately, before an interruptible inline wait. */

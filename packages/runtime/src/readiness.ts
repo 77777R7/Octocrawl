@@ -108,6 +108,10 @@ export function readinessOf(result: FetchResult): Readiness {
   if (verification?.status !== 'passed' && result.warnings?.some((warning) => warning.code === 'redirected_off_page')) {
     return readiness('not_served', ['redirected_off_page'], result)
   }
+  // A page read with the person's login that holds its content back behind a sign-in: what a login shows was not served.
+  if (verification?.status !== 'passed' && result.warnings?.some((warning) => warning.code === 'sign_in_prompt')) {
+    return readiness('not_served', ['sign_in_prompt'], result)
+  }
   // A configured pass keeps ADR 0007's semantics. Otherwise an active source outage is not a loading shell.
   if (verification?.status !== 'passed' && sourceUnavailable(result)) return readiness('not_served', ['source_unavailable'], result)
   if (verification !== undefined && verification.status !== 'not_requested') {

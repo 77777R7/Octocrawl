@@ -31,6 +31,13 @@ const read = (html: string, extra: Partial<UserBrowserRead> = {}): UserBrowserRe
 })
 
 describe('a page read in the person\'s browser', () => {
+  it('says when a page read in the person\'s Chrome came without what their login shows', () => {
+    const body = (line: string) => `<!doctype html><html><head><title>Kerr</title></head><body><main><h1>Kerr</h1><p>Balz Zimmermann-Strasse 7, 8302 Kloten, Switzerland, a maker of dental materials with a long list of product groups and sectors.</p><p><strong>${line}</strong></p></main></body></html>`
+    const codes = (line: string) => (pageFromUserBrowser(read(body(line)), null, {}).warnings ?? []).map((warning) => warning.code)
+    expect(codes('Log in for contact details')).toContain('sign_in_prompt')
+    expect(codes('+41 800 303 230')).not.toContain('sign_in_prompt')
+  })
+
   it('says when includeTags selects nothing readable, as any other lane does', () => {
     const page = '<!doctype html><html><head><title>Members</title></head><body><main><h1>Members</h1><p>The harbour office keeps a list of every member and the moorings each one holds through the year.</p></main><script type="application/ld+json">{"name":"Harbour office"}</script></body></html>'
     const codes = (includeTags: string[]) => (pageFromUserBrowser(read(page), null, { includeTags }).warnings ?? []).map((warning) => warning.code)

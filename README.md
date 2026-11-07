@@ -93,6 +93,8 @@ npx octocrawl serve                                  # keep it running: the API 
 claude mcp add octocrawl -- npx -y @octocrawl/mcp    # the published stdio server, a client of that API
 ```
 
+A page behind your own sign-in can often be read here too, with no new login for a site you are already signed in to in Chrome: the agent is told to ask you first, then reads it in that Chrome, or with a login you save. A site can still refuse, and a saved login can expire. Saved logins stay on your computer ([Access](docs/access.md#from-your-side)).
+
 The hosted service offers scrape and map, and with an account crawl and batch jobs. The local server adds larger jobs, the Amazon.sg product tool and the Monitor tools. To serve other machines yourself, `npx octocrawl serve --hosted --token <token>` refuses private addresses, robots overrides and saved logins as the hosted service does. [Running Octocrawl](docs/local-setup.md) covers all three; [Docker Compose](docs/self-host-docker.md) runs one on your own server. An agent installing Octocrawl for you (Cline, for one) can follow [llms-install.md](llms-install.md).
 
 ## What a failure looks like

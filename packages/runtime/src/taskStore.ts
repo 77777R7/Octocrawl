@@ -21,7 +21,7 @@ export const VERIFICATION_COUNTED_STATUSES: readonly StepStatus[] = ['success', 
 /** The statuses of a page read, the ones a batch's `succeeded` counts. */
 export const READ_STATUSES: readonly StepStatus[] = ['success', 'partial', 'empty_verified']
 /** The warnings that make a page read `not_served` whatever else it shows (readiness.ts). */
-export const NOT_SERVED_WARNINGS: readonly string[] = ['source_data_error', 'redirected_off_page']
+export const NOT_SERVED_WARNINGS: readonly string[] = ['source_data_error', 'redirected_off_page', 'sign_in_prompt']
 export interface StepPageQuery {
   attemptId?: string
   cursor?: string

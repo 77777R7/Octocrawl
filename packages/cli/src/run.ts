@@ -245,9 +245,11 @@ function summaryLine(kind: 'crawl' | 'batch', report: CrawlReport, items: readon
   const read = items.filter((item) => CONTENTFUL_STATUS.has(item.status as never) || item.status === 'empty_verified').length
   const notRead = items.length - read
   const offPage = items.filter((item) => item.warnings?.some((warning) => warning.code === 'redirected_off_page')).length
+  const signedOut = items.filter((item) => item.warnings?.some((warning) => warning.code === 'sign_in_prompt')).length
   const parts = [`${report.status}`, `${read.toLocaleString('en-US')} of ${items.length.toLocaleString('en-US')} pages read`]
   if (notRead > 0) parts.push(`${notRead.toLocaleString('en-US')} not read (each item says why, with its agentHints)`)
   if (offPage > 0) parts.push(`${offPage.toLocaleString('en-US')} answered by another page of the site (redirected_off_page)`)
+  if (signedOut > 0) parts.push(`${signedOut.toLocaleString('en-US')} read without your login: sign in again and run them again (sign_in_prompt)`)
   if (onStdout) parts.push('the report and every page are the JSON above (--out <dir> writes them as files)')
   return `octocrawl ${kind}: ${parts.join('; ')}`
 }
