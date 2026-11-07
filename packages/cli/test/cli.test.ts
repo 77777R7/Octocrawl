@@ -39,6 +39,15 @@ describe('flags', () => {
     expect(usage('scrape')).toContain('--handoff')
   })
 
+  it('says in its help how to read a page behind your login, and what each route needs', () => {
+    expect(usage(null)).toContain('A page behind your login: --lane my-browser reads it in the Chrome you are signed in to; --mode authed reads it with a login you saved')
+    for (const command of ['scrape', 'batch'] as const) {
+      expect(usage(command)).toContain('--lane my-browser: for a page behind your login')
+      // The first thing the lane needs, which its own lines did not say.
+      expect(usage(command)).toMatch(/--lane my-browser:[^]*remote debugging on/)
+    }
+  })
+
   it('takes --lane my-browser on a scrape', () => {
     expect(parseCommandLine('scrape', ['https://example.com/', '--lane', 'my-browser']).body).toEqual({ lane: 'my-browser' })
     expect(usage('scrape')).toContain('--lane my-browser')
