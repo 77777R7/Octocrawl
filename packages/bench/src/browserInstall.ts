@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { chromium } from 'playwright'
 import { INSTALLED_CHROME_INSTALL } from './subjects/installedChrome.js'
 
 /** What a machine without the browser runs once, so the browser lane can start: stock Playwright's Chromium. */
@@ -18,4 +21,24 @@ export function browserInstallCommand(engine: 'playwright' | 'patchright' | 'ins
  */
 export function browserNotInstalled(err: unknown): boolean {
   return err instanceof Error && (err.name === 'InstalledChromeMissingError' || /Executable doesn't exist|executable doesn't exist|Please run the following command to download new browsers/.test(err.message))
+}
+
+/**
+ * Whether stock Playwright's Chromium is where the browser lane will look for it: a new `npx octocrawl` install has none
+ * until BROWSER_INSTALL_COMMAND runs, and an update that moves Playwright to a new Chromium build needs it again. False
+ * when Playwright cannot say where it would be.
+ */
+export function playwrightChromiumInstalled(): boolean {
+  try { return chromiumInstalledAt(chromium.executablePath()) } catch { return false }
+}
+
+/**
+ * Whether the browser lane can launch from this build: the full Chromium at `executablePath`, or the headless shell of
+ * the same revision beside it, which is what a headless launch with no channel starts (`npx playwright install
+ * --only-shell chromium` installs it alone). Playwright names no path for the shell, so it is found by its directory.
+ */
+export function chromiumInstalledAt(executablePath: string, exists: (path: string) => boolean = existsSync): boolean {
+  if (exists(executablePath)) return true
+  const build = /^(.*[\\/])chromium-(\d+)[\\/]/.exec(executablePath)
+  return build !== null && exists(join(`${build[1]}chromium_headless_shell-${build[2]}`, 'INSTALLATION_COMPLETE'))
 }
