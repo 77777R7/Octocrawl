@@ -14,7 +14,7 @@
 import { HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, MAX_FILE_BYTES_CEILING, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS } from '@w2l/contracts'
 import { HOSTED_MAX_FILE_BYTES, HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS, HOSTED_MCP_SCRAPE_TIMEOUT_MS, HOSTED_RECORD_TTL_MS, HOSTED_REQUEST_TIMEOUT_MS, hostedTools } from './hostedApi.js'
 import { CREDITS } from './hostedCredits.js'
-import { JOB_DEFAULT_CRAWL_PAGES, JOB_MAX_CRAWL_PAGES, JOB_WORKER_COUNT } from './hostedJobRoutes.js'
+import { JOB_DEFAULT_CRAWL_PAGES, JOB_MAX_CRAWL_PAGES, JOB_BROWSER_PAGES, JOB_WORKER_COUNT } from './hostedJobRoutes.js'
 import { JOB_RETENTION_DAYS } from './hostedJobs.js'
 import { MCP_SCRAPE_TIMEOUT_MS, TOOLS, type ToolName } from './tools.js'
 
@@ -225,7 +225,7 @@ export const OPTION_PARITY: { [N in OptionTool]: Record<OptionOf<N>, OptionEntry
     allowExternalLinks: supported,
     sitemap: supported,
     ignoreRobotsTxt: { status: 'different_on_purpose', note: ROBOTS, sent: 'refused' },
-    maxConcurrency: { status: 'limited', item: 'limits_capacity', note: `At most ${JOB_WORKER_COUNT}, the pages a job's slice reads at once (local: up to the server's worker count, W2L_WORKER_COUNT); the start lowers a larger value to ${JOB_WORKER_COUNT}.`, over: { value: JOB_WORKER_COUNT + 1, sent: 'not_honoured' } },
+    maxConcurrency: { status: 'limited', item: 'limits_capacity', note: `At most ${JOB_WORKER_COUNT}, the pages a job's slice reads at once (local: up to the server's worker count, W2L_WORKER_COUNT); ${JOB_BROWSER_PAGES} of them rendered in a browser at once; the start lowers a larger value to ${JOB_WORKER_COUNT}.`, over: { value: JOB_WORKER_COUNT + 1, sent: 'not_honoured' } },
     idempotencyKey: supported,
     webhook: { status: 'planned', item: 'monitors_delivery', note: WEBHOOK, sent: 'rest_only' },
     ...JOB_PAGE_OPTIONS,
@@ -241,7 +241,7 @@ export const OPTION_PARITY: { [N in OptionTool]: Record<OptionOf<N>, OptionEntry
     ...JOB_PAGE_OPTIONS,
     actions: { status: 'planned', item: 'actions', note: 'Hosted takes no page actions yet; stage H item 3 brings them to keyed callers.', sent: 'refused' },
     robotsOverrides: { status: 'different_on_purpose', note: ROBOTS, sent: 'refused' },
-    maxConcurrency: { status: 'limited', item: 'limits_capacity', note: `At most ${JOB_WORKER_COUNT}, the pages a job's slice reads at once (local: up to the server's worker count, W2L_WORKER_COUNT, with no ceiling in the schema); the start lowers a larger value to ${JOB_WORKER_COUNT}, as a crawl's.`, over: { value: JOB_WORKER_COUNT + 1, sent: 'not_honoured' } },
+    maxConcurrency: { status: 'limited', item: 'limits_capacity', note: `At most ${JOB_WORKER_COUNT}, the pages a job's slice reads at once (local: up to the server's worker count, W2L_WORKER_COUNT, with no ceiling in the schema); ${JOB_BROWSER_PAGES} of them rendered in a browser at once; the start lowers a larger value to ${JOB_WORKER_COUNT}, as a crawl's.`, over: { value: JOB_WORKER_COUNT + 1, sent: 'not_honoured' } },
     retry: supported,
     ignoreInvalidURLs: supported,
     allowExternalLinks: { status: 'planned', item: null, note: 'Locally only false is taken, since a batch follows no link; hosted refuses the field by name.', sent: 'refused' },

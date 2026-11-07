@@ -1,4 +1,5 @@
 import { sourceDataWarnings } from './sourceData.js'
+import type { BrowserKeeper } from './browserKeeper.js'
 import { captureEvent, documentOf, newCapture, newView, selectionView, viewEvent } from '../capture.js'
 import { mergeListPages } from './listMerge.js'
 import { CONTENTFUL_STATUS, estimateTokens, type ListFormatRequest, type ListRecord, type ListRun, type PageAction, fileByteCap, proxyFor, type ContextCookie, type CookieSession, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
@@ -396,6 +397,11 @@ export class BrowserLocalSubject implements SubjectAdapter {
      * service: the address guard Chrome goes through and the kind of exit behind it. Null (the default) on every other engine.
      */
     private readonly hostedChrome: HostedChromeLaunch | null = null,
+    /**
+     * The process's browser keeper (browserKeeper.ts): the shared browser is its, launched once for every subject that asks
+     * and left open when this subject is torn down. Null (the default): this subject launches and closes its own.
+     */
+    private readonly keeper: BrowserKeeper | null = null,
   ) {
     if ((browserEngine === 'hosted_chrome') !== (hostedChrome !== null)) throw new Error('hosted_chrome launches behind its address guard: the engine and its launch go together')
     if (robotsCache !== undefined && (access?.proxy || browserAllowedHosts !== undefined)) {
@@ -2019,6 +2025,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
         if (engine.version !== undefined) this.engineVersion = engine.version
         return engine.launch({ headless: !this.headed, timeout: 30_000, ...(args.length === 0 ? chromiumProxyLaunchOptions(this.envProxy) : { args }) })
       }
+      // The keeper's browser is the process's: taken as it is, or launched for every subject at once, and never abandoned for one caller.
+      if (this.keeper !== null) return this.keeper.get(launch)
       const pending = launch().then(async browser => {
         if (this.activeExecutions === 0) {
           if (this.browserPromise === pending) this.browserPromise = null
@@ -2071,7 +2079,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
     this.managedContextPromise = null
     const pending = this.browserPromise
     if (pending !== null && this.browser === null) await pending.catch(() => {})
-    await this.browser?.close().catch(() => {})
+    // A keeper's browser stays for the next engine; this subject never held one of its own.
+    if (this.keeper === null) await this.browser?.close().catch(() => {})
     this.browser = null
     this.browserPromise = null
     if (this.ownsRobotsCache) await this.robotsCache.teardown()
