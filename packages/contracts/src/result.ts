@@ -388,7 +388,9 @@ export interface FetchWarning {
    * trace): its data may not all be in the answer. `page_read_hidden`: the
    * my-browser lane, reading the page as it shows, found its tab out of sight
    * after waiting for it to come in front (or without waiting, once a page
-   * before it in the same batch had waited), and read the whole document.
+   * before it in the same batch had waited), and read the whole document; or,
+   * when the whole document's main content was a weak guess, read the page as
+   * it showed in that tab (`readAs: "shown"` on `user_browser_read`).
    * `hosted_chrome_not_admitted`: hosted Octocrawl's counter for the
    * hosted_chrome rung (ADR 0005) refused the read, its message says why
    * (the account's attempts for the day, the operator's monthly budget, the

@@ -188,6 +188,8 @@ describe('the person\'s Chrome', () => {
     const whole = await (await openUserChrome({ userDataDir, connect: behind.connect })).read('https://site.test/a', { pollMs: 1, waitMs: 5_000, unattended: true, shownOnly: true, hiddenWaitMs: 50 })
     expect(whole.html).not.toContain('<!--as shown-->')
     expect(whole.document).toBeUndefined()
+    // The page as it showed in that tab is kept beside the whole document, for the content when the whole one misleads.
+    expect(whole.shownWhileHidden).toContain('<!--as shown-->')
     expect(whole).toMatchObject({ tabHidden: true })
     expect(whole.hiddenWaitMs).toBeGreaterThanOrEqual(50)
     // The wait for the tab is said once, in hiddenWaitMs: the settle wait it overlapped does not count it (2026-10-12, a
@@ -201,6 +203,39 @@ describe('the person\'s Chrome', () => {
     expect(plain).toMatchObject({ tabHidden: true })
     expect(plain.hiddenWaitMs).toBeUndefined()
     expect(pageFromUserBrowser(plain, null, {}).warnings?.map((w) => w.code) ?? []).not.toContain('page_read_hidden')
+  })
+
+  it('a page read whole in a tab out of sight is read as it showed there when the whole document gives only a weak guess', () => {
+    // www.english.ids-cologne.de, exhibitor mungyo, 2026-11-07, cut down and renamed: its product groups sit in an
+    // accordion the page folds away (display:none). Read whole in a background tab, the extractor took them for a list
+    // (confidence 0) and dropped the company's heading, a success with no sign; read as it shows, the heading is there.
+    const WHOLE = '<!doctype html><html lang="en" class="no-touch"><head><title>Acme Dental| Exhibitor on the Dental Fair</title></head><body id="top" class="pate-home"><div class="main"><div class="breadcrumb invertedback"><div class="breadcrumb-container"><div class="grid-wrapper invisible cloned"><div class="gw-inner"><ul><li><div title="List of exhibitors" class="initial_noline">List of exhibitors</div></li></ul></div></div></div></div><div class="maincontent"><section class="content asdb54-aussteller-detailseite-content" xmlns="http://www.w3.org/1999/html"><div class="options-bar cmodul wide asdb54-aussteller-detailseite"><div class="grid-wrapper"><div class="gw-inner"><h1 class="hl_2"><strong>Acme Dental</strong></h1></div></div></div><div class="asdb54-noTabBox-All-Container cmodul wide"><div class="grid-wrapper"><div class="gw-inner"><div class="austellerdetail_gruppe"><div class="db-acc db-closed" style="margin-bottom: 15px"><div class="asdb-cap-products-list" style="display:none;"><div class="xasdb-cap-products-list-entry"><div class="accordeonlist"><ul class="level-1"><li class="hassub"><ul class="level-2"><li class="hassub"><ul class="level-3"><li><div class="lastChild"><a href="/exhibitors/?pg=201030">Plaster bins</a></div></li></ul></li><li class="hassub"><ul class="level-3"><li><div class="lastChild"><a href="/exhibitors/?pg=208070">Flasks / Muffles</a></div></li><li><div class="lastChild"><a href="/exhibitors/?pg=208120">Polishing materials</a></div></li></ul></li><li class="hassub"><ul class="level-3"><li><div class="lastChild"><a href="/exhibitors/?pg=210030">Measuring instruments</a></div></li><li><div class="lastChild"><a href="/exhibitors/?pg=210040">Modelling instruments</a></div></li></ul></li><li class="hassub"><ul class="level-3"><li><div class="lastChild"><a href="/exhibitors/?pg=214020">Ceramic</a></div></li></ul></li></ul></li></ul></div></div></div></div></div></div></div></div></section></div></div></body></html>'
+    const SHOWN = WHOLE.replace(/<div class="asdb-cap-products-list" style="display:none;">.*?<\/ul><\/li><\/ul><\/div>/, '')
+    expect(SHOWN).not.toContain('Plaster bins')
+    const read = (over: Record<string, unknown> = {}) => ({ requestedUrl: 'https://fair.test/exhibitor/acme/', finalUrl: 'https://fair.test/exhibitor/acme/', status: 200, contentType: 'text/html', html: WHOLE, fetchedAt: '2026-11-07T09:04:29.000Z', wallMs: 2_718, sawGate: null, act: null, browser: 'Chrome/156', tabHidden: true, hiddenWaitMs: 0, ...over })
+    const userRead = (result: ReturnType<typeof pageFromUserBrowser>) => result.trace.find((e) => e.event === 'user_browser_read')?.detail
+    // Without the page as it showed (a reader that kept none): the whole document, as before.
+    const whole = pageFromUserBrowser(read(), null, {})
+    expect(whole.markdown).toContain('Plaster bins')
+    expect(whole.markdown).not.toContain('Acme Dental')
+    // With it: the content is the page as it showed, the raw HTML still the whole document, and the warning says which.
+    const shown = pageFromUserBrowser(read({ shownWhileHidden: SHOWN }), null, { includeRawHtml: true })
+    expect(shown.status).toBe('success')
+    expect(shown.markdown).toContain('# **Acme Dental**')
+    expect(shown.markdown).not.toContain('Plaster bins')
+    expect(shown.rawHtml).toBe(WHOLE)
+    expect(userRead(shown)).toMatchObject({ tabHidden: true, readAs: 'shown' })
+    expect(shown.warnings?.find((w) => w.code === 'page_read_hidden')?.message).toContain('as the page showed there')
+    // A whole document whose main content is sure stays the answer: github.com folds its <main> while hidden, so the
+    // page as it shows there may hold less than the person sees.
+    const sure = pageFromUserBrowser(read({ html: PAGE, shownWhileHidden: '<html><body><nav><a href="/">Home</a></nav></body></html>' }), null, {})
+    expect(sure.markdown).toContain('Prose long enough')
+    expect(userRead(sure)).toMatchObject({ readAs: 'whole' })
+    expect(sure.warnings?.find((w) => w.code === 'page_read_hidden')?.message).toContain('the whole document was read')
+    // Content the request names (includeTags), or the whole page asked for, is read from the whole document.
+    expect(pageFromUserBrowser(read({ shownWhileHidden: SHOWN }), null, { includeTags: ['.accordeonlist'] }).markdown).toContain('Plaster bins')
+    expect(pageFromUserBrowser(read({ shownWhileHidden: SHOWN }), null, { onlyMainContent: false }).markdown).toContain('Plaster bins')
+    expect(userRead(pageFromUserBrowser(read({ shownWhileHidden: SHOWN }), null, { list: { type: 'list', itemSelector: '.lastChild' } }))).toMatchObject({ readAs: 'whole' })
   })
 
   it('a tab that comes in front on the read\'s last poll is read then, not lost to the wait', async () => {
