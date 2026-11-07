@@ -34,6 +34,7 @@ import { EXTRACTOR_VERSION } from '@w2l/extract-tf'
 import { createHash } from 'node:crypto'
 import { BROWSER_INSTALL_COMMAND } from '../browserInstall.js'
 import { INSTALLED_CHROME_INSTALL } from '../subjects/installedChrome.js'
+import { withEmptySelectionWarning } from '../subjects/errorPage.js'
 import type { DomainHistory, RouteContext, RouteEnvironment, RouteObservation, RoutingHistory, VendorOutcome } from './vendorRouter.js'
 import { rankVendors, shadowRankVendors, startingVendor } from './vendorRouter.js'
 import { identityCompromised } from './identity.js'
@@ -690,11 +691,13 @@ export class LadderRunner {
     }
     // A rung says so the moment it sets a rule aside, so the run knows even when that rung never returns.
     const rungs: ExecutionContext = { ...scope, onRobotsOverride: (applied) => { progress.robotsOverrides.push(applied); execution.onRobotsOverride?.(applied) } }
-    try { return withNotAdmitted(withRunCost(carryRobotsOverride(await this.runWithinBudget(url, session, rungs, options, progress, exit), progress.robotsOverrides), progress), progress) }
+    // Every way a run ends comes through here: its answer, a human's retry, the deadline's best so far.
+    const ended = (run: LadderRunResult): LadderRunResult => withNotAdmitted(withRunCost(carryRobotsOverride({ ...run, result: withEmptySelectionWarning(run.result, options) }, progress.robotsOverrides), progress), progress)
+    try { return ended(await this.runWithinBudget(url, session, rungs, options, progress, exit)) }
     catch (error) {
       // A run that throws keeps its paid calls on the error, for the record of whatever result the error becomes.
       if (!deadlineReached(scope)) throw progress.paidCalls.length === 0 ? error : carryPaidCalls(error, paidCallsEvent(progress, new Set(), Math.max(0, performance.now() - progress.startedAt), 'provider'))
-      return withNotAdmitted(withRunCost(carryRobotsOverride(deadlineOutcome(url, progress, null), progress.robotsOverrides), progress), progress)
+      return ended(deadlineOutcome(url, progress, null))
     } finally { scope.dispose() }
   }
 

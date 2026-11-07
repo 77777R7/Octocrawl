@@ -414,6 +414,10 @@ export interface FetchWarning {
    * as `not_served`. A redirect that keeps the page (scheme, www, a trailing
    * slash, index.html, a language prefix, a new slug, a deeper page) raises
    * none; a page a request's `actions` led elsewhere raises none either.
+   * `empty_selection`: `includeTags` was asked and the Markdown shows nothing,
+   * because no element was named or those named hold no text and no image
+   * (script blocks are left out as always). The answer stays a `success` and
+   * `readiness` does not read this code.
    * `https_unavailable`: the site has no working HTTPS (its first request was
    * refused, reset, or answered by a plain server), and its http:// twin was
    * asked for, under that origin's robots.txt: `requestedUrl` stays the https

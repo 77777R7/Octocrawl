@@ -83,6 +83,9 @@ export const INSTALLED_CHROME_RECOMMENDED_HINT = 'installed_chrome with compatib
 /** The hint a `screenshot_unavailable` warning carries: the page stands, where the error is, and the lighter request. */
 export const SCREENSHOT_UNAVAILABLE_HINT = "the screenshot could not be captured, so screenshot is null while the page result stands; the trace's screenshot_failed event names the error; a viewport capture (fullPage false) is the lighter request, and a longer timeout gives a slow page more time"
 
+/** The hint an `empty_selection` warning carries: what a selection leaves out, and what reads it instead. */
+export const EMPTY_SELECTION_HINT = 'includeTags selected nothing Markdown can show: scripts, styles, form controls and embedded media are left out of a selection, and so is the page\'s <head>; ask for rawHtml to read those as received, or name elements that hold text'
+
 /** The hint a `redirected_off_page` warning carries: where the site sent the request, and what to do about the page asked for. */
 export function offPageHint(result: Pick<HintedResult, 'requestedUrl' | 'evidence'>): string {
   return `${hostOf(result)} answered ${result.evidence.finalUrl} in place of ${result.requestedUrl}, and the content is that page's, not the requested page's; check that the link is still live (the site may have moved or removed the page, or sent an automated request to its home page), and scrape ${result.evidence.finalUrl} on purpose only when it is the page you want`
@@ -315,6 +318,8 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode' | 'waitFor'>, 
   }
   // The site answered another page in place of the one asked for: the content is real, and it is not the requested page's.
   if (result.warnings?.some((warning) => warning.code === 'redirected_off_page')) hints.push(offPageHint(result))
+  // The selection holds nothing to read: the answer stays a success, and what was left out of it is named.
+  if (result.warnings?.some((warning) => warning.code === 'empty_selection')) hints.push(EMPTY_SELECTION_HINT)
   if (result.retryAt !== undefined) {
     hints.push(`wait until ${new Date(result.retryAt).toISOString()} before asking ${host} again`)
   } else if (result.status === 'blocked' && result.blockReason === 'rate_limit') {
