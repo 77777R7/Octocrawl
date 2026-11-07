@@ -567,6 +567,11 @@ describe('MCP tools', () => {
       expect(status.resultFiles, name).toEqual(files)
       expect(status.agentHints, name).toEqual([`every page is on this computer: ${files.jsonl} (a page a line, as ${pages} lists them) and ${files.csv} (a row a page, its evidence columns); ${pages} reads a few at a time`])
     }
+    // A server that wrote each page's Markdown names the directory, so the agent does not split the JSONL itself.
+    const withMarkdown = { ...files, markdown: '/tasks/batch-1/markdown' }
+    const markdownServer = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async () => json({ taskId: 'batch-1', status: 'completed', completed: 2, requested: 2, remaining: 0, resultFiles: withMarkdown })) as typeof fetch })
+    const written = await callTool(markdownServer, 'wait_batch', { id: 'batch-1' }) as { agentHints: string[] }
+    expect(written.agentHints).toEqual([`every page is on this computer: ${files.jsonl} (a page a line, as get_batch_items lists them) and ${files.csv} (a row a page, its evidence columns), with each page's Markdown as a file of its own in /tasks/batch-1/markdown (the CSV's markdown_file names it); hand those files on rather than splitting the JSONL; get_batch_items reads a few at a time`])
     const hosted = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async () => json({ taskId: 'batch-1', status: 'failed', failureReason: 'credits_exhausted', completed: 1, requested: 2, remaining: 1, export: { url: 'https://storage.example/batch-1', expiresInSeconds: 86_400 } })) as typeof fetch })
     const failed = await callTool(hosted, 'get_batch', { id: 'batch-1' }) as { agentHints: string[] }
     expect(failed.agentHints).toEqual(['every page read so far downloads at export.url: one gzip JSONL file, a page a line, as get_batch_items lists them; the link is good for 24 hours, and get_batch gives a fresh one; get_batch_items reads a few at a time'])

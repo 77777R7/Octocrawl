@@ -11,7 +11,7 @@ import { buildChannels } from '@w2l/bench'
 import { W2L, type BatchAccepted } from '@w2l/sdk'
 import { createApp } from '../src/app.js'
 import { createApiEngine, type ApiEngine, type ApiEngineOptions } from '../src/engine.js'
-import { RESULT_COLUMNS } from '../src/resultFiles.js'
+import { markdownFileName, RESULT_FILE_COLUMNS } from '../src/resultFiles.js'
 
 describe('persistent URL-array batch', () => {
   const cleanup: Array<() => Promise<void>> = []
@@ -501,7 +501,7 @@ describe('persistent URL-array batch', () => {
     expect(items.find((item) => item.url === `${f.origin}/item/1`)).toMatchObject({ status: 'success', readiness: { state: 'ready' } })
   })
 
-  it('writes results.jsonl and results.csv beside the checkpoint when a batch ends, names them in its status, and not before', async () => {
+  it('writes results.jsonl, results.csv and each page\'s Markdown beside the checkpoint when a batch ends, names them in its status, and not before', async () => {
     const f = await fixture()
     const engine = f.engine()
     cleanup.push(() => engine.close())
@@ -510,7 +510,7 @@ describe('persistent URL-array batch', () => {
     const report = await w2l.waitBatch(accepted.taskId)
     expect(report.status).toBe('completed')
     const dir = join(f.root, accepted.taskId)
-    expect(report.resultFiles).toEqual({ jsonl: join(dir, 'results.jsonl'), csv: join(dir, 'results.csv') })
+    expect(report.resultFiles).toEqual({ jsonl: join(dir, 'results.jsonl'), csv: join(dir, 'results.csv'), markdown: join(dir, 'markdown') })
     // A page a line, as get_batch_items lists them: the failed page too, without its trace.
     const lines = (await readFile(join(dir, 'results.jsonl'), 'utf8')).split('\n').filter((line) => line.length > 0)
     expect(lines).toHaveLength(3)
@@ -518,13 +518,23 @@ describe('persistent URL-array batch', () => {
     expect(pages.map((page) => page.status).sort()).toEqual(['failed', 'success', 'success'])
     expect(pages.find((page) => page.url === `${f.origin}/item/1`)?.markdown).toContain('Fixture item 1')
     expect(pages.every((page) => page.trace === undefined || page.trace.length === 0)).toBe(true)
-    // One row a page, the CLI's evidence columns without the Markdown file it alone writes.
+    // One row a page, the CLI's evidence columns and the page's Markdown file.
     const csv = (await readFile(join(dir, 'results.csv'), 'utf8')).split('\r\n').filter((line) => line.length > 0)
-    expect(csv[0]).toBe(RESULT_COLUMNS.join(','))
+    expect(csv[0]).toBe(RESULT_FILE_COLUMNS.join(','))
     expect(csv).toHaveLength(4)
-    const rows = csv.slice(1).map((line) => Object.fromEntries(line.split(',').map((value, i) => [RESULT_COLUMNS[i], value])))
+    const rows = csv.slice(1).map((line) => Object.fromEntries(line.split(',').map((value, i) => [RESULT_FILE_COLUMNS[i], value])))
     expect(rows.find((row) => row.url === `${f.origin}/moved/3`)).toMatchObject({ status: 'success', final_url: `${f.origin}/`, http_status: '200' })
     expect(rows.find((row) => row.url === `${f.origin}/missing/2`)).toMatchObject({ status: 'failed', http_status: '404' })
+    // A file a page read, named by its line, which its row names; the failed page has none, though it carries the 404 page's Markdown.
+    const item = rows.find((row) => row.url === `${f.origin}/item/1`)!
+    const line = pages.findIndex((page) => page.url === `${f.origin}/item/1`) + 1
+    expect(item.markdown_file).toBe(`markdown/${String(line).padStart(4, '0')}-${new URL(f.origin).host.replace(':', '-')}-item-1.md`)
+    expect(await readFile(join(dir, item.markdown_file!), 'utf8')).toBe(pages[line - 1]!.markdown)
+    const files = await readdir(join(dir, 'markdown'))
+    expect(files).toHaveLength(2)
+    expect(pages.find((page) => page.url === `${f.origin}/missing/2`)?.markdown).toContain('Not Found')
+    // Rows and lines are in one order, so row n names the file of line n, or nothing for a page not read.
+    expect(rows.map((row) => row.markdown_file)).toEqual(pages.map((page, i) => page.status === 'success' ? `markdown/${markdownFileName(i + 1, page.url)}` : ''))
     // A batch still running names no files.
     f.setSlow(true)
     const running = await w2l.batchScrape([`${f.origin}/item/2`])
@@ -559,6 +569,7 @@ describe('persistent URL-array batch', () => {
     expect(report.status).toBe('completed')
     expect(report.resultFiles).toBeUndefined()
     expect(existsSync(join(f.root, accepted.taskId, 'results.jsonl'))).toBe(false)
+    expect(existsSync(join(f.root, accepted.taskId, 'markdown'))).toBe(false)
   })
 
   it('counts every read page that is not the page asked for, and names each beside the errors, which stay the items that failed', async () => {
