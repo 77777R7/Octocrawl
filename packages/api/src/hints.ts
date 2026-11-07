@@ -315,21 +315,22 @@ export function batchFailureHints(failures: BatchFailures, batch: { timeout?: nu
   const rest = [...named.slice(MAX_FAILURE_LINES), ...groups.filter(([name]) => rank(name) === NAMED_FAILURE_GROUPS.length)].sort(([a, x], [b, y]) => y.count - x.count || a.localeCompare(b))
   const lines = own.map(([name, group]) => {
     const pages = failedPages(group)
+    const one = group.count === 1
     switch (name) {
       case 'fast_mode_declined': return batch.browserLane === false
-        ? `${pages} read empty over HTTP and asked for the browser lane, which this key does not have: the browser lane comes with an account's own key (https://octocrawl.dev/dashboard/keys/) or a signed-in MCP connection; a new batch of those URLs from one reads them in a browser${hosted ? ' (5 credits a page)' : ''}`
-        : `${pages} read empty over HTTP and asked for the browser lane, which fastMode declined: a new batch of those URLs without fastMode reads them in a browser${hosted ? ' (5 credits a page)' : ''}`
-      case 'robots_unreachable': return `${pages} were refused because their robots.txt could not be read from this server, which counts as a complete disallow${hosted
+        ? `${pages} read empty over HTTP and asked for the browser lane, which this key does not have: the browser lane comes with an account's own key (https://octocrawl.dev/dashboard/keys/) or a signed-in MCP connection; a new batch of ${one ? 'that URL' : 'those URLs'} from one reads ${one ? 'it' : 'them'} in a browser${hosted ? ' (5 credits a page)' : ''}`
+        : `${pages} read empty over HTTP and asked for the browser lane, which fastMode declined: a new batch of ${one ? 'that URL' : 'those URLs'} without fastMode reads ${one ? 'it' : 'them'} in a browser${hosted ? ' (5 credits a page)' : ''}`
+      case 'robots_unreachable': return `${pages} ${one ? 'was' : 'were'} refused because ${one ? 'its' : 'their'} robots.txt could not be read from this server, which counts as a complete disallow${hosted
         ? '; hosted Octocrawl obeys that for every URL: a new batch of those URLs with access: "enhanced" reads them through its own exits, on an account that has it, and on your computer Octocrawl reads a URL you name whatever robots.txt says (npx octocrawl serve)'
         : '; Octocrawl asks for the file again after a while'}`
-      case 'robots_disallowed': return `${pages} are disallowed by their robots.txt for Octocrawl: the site owner's rule${hosted ? ', which hosted Octocrawl obeys for every URL; on your computer a URL you name is read on the record (npx octocrawl serve)' : ', kept on the record'}`
-      case 'gated': return `${pages} gate automated access (a challenge or bot check)${hosted
+      case 'robots_disallowed': return `${pages} ${one ? 'is' : 'are'} disallowed by ${one ? 'its' : 'their'} robots.txt for Octocrawl: the site owner's rule${hosted ? ', which hosted Octocrawl obeys for every URL; on your computer a URL you name is read on the record (npx octocrawl serve)' : ', kept on the record'}`
+      case 'gated': return `${pages} ${one ? 'gates' : 'gate'} automated access (a challenge or bot check)${hosted
         ? '; hosted Octocrawl does not solve challenges or change its identity; on your computer Octocrawl can hand them to you in your own Chrome (npx octocrawl serve, then the batch with a handoff) or read them with a login you saved there (octocrawl login import <host>, then mode authed)'
         : batch.handoff === true ? '; get through the check yourself in your own Chrome: a batch handoff (hand_off_batch, POST /v1/batches/:id/handoff, octocrawl batch --handoff) opens them there and Octocrawl reads the page'
         : '; this server has no Chrome of the person\'s to hand them to; on their own computer Octocrawl can (npx octocrawl serve, then the batch with a handoff)'}`
       case 'timeout': return (batch.timeout ?? most) >= most
-        ? `${pages} ran out of the longest timeout Octocrawl takes (${most} ms): the sites were down or slower than that; a new batch of those URLs later tells one from the other`
-        : `${pages} ran out of their ${batch.timeout} ms timeout: a new batch of those URLs with a longer timeout (up to ${most} ms) when the sites are slow rather than down`
+        ? `${pages} ran out of the longest timeout Octocrawl takes (${most} ms): the ${one ? 'site was' : 'sites were'} down or slower than that; a new batch of ${one ? 'that URL' : 'those URLs'} later tells one from the other`
+        : `${pages} ran out of ${one ? 'its' : 'their'} ${batch.timeout} ms timeout: a new batch of ${one ? 'that URL' : 'those URLs'} with a longer timeout (up to ${most} ms) when the ${one ? 'site is' : 'sites are'} slow rather than down`
       default: return pages
     }
   })
