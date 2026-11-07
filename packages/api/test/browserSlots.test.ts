@@ -60,24 +60,24 @@ describe('the pages a server renders at once', () => {
     const identity = identityBundleFrom(modeIdentity('standard'))
     const [http, browser] = withBrowserSlots([
       { id: 'http', identity, fetch: async (url) => page(url, 'http') },
-      { id: 'browser_local', identity, waitsFor: true, fetch: async (url) => page(url, 'browser_local'), admit: async (): Promise<ChannelAdmission> => refuse ? { ok: false, reason: 'own' } : { ok: true, settle: async (...args: unknown[]) => { settles.push(args) } } },
+      { id: 'browser_local', identity, waitsFor: true, fetch: async (url) => page(url, 'browser_local'), admit: async (): Promise<ChannelAdmission> => refuse ? { ok: false, reason: 'own', warning: { code: 'hosted_chrome_not_admitted', message: 'own refusal' } } : { ok: true, settle: async (...args: unknown[]) => { settles.push(args) } } },
     ], slots)
     expect(http!.admit).toBeUndefined()
     const first = await browser!.admit!('https://a.test/', {})
     expect(first.ok).toBe(true)
     // The slot is held: a second admission waits until the first read is settled.
-    let second: ChannelAdmission | null = null
-    const waiting = browser!.admit!('https://b.test/', {}).then((admission) => { second = admission })
+    const admitted = { second: false }
+    const waiting = browser!.admit!('https://b.test/', {}).then((admission) => { admitted.second = true; return admission })
     await sleep(20)
-    expect(second).toBeNull()
+    expect(admitted.second).toBe(false)
     if (first.ok) await first.settle(null, true)
-    await waiting
+    const second = await waiting
     expect(second).toMatchObject({ ok: true })
     expect(settles).toEqual([[null, true]])
-    if (second !== null && second.ok) await second.settle(null, false)
+    if (second.ok) await second.settle(null, false)
     // The rung's own refusal gives the slot back at once: the next admission does not wait.
     refuse = true
-    expect(await browser!.admit!('https://c.test/', {})).toEqual({ ok: false, reason: 'own' })
+    expect(await browser!.admit!('https://c.test/', {})).toMatchObject({ ok: false, reason: 'own' })
     refuse = false
     expect(await browser!.admit!('https://d.test/', {})).toMatchObject({ ok: true })
   })
