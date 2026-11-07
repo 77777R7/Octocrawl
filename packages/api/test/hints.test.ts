@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { INSTALLED_CHROME_INSTALL } from '@w2l/bench'
-import { batchFailureHints, batchLoginWallHint, failureGroupOf, withFailure, agentHintsFor, mapAgentHints, offPageHint, SIGN_IN_PROMPT_HINT, THIN_PAGE_HINT, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, HOSTED_LOGIN_WALL_HINT, hostedFileNotKeptHint, hostedGateHint, INSTALLED_CHROME_MISSING_HINT, renderedLowYieldHint, renderedNotLoadedHint, INSTALLED_CHROME_RECOMMENDED_HINT, lowContentYieldHint, MAX_AGENT_HINTS, pinnedFastModeHints, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
+import { batchExtractionHints, batchFailureHints, batchLoginWallHint, failureGroupOf, withFailure, agentHintsFor, mapAgentHints, offPageHint, SIGN_IN_PROMPT_HINT, THIN_PAGE_HINT, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, HOSTED_LOGIN_WALL_HINT, hostedFileNotKeptHint, hostedGateHint, INSTALLED_CHROME_MISSING_HINT, renderedLowYieldHint, renderedNotLoadedHint, INSTALLED_CHROME_RECOMMENDED_HINT, lowContentYieldHint, MAX_AGENT_HINTS, pinnedFastModeHints, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
+import { UNSOURCED_FIELD_MESSAGE } from '../src/structured.js'
 
 const URL_ = 'https://example.test/report'
 
@@ -433,6 +434,26 @@ describe('agent hints', () => {
     const many = hints({ ...json([{ code: 'missing_required', message: 'no source', path: '/price' }, { code: 'model_unavailable', message: 'no model' }]), status: 'partial', retryAt: Date.UTC(2026, 0, 1), truncated: true, truncatedAt: 10, warnings: [{ code: 'screenshot_unavailable', message: 'no capture' }] })
     expect(many).toHaveLength(5)
     expect(many.map((hint) => hint.split(' ')[0])).toEqual(['the', 'wait', 'the', 'the', 'json'])
+  })
+
+  it('says why json left a field null with no source on the page, and what reads it, unless a model tried', () => {
+    const unsourced = (paths: string[], modelAttempts = 0): HintedResult => result({ json: { status: 'complete', data: Object.fromEntries(paths.map((path) => [path.slice(1), null])), evidence: [], issues: paths.map((path) => ({ code: 'field_unavailable' as const, path, message: UNSOURCED_FIELD_MESSAGE })), modelUsage: modelAttempts === 0 ? null : { attempts: modelAttempts } } as unknown as HintedResult['json'] })
+    expect(hints(unsourced(['/license']))).toEqual(['json found no source for /license on this page; such a field stays null: json fills a top-level field from data the page states for it (JSON-LD, metadata, microdata, a selected list) or from a label on the page that matches the field\'s name (a two-cell table row or a dt/dd pair in the main content), not from other text or links; name the field as the page labels it, read the value from the markdown (onlyMainContent: false keeps sidebars), or name its element in an attributes or list format; a model reads a field only when the schema requires it and does not allow null: drop null from its type and send modelFallback, on a server with W2L_EXTRACT_BASE_URL and W2L_EXTRACT_MODEL'])
+    expect(agentHintsFor({}, { channelsTried: ['http'], result: unsourced(['/license', '/stars']) }, { hosted: true })[0]).toMatch(/^json found no source for \/license, \/stars on this page; such a field stays null.*drop null from its type and send modelFallback: true \(hosted Octocrawl's model, for an account at 2 credits more a page/)
+    // A model filled in, or tried to: its null stands.
+    expect(hints(unsourced(['/license'], 1))).toEqual([])
+    // Another field_unavailable (a check the value broke) is not a missing source.
+    expect(hints(result({ json: { status: 'incomplete', data: {}, evidence: [], issues: [{ code: 'field_unavailable', path: '/price', message: 'the value breaks minimum' }] } }))).toEqual([])
+  })
+
+  it('says on a finished batch how many pages read held nothing selected, and which json fields had no source on how many', () => {
+    expect(batchExtractionHints({ read: 0, emptySelection: 0, unsourced: {} }, false)).toEqual([])
+    expect(batchExtractionHints({ read: 20, emptySelection: 0, unsourced: {} }, false)).toEqual([])
+    expect(batchExtractionHints({ read: 20, emptySelection: 20, unsourced: {} }, false)).toEqual(['on 20 of 20 pages read, includeTags selected nothing to read: its selectors matched no element there, or only elements without text or an image (scripts, styles, form controls, embedded media, the <head>); check them against one page\'s rawHtml, or name elements that hold text'])
+    const [line] = batchExtractionHints({ read: 20, emptySelection: 0, unsourced: { '/stars': 3, '/license': 20 } }, false)
+    expect(line).toMatch(/^json found no source for \/license on 20 of 20 pages read, \/stars on 3 of 20 pages read; such a field stays null: /)
+    const many = batchExtractionHints({ read: 9, emptySelection: 0, unsourced: Object.fromEntries(['/a', '/b', '/c', '/d', '/e', '/f', '/g'].map((path) => [path, 9])) }, false)[0]!
+    expect(many).toContain('/e on 9 of 9 pages read and 2 more fields; such a field stays null')
   })
 
   it('says the page stands when the browser lane could not capture the screenshot asked for, and names the lighter request', () => {

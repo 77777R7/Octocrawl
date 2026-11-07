@@ -11,6 +11,7 @@
 import { DEFAULT_SCRAPE_TIMEOUT_MS, isOctocrawlRobotsGroup, MAX_WAIT_FOR_MS, type Evidence, type FetchResult, type LadderRunAudit, type MapResponse, type ScrapeRequest } from '@w2l/contracts'
 import { HTTP_CHANNELS, INSTALLED_CHROME_INSTALL } from '@w2l/bench'
 import { SHELL_TEXT_MAX } from '@w2l/runtime'
+import { UNSOURCED_FIELD_MESSAGE } from './structured.js'
 
 /** The hint a `fastMode` scrape carries when the http lane asked for the browser lane it was denied. */
 export const FAST_MODE_DECLINED_HINT = 'the http lane asked for the browser lane; fastMode declined it; retry without fastMode'
@@ -405,6 +406,49 @@ function jsonHints(result: HintedResult, hosted: boolean): string[] {
   return hints
 }
 
+/**
+ * The fields a json extraction left null for want of a source, and where such a value is read instead; nothing when a
+ * model filled in, or tried to. A complete result can hold them, so jsonHints, which stops at complete, does not.
+ */
+function unsourcedJsonHints(result: HintedResult, hosted: boolean): string[] {
+  const json = result.json
+  if (json === undefined || json === null || (json.modelUsage?.attempts ?? 0) > 0) return []
+  const paths = [...new Set(json.issues.filter((issue) => issue.code === 'field_unavailable' && issue.message === UNSOURCED_FIELD_MESSAGE).map((issue) => issue.path ?? '/'))]
+  return paths.length === 0 ? [] : [unsourcedJsonHint(`for ${paths.join(', ')} on this page`, hosted)]
+}
+
+/**
+ * Why json left fields null with no source, and what reads such a value: `where` says which fields on which pages. Without
+ * a model, json fills a field only from data the page states for it or a label matching its name (docs/json-extraction.md),
+ * so a value shown as other text or a link stays null; and a model never reads a nullable field.
+ */
+export function unsourcedJsonHint(where: string, hosted: boolean): string {
+  // The model fallback runs only for a required field that is missing or a value that breaks the schema: a nullable one stays null.
+  const model = hosted
+    ? 'a model reads a field only when the schema requires it and does not allow null: drop null from its type and send modelFallback: true (hosted Octocrawl\'s model, for an account at 2 credits more a page, when it is switched on)'
+    : 'a model reads a field only when the schema requires it and does not allow null: drop null from its type and send modelFallback, on a server with W2L_EXTRACT_BASE_URL and W2L_EXTRACT_MODEL'
+  return `json found no source ${where}; such a field stays null: json fills a top-level field from data the page states for it (JSON-LD, metadata, microdata, a selected list) or from a label on the page that matches the field's name (a two-cell table row or a dt/dd pair in the main content), not from other text or links; name the field as the page labels it, read the value from the markdown (onlyMainContent: false keeps sidebars), or name its element in an attributes or list format; ${model}`
+}
+
+/**
+ * A finished batch's lines for pages read with nothing extracted: an includeTags selection empty on some, json fields
+ * without a source on some. `read` is how many pages were read; `unsourced` counts them by json path, most first.
+ */
+export function batchExtractionHints(facts: { read: number; emptySelection: number; unsourced: Record<string, number> }, hosted: boolean): string[] {
+  const hints: string[] = []
+  if (facts.read === 0) return hints
+  if (facts.emptySelection > 0) hints.push(`on ${facts.emptySelection} of ${facts.read} pages read, includeTags selected nothing to read: its selectors matched no element there, or only elements without text or an image (scripts, styles, form controls, embedded media, the <head>); check them against one page's rawHtml, or name elements that hold text`)
+  const paths = Object.entries(facts.unsourced).sort(([a, x], [b, y]) => y - x || a.localeCompare(b))
+  if (paths.length > 0) {
+    const shown = paths.slice(0, BATCH_HINT_FIELDS).map(([path, count]) => `${path || '/'} on ${count} of ${facts.read} pages read`)
+    hints.push(unsourcedJsonHint(`for ${shown.join(', ')}${paths.length > BATCH_HINT_FIELDS ? ` and ${paths.length - BATCH_HINT_FIELDS} more fields` : ''}`, hosted))
+  }
+  return hints
+}
+
+/** How many json fields a batch's line names before it counts the rest. */
+const BATCH_HINT_FIELDS = 5
+
 /** The robots.txt rule the lane applied, from its `robots_disallowed` event, or why it could not read the file. */
 function robotsHint(result: HintedResult, host: string): string | null {
   const disallowed = result.trace.find((event) => event.event === 'robots_disallowed')
@@ -535,6 +579,7 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode' | 'waitFor'>, 
     else if (status === 404) hints.push('the server answered 404; check the link')
   }
   hints.push(...jsonHints(result, hosted))
+  hints.push(...unsourcedJsonHints(result, hosted))
   if (result.file !== undefined) hints.push(fileHint(result.file, offers.noFiles === true))
   return hints.slice(0, MAX_AGENT_HINTS)
 }

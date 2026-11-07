@@ -701,6 +701,9 @@ function fillNullableMissing(root: JsonSchema, schemaInput: JsonSchema, value: J
   return value
 }
 
+/** The `field_unavailable` message of a nullable field the page gave no source for: it stays null, and the result can be complete. */
+export const UNSOURCED_FIELD_MESSAGE = 'no verified source for this nullable field on the selected page'
+
 function nullableMissingIssues(root: JsonSchema, schemaInput: JsonSchema, value: JsonValue | undefined, path = ''): StructuredExtractionIssue[] {
   const schema = effective(root, schemaInput)
   if (schema.properties !== undefined && value !== null && typeof value === 'object' && !Array.isArray(value)) {
@@ -708,7 +711,7 @@ function nullableMissingIssues(root: JsonSchema, schemaInput: JsonSchema, value:
     return Object.entries(schema.properties).flatMap(([name, child]) => nullableMissingIssues(root, child, data[name], `${path}/${name}`))
   }
   return value === null && schemaTypes(schema).includes('null')
-    ? [{code:'field_unavailable',path,message:'no verified source for this nullable field on the selected page'}]
+    ? [{code:'field_unavailable',path,message:UNSOURCED_FIELD_MESSAGE}]
     : []
 }
 

@@ -69,6 +69,8 @@ export interface TaskStore {
   countVerifications(taskId: string, attemptId?: string): Promise<VerificationCounts>
   /** How many of an attempt's steps (every attempt's without attemptId) that `succeeded` and `failed` count carry a warning of this code, without reading their text. */
   countStepsWarned(taskId: string, code: string, attemptId?: string): Promise<number>
+  /** Of a task's steps whose page was read (READ_STATUSES, every attempt) and whose json no model was asked to fill, how many carry a `json` issue of this code and message, by the issue's path (`""` without one), each step once a path; without reading their text. */
+  countJsonIssuePaths(taskId: string, code: string, message: string): Promise<Record<string, number>>
   /** The steps of a page read that `readinessOf` could call `not_served` (notServedSteps decides), in stored order: of an attempt, or of every attempt without attemptId. */
   listNotServedCandidates(taskId: string, attemptId?: string): Promise<StepRecord[]>
   listStepsPage(taskId: string, query: StepPageQuery): Promise<StepPage>
