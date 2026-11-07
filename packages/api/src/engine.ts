@@ -135,7 +135,7 @@ import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, de
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, verify, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { BrowserEngineName, BrowserIdentityChoice, BrowserKeeper, CaptchaSolving, ChannelAdmission, ChannelsFiltered, InstalledChromeTestSeams, PricedExit } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
-import { agentHintsFor, batchExtractionHints, batchFailureHints, batchLoginWallHint, failureGroupOf, httpLaneAskedForBrowser, mapAgentHints, MAX_AGENT_HINTS, pinnedFastModeHints, withFailure, type BatchFailures, type FailureFacts, type FastModePin, type HintOffers } from './hints.js'
+import { agentHintsFor, withJsonHints, batchExtractionHints, batchFailureHints, batchLoginWallHint, failureGroupOf, httpLaneAskedForBrowser, mapAgentHints, MAX_AGENT_HINTS, pinnedFastModeHints, withFailure, type BatchFailures, type FailureFacts, type FastModePin, type HintOffers } from './hints.js'
 import { HandoffNotThrough, LOGIN_WAIT_MS, openUserChrome, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
 import { importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
 import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
@@ -2150,7 +2150,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const full: ScrapeRun = pinned.length === 0 && turnHints.length === 0 ? run : { ...run, agentHints: [...turnHints, ...told].slice(0, MAX_AGENT_HINTS) }
       // An observer that throws does not cost the caller the page.
       try { context.observe?.(full, scrapeId) } catch { /* the observer's own fault */ }
-      const response = await prepareScrapeResponse(full, req, modelGated(shapeScope, context), null, overallStart, scrapeId, fetched).finally(() => { if (shapeScope !== scope) shapeScope.dispose() })
+      const shaped = await prepareScrapeResponse(full, req, modelGated(shapeScope, context), null, overallStart, scrapeId, fetched).finally(() => { if (shapeScope !== scope) shapeScope.dispose() })
+      // The json is extracted after the run's hints were made: what it could not fill is said here, as a batch item's stored page says it.
+      const jsonLines = shaped.json === undefined ? null : withJsonHints(shaped.agentHints ?? [], shaped.json, options.hosted === true)
+      const response = jsonLines === null || jsonLines.length === (shaped.agentHints ?? []).length ? shaped : { ...shaped, agentHints: jsonLines }
       if (!record) return response
       // Written before the response is sent; a write failure is logged, the response keeps its id, and the full response's trace says so.
       try {

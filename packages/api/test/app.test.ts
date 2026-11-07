@@ -620,6 +620,25 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     expect(both.json.data.title).toBe('Harbour lantern catalog')
   })
 
+  it('says on a scrape what its json could not fill, as a batch item does: a required field not found, a nullable one with no source', async () => {
+    const app = createApp(engine)
+    const scrape = async (schema: object, debug: boolean) => (await app.request('/v1/scrape', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: `${server.url}/crawl/listing`, formats: [{ type: 'json', schema }], debug }),
+    })).json()
+    const nullable = { type: 'object', properties: { title: { type: 'string' }, license: { type: ['string', 'null'] } }, required: ['title', 'license'] }
+    for (const debug of [false, true]) {
+      const out = await scrape(nullable, debug)
+      expect(out.json, `debug ${debug}`).toMatchObject({ status: 'complete', data: { license: null } })
+      expect(out.agentHints, `debug ${debug}`).toEqual(expect.arrayContaining([expect.stringMatching(/^json found no source for \/license on this page; such a field stays null: /)]))
+    }
+    const required = await scrape({ type: 'object', properties: { title: { type: 'string' }, sku: { type: 'string' } }, required: ['title', 'sku'] }, false)
+    expect(required.json.status).toBe('incomplete')
+    expect(required.agentHints).toEqual(expect.arrayContaining([expect.stringMatching(/^json is incomplete: the required field \/sku was not found on the page/)]))
+    // A json the page filled has nothing to say.
+    expect((await scrape({ type: 'object', properties: { title: { type: 'string' } }, required: ['title'] }, false)).agentHints ?? []).not.toEqual(expect.arrayContaining([expect.stringMatching(/^json /)]))
+  })
+
   it('reads JSON numbers as the page writes them, and leaves one it cannot settle unfilled with the text quoted', async () => {
     const shop = (price: string) => `<!doctype html><html lang="de"><head><title>Messinglampe | Shop</title></head><body><main><h1>Messinglampe</h1><p class="price">${price}</p>` +
       '<p>Eine Messinglampe mit mattiertem Glasschirm, passend für Schreibtisch oder Nachttisch und für eine Standardfassung verdrahtet.</p></main></body></html>'

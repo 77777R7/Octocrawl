@@ -393,6 +393,16 @@ function laneEscalatedHint(run: HintedRun, host: string): string | null {
   return `the http lane got ${http.status}/${reason}${status} from ${host} and the local browser lane served the page; expect other pages of ${host} to need the browser lane too`
 }
 
+/**
+ * The json lines of an answer whose extraction ran after its hints were made, as a scrape's does (prepareScrapeResponse):
+ * the lines agentHintsFor gives a stored page with this json, those the hints hold already left out, at most five in all.
+ */
+export function withJsonHints(hints: readonly string[], json: HintedResult['json'], hosted: boolean): string[] {
+  const result = { json } as HintedResult
+  const extra = [...jsonHints(result, hosted), ...unsourcedJsonHints(result, hosted)].filter((hint) => !hints.includes(hint))
+  return [...hints, ...extra].slice(0, MAX_AGENT_HINTS)
+}
+
 /** The required fields the json extraction found no source for, and a model fallback that was asked for and did not run; nothing for a complete result. */
 function jsonHints(result: HintedResult, hosted: boolean): string[] {
   const json = result.json
