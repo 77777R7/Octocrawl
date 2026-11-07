@@ -9,6 +9,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { isIP } from 'node:net'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { resultFilesOf, writeResultFiles } from './resultFiles.js'
 import {
   buildChannels,
   compatHostListed,
@@ -142,7 +143,7 @@ import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runC
 import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlIntroduction } from '@w2l/runtime'
 import { FileSessionBrokerStore, FileSessionStore, hostedChromeRefusal, installedChromeRefusal, mergeListPages, publicSession, regionSpecOf, SessionBroker, type SessionStore } from '@w2l/bench'
 import { BLOCK_REASON, hostedVerifyRefusal, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, LIST_DEFAULTS, type AccessChoice, type BlockReason, type ListRun, type PageAction, type MonitorView, type MonitorRevision } from '@w2l/contracts'
-import type { ManagedSessionRef, PublicManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
+import type { JobResultFiles, ManagedSessionRef, PublicManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
 import { attributesFormat, checkVerificationFormats, customJsonFormat, listFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv, verifyScrapeResponse } from './structured.js'
 
 export interface CrawlWithSteps {
@@ -1252,7 +1253,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         report.attemptId.length === 0 ? [] : await store.listSteps(taskId, report.attemptId)
       const task = await store.getTask(taskId)
       const webhook = task === null ? undefined : jobWebhooks.status(task)
-      return { report: webhook === undefined ? report : { ...report, webhook }, steps }
+      return { report: { ...report, ...(webhook === undefined ? {} : { webhook }), ...resultFilesField(task) }, steps }
     } finally {
       await store.close()
     }
@@ -1303,8 +1304,45 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ...(waitingForPerson === undefined ? {} : { waitingForPerson }),
         ...(approvalsWaiting.has(taskId) ? { waitingForApproval: true as const } : {}),
         ...(webhook === undefined ? {} : { webhook }),
+        ...resultFilesField(task),
       }
     } finally { await store.close() }
+  }
+
+  /** A server that keeps files writes a job's results beside its checkpoint when it ends; hosted Octocrawl keeps none and gives `export` instead. */
+  const writesResultFiles = options.hosted !== true && options.noFileStore !== true
+
+  /** The job's result files, once it has ended and they are written: a status says where they are. */
+  function resultFilesField(task: Task | null): { resultFiles?: JobResultFiles } {
+    if (!writesResultFiles || task === null || !isTerminalStatus(task.status)) return {}
+    const files = resultFilesOf(join(taskRoot, task.id))
+    return files === null ? {} : { resultFiles: files }
+  }
+
+  /**
+   * Write a finished job's `results.jsonl` and `results.csv`: every page recorded, every attempt, as listJobPages gives
+   * them. Done before anyone hears of the end, so the terminal event, the webhook and the next status name the files.
+   * A failure to write them is logged and keeps nothing else from happening: the pages stay in the checkpoint, and a
+   * status without `resultFiles` sends the reader to the item list. A job that ended before this server wrote files, or
+   * in a crash between its terminal row and the files, has none: nothing writes them later.
+   */
+  async function writeJobResultFiles(taskId: string): Promise<void> {
+    if (!writesResultFiles) return
+    const dir = join(taskRoot, taskId)
+    if (!existsSync(join(dir, 'checkpoint.sqlite'))) return
+    try {
+      await writeResultFiles(dir, async function* () {
+        for (let cursor: string | undefined; ;) {
+          const page = await loadCrawlPageList(taskId, { ...(cursor === undefined ? {} : { cursor }), limit: 50 }, 'all', true)
+          if (page === null) return
+          yield page.items.map(({ audit: _audit, ...item }) => ({ ...item, trace: [] }))
+          if (!page.hasMore || page.nextCursor === null) return
+          cursor = page.nextCursor
+        }
+      })
+    } catch (error) {
+      console.error(JSON.stringify({ severity: 'WARNING', event: 'result_files_not_written', taskId, error: error instanceof Error ? error.message : String(error) }))
+    }
   }
 
   /**
@@ -1318,6 +1356,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const current = await store.getTask(task.id)
     if (current === null || !isTerminalStatus(current.status)) return
     const kind = jobKindOf(current)
+    await writeJobResultFiles(current.id)
     const report = kind === 'batch' ? await loadBatch(current.id) : (await loadCrawlWithSteps(current.id))?.report ?? null
     if (report === null) return
     if (webhookOf(current) !== undefined) {
@@ -1675,7 +1714,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     try {
       const task = await store.getTask(taskId)
       if (task === null || task.batch === undefined) return null
-      if (inflight.has(taskId) || task.status === 'pending' || task.status === 'running' || task.status === 'paused') throw new CrawlStateError(`batch ${taskId} is ${task.status}: hand its items over when it has finished`)
+      if (task.status === 'pending' || task.status === 'running' || task.status === 'paused') throw new CrawlStateError(`batch ${taskId} is ${task.status}: hand its items over when it has finished`)
+      // The row is terminal and the run is still closing (its result files, its terminal event): the handoff starts once it has.
+      const closing = inflight.get(taskId)
+      if (closing !== undefined) await closing
       if (handoffs.has(taskId)) throw new CrawlStateError(`batch ${taskId} is already being handed over`)
       const unread = handoffUnread(task)
       if (unread !== null) throw new CrawlStateError(`batch ${taskId} asked for ${unread}, which a page read in your own Chrome cannot give: its stopped items are not handed over`)
@@ -1735,6 +1777,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           }
         }
         const through = items.filter((item) => item.through).length
+        // The pages the person got through to replace the stopped items: the result files say so too.
+        if (through > 0) await writeJobResultFiles(taskId)
         return { id: taskId, handedOff: items.length, through, notThrough: items.length - through, items }
       } finally {
         handoffs.delete(taskId)

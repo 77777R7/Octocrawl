@@ -114,7 +114,7 @@ Without an account the tools are not listed, and a call says it needs one. A job
 - A crawl reads at most 500 pages, and a batch at most 1,000 URLs.
 - Each page costs credits as a scrape does: 1 over HTTP and 5 in a browser.
 - An account runs two jobs at a time, with up to ten more waiting.
-- Results are kept 7 days after the job ends. A job that runs out of credits is not lost: it waits, its status says so and where to ask for more, and it goes on by itself when credits come back.
+- Results are kept 7 days after the job ends. Once it has ended, `get_crawl`, `get_batch` and the waits carry `export`: a link that downloads every page as one gzip JSONL file, good for 24 hours, and asking again gives a fresh one, so a thousand pages need not pass through the chat. A job that runs out of credits is not lost: it waits, its status says so and where to ask for more, and it goes on by itself when credits come back.
 - A wait returns after at most 120 seconds (`timeoutMs`, default 30 seconds) with the status so far. Call it again, or check later with `get_crawl` or `get_batch`.
 
 ```text

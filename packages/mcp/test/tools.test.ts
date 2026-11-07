@@ -557,6 +557,24 @@ describe('MCP tools', () => {
     expect(state.status).toBe('running')
   })
 
+  it('tells the agent where a finished job\'s results are: the files a local server wrote, or a hosted job\'s download link', async () => {
+    const files = { jsonl: '/tasks/batch-1/results.jsonl', csv: '/tasks/batch-1/results.csv' }
+    const local = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input: RequestInfo | URL) => json(String(input).includes('/v1/crawls/')
+      ? { taskId: 'crawl-1', status: 'completed', pagesFetched: 2, resultFiles: files }
+      : { taskId: 'batch-1', status: 'completed', completed: 2, requested: 2, remaining: 0, resultFiles: files })) as typeof fetch })
+    for (const [name, pages] of [['get_batch', 'get_batch_items'], ['wait_batch', 'get_batch_items'], ['get_crawl', 'get_crawl_pages'], ['wait_crawl', 'get_crawl_pages']] as const) {
+      const status = await callTool(local, name, { id: name.endsWith('crawl') ? 'crawl-1' : 'batch-1' }) as { resultFiles: unknown; agentHints: string[] }
+      expect(status.resultFiles, name).toEqual(files)
+      expect(status.agentHints, name).toEqual([`every page is on this computer: ${files.jsonl} (a page a line, as ${pages} lists them) and ${files.csv} (a row a page, its evidence columns); ${pages} reads a few at a time`])
+    }
+    const hosted = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async () => json({ taskId: 'batch-1', status: 'failed', failureReason: 'credits_exhausted', completed: 1, requested: 2, remaining: 1, export: { url: 'https://storage.example/batch-1', expiresInSeconds: 86_400 } })) as typeof fetch })
+    const failed = await callTool(hosted, 'get_batch', { id: 'batch-1' }) as { agentHints: string[] }
+    expect(failed.agentHints).toEqual(['every page read so far downloads at export.url: one gzip JSONL file, a page a line, as get_batch_items lists them; the link is good for 24 hours, and get_batch gives a fresh one; get_batch_items reads a few at a time'])
+    // A job still running has neither, and no hint about them.
+    const running = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async () => json({ taskId: 'batch-1', status: 'running', completed: 0, requested: 2, remaining: 2 })) as typeof fetch })
+    expect(await callTool(running, 'get_batch', { id: 'batch-1' })).not.toHaveProperty('agentHints')
+  })
+
   it('stops a scrape and a wait_batch when the MCP client cancels the call', async () => {
     const signals: AbortSignal[] = []
     const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
