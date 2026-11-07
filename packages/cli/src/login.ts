@@ -25,7 +25,7 @@ export const LOGIN_USAGE = [
   '',
   'allowed lists the sites you allowed on the page Octocrawl opens in your Chrome for --lane my-browser:',
   'Octocrawl remembers each one and reads it there again without asking (Chrome still asks "Allow remote debugging?"',
-  'on each connection). revoke <site> forgets one (its host, with a port that is not the default): its next read',
+  'on each connection, once while a server runs). revoke <site> forgets one (its host, with a port that is not the default): its next read',
   'asks again, and a read of it under way stops. They are kept beside the logins, in allowed-sites.json.',
 ].join('\n')
 
