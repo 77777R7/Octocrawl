@@ -938,10 +938,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }
     return next
   }
-  /** A request may lower the file cap, never raise it past the operator's. */
+  /** A request may lower the file cap, never raise it past the operator's. Only a cap read from the variable names it: a hosted caller has none to set. */
   const checkFileCap = (req: PageOptions): void => {
     if (req.maxFileBytes !== undefined && req.maxFileBytes > networkPolicy.maxFileBytes!) {
-      throw new RequestError(`maxFileBytes must be at most ${networkPolicy.maxFileBytes}, this server's file cap (W2L_MAX_FILE_BYTES)`)
+      throw new RequestError(`maxFileBytes must be at most ${networkPolicy.maxFileBytes} on this server${basePolicy.maxFileBytes === undefined ? ' (W2L_MAX_FILE_BYTES)' : ''}`)
     }
   }
   /**

@@ -15,7 +15,6 @@ import { isDataCheck, MAX_VERIFY_CHECKS, MAX_VERIFY_TEXT, VERIFY_CHECK_KEYS, VER
 import type { DocumentExtraction, PageMetadata } from './extractor.js'
 import type { EvidenceRecord } from './evidenceRecord.js'
 import type { AttributeSelector, ListField, ListFormatRequest, ScrapeFormat, ScreenshotFormatRequest, ScreenshotViewport, StructuredExtractionResult } from './structured.js'
-import { MAX_FILE_BYTES_CEILING } from './file.js'
 import { LIST_WAIT_MS, MAX_ACTIONS, MAX_ACTION_SCRIPT_CHARS, MAX_ACTION_TEXT_CHARS, MAX_ACTION_WAIT_MS, MAX_LIST_PAGES, MAX_LIST_ROUNDS, PDF_PAPER_FORMATS, type PageAction, type PdfPaperFormat } from './actions.js'
 import type { WebhookPayloadFormat } from './delivery.js'
 
@@ -2051,8 +2050,9 @@ export function readVerify(value: unknown): VerifyContract | undefined {
 function readPageOptions(rec: Record<string, unknown>, mode: ApiCrawlMode | undefined): PageOptions {
   if (rec.onlyMainContent !== undefined && typeof rec.onlyMainContent !== 'boolean') throw new RequestError('onlyMainContent must be a boolean')
   const maxFileBytes = rec.maxFileBytes
-  if (maxFileBytes !== undefined && (typeof maxFileBytes !== 'number' || !Number.isSafeInteger(maxFileBytes) || maxFileBytes < 1 || maxFileBytes > MAX_FILE_BYTES_CEILING)) {
-    throw new RequestError(`maxFileBytes must be an integer number of bytes from 1 to ${MAX_FILE_BYTES_CEILING}`)
+  // The largest is the engine's to refuse: a hosted server's cap is smaller than a local one's.
+  if (maxFileBytes !== undefined && (typeof maxFileBytes !== 'number' || !Number.isSafeInteger(maxFileBytes) || maxFileBytes < 1)) {
+    throw new RequestError('maxFileBytes must be a whole number of bytes, 1 or more')
   }
   const includeTags = readSelectors(rec.includeTags, 'includeTags')
   const excludeTags = readSelectors(rec.excludeTags, 'excludeTags')
