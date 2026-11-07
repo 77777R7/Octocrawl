@@ -243,7 +243,7 @@ ROADMAP：
   - 验收：先写失败测试（第二次请求仍打开授权页）；改后同 host 不打开、不同 host 打开、撤销后打开；记录字段正确；`docs/access.md:185-197` 更新。
 - [ ] **A2 一条 CDP 连接贯穿 serve 生命周期**。今天每个请求连一次 Chrome，Chrome 每次弹 Allow。改成第一次用时连上，保持到 serve 停止或 Chrome 退出；断了下次用再连（Chrome 再弹一次是对的）。先查：保持连接对 `navigator.webdriver`（本来 remote debugging 开着就为 true）、对 `octocrawl login import` 的并发有没有影响；"Chrome is being controlled by automated test software" 横幅是否因此常驻（`docs/access.md:164` 说 remote debugging 开着就显示）。
   - 验收：同一 serve 内两次 my-browser 请求，Chrome 只弹一次 Allow（真实 Chrome 的 integration 测试，进 TIMED 组）。
-- [ ] **A3 Chrome 退出后能续**。my-browser 的 batch 在 Chrome 退出后把余下页面标成 `cancelled`。改成：A1 记住的 host 在 Chrome 回来后自动续读，没记住的按今天的流程再问。每页顶一个 tab 的行为不改（隐藏 tab 会折叠内容，`docs/access.md:192`）。
+- [ ] **A3 Chrome 退出后能续**。my-browser 的 batch 在 Chrome 退出后把余下页面标成 `cancelled`。改成：A1 记住的 host 在 Chrome 回来后自动续读，没记住的按今天的流程再问。每页顶一个 tab 的行为已改（2026-11-07）：batch 默认把每页开在当前 tab 后面（`backgroundTabs`），只有页面出现需要本人处理的 check 才顶到前面；隐藏 tab 整份文档读取，实测不丢字段（`docs/access.md` 的 "Your screen stays yours"）。
 - [ ] **A4 批量只重跑撞墙的页**。L7 让 agent 知道有 N 页要登录；A4 给一个动作：`hand_off_batch` 已经按项处理 check；加一个 "retry stopped items in mode authed / lane my-browser" 的入口（REST 和 MCP，形状待定），让 agent 不必自己收集 URL 再开一个 batch。
 - 决定：D4、D5。
 
