@@ -186,9 +186,9 @@ describe('agent hints', () => {
         '11 pages of a.test, b.test, c.test and more sites read empty over HTTP and asked for the browser lane, which fastMode declined: a new batch of those URLs without fastMode reads them in a browser (5 credits a page)',
         '2 pages of slow.test ran out of their 30000 ms timeout: a new batch of those URLs with a longer timeout (up to 300000 ms) when the sites are slow rather than down',
       ])
-      expect(batchFailureHints({ fast_mode_declined: { count: 1, hosts: ['a.test'] } }, {})).toEqual(['1 page of a.test read empty over HTTP and asked for the browser lane, which fastMode declined: a new batch of those URLs without fastMode reads them in a browser'])
+      expect(batchFailureHints({ fast_mode_declined: { count: 1, hosts: ['a.test'] } }, {})).toEqual(['1 page of a.test read empty over HTTP and asked for the browser lane, which fastMode declined: a new batch of that URL without fastMode reads it in a browser'])
       // A key with no browser lane ran on HTTP alone: sending the pages again without fastMode would read them empty again.
-      expect(batchFailureHints({ fast_mode_declined: { count: 1, hosts: ['a.test'] } }, { hosted: true, browserLane: false })).toEqual(['1 page of a.test read empty over HTTP and asked for the browser lane, which this key does not have: the browser lane comes with an account\'s own key (https://octocrawl.dev/dashboard/keys/) or a signed-in MCP connection; a new batch of those URLs from one reads them in a browser (5 credits a page)'])
+      expect(batchFailureHints({ fast_mode_declined: { count: 1, hosts: ['a.test'] } }, { hosted: true, browserLane: false })).toEqual(['1 page of a.test read empty over HTTP and asked for the browser lane, which this key does not have: the browser lane comes with an account\'s own key (https://octocrawl.dev/dashboard/keys/) or a signed-in MCP connection; a new batch of that URL from one reads it in a browser (5 credits a page)'])
     })
 
     it('names what this server obeys for robots.txt and gates, and the route on the person\'s own computer', () => {
@@ -199,8 +199,8 @@ describe('agent hints', () => {
       expect(gated).toContain('3 pages of g.test gate automated access (a challenge or bot check); hosted Octocrawl does not solve challenges')
       expect(gated).toContain('npx octocrawl serve, then the batch with a handoff')
       expect(batchFailureHints({ gated: { count: 1, hosts: ['g.test'] } }, { handoff: true })[0]).toContain('a batch handoff (hand_off_batch, POST /v1/batches/:id/handoff, octocrawl batch --handoff) opens them there')
-      expect(batchFailureHints({ gated: { count: 1, hosts: ['g.test'] } }, {})[0]).toBe('1 page of g.test gate automated access (a challenge or bot check); this server has no Chrome of the person\'s to hand them to; on their own computer Octocrawl can (npx octocrawl serve, then the batch with a handoff)')
-      expect(batchFailureHints({ robots_disallowed: { count: 1, hosts: ['r.test'] } }, { hosted: true })[0]).toBe('1 page of r.test are disallowed by their robots.txt for Octocrawl: the site owner\'s rule, which hosted Octocrawl obeys for every URL; on your computer a URL you name is read on the record (npx octocrawl serve)')
+      expect(batchFailureHints({ gated: { count: 1, hosts: ['g.test'] } }, {})[0]).toBe('1 page of g.test gates automated access (a challenge or bot check); this server has no Chrome of the person\'s to hand them to; on their own computer Octocrawl can (npx octocrawl serve, then the batch with a handoff)')
+      expect(batchFailureHints({ robots_disallowed: { count: 1, hosts: ['r.test'] } }, { hosted: true })[0]).toBe('1 page of r.test is disallowed by its robots.txt for Octocrawl: the site owner\'s rule, which hosted Octocrawl obeys for every URL; on your computer a URL you name is read on the record (npx octocrawl serve)')
     })
 
     it('puts every other reason in one line that points at the items, and a timeout at the ceiling offers no longer one', () => {
@@ -208,7 +208,7 @@ describe('agent hints', () => {
         '4 pages failed for other reasons (http_error 2, dns_error 1, tls_error 1): get_batch_errors (GET /v1/batches/:id/errors) lists them, each with its own agentHints',
       ])
       const hints = batchFailureHints({ timeout: { count: 1, hosts: ['s.test'] }, http_error: { count: 1, hosts: ['h.test'] } }, {})
-      expect(hints[0]).toBe('1 page of s.test ran out of the longest timeout Octocrawl takes (300000 ms): the sites were down or slower than that; a new batch of those URLs later tells one from the other')
+      expect(hints[0]).toBe('1 page of s.test ran out of the longest timeout Octocrawl takes (300000 ms): the site was down or slower than that; a new batch of that URL later tells one from the other')
       expect(batchFailureHints({ timeout: { count: 1, hosts: ['s.test'] } }, { timeout: 300_000 })[0]).toContain('the longest timeout Octocrawl takes')
       expect(hints[1]).toBe('1 more page failed for other reasons (http_error 1): get_batch_errors (GET /v1/batches/:id/errors) lists them, each with its own agentHints')
       expect(batchFailureHints({}, {})).toEqual([])
