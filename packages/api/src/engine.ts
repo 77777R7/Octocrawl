@@ -795,6 +795,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // A hosted server's hints name the routes a server on the person's computer has (logins, handoff, actions), never its own.
     ...(options.hosted === true ? { hosted: true } : {}),
     ...(options.noFileStore === true ? { noFiles: true } : {}),
+    // The routes to a page behind the person's login: their Chrome takes a request it can give, and mode authed takes no script.
+    ...(userChrome !== null && unreadByPerson(page) === null ? { personChrome: true } : {}),
+    ...(savedLogins !== null ? { savedLogins: true } : {}),
+    ...(page.actions?.some((action) => action.type === 'executeJavascript') === true ? { scriptAction: true } : {}),
     ...(userChrome !== null && !installedChrome && options.browserAllowedHosts === undefined && mode === 'standard'
       && (options.channelPolicy?.(url) ?? 'ladder') === 'ladder' && installedChromeRefusal(page) === null
       ? { installedChrome: true } : {}),
@@ -2145,7 +2149,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       // The my-browser lane: the page read in the person's Chrome, nothing fetched by Octocrawl, nothing cached.
       if (req.lane === 'my-browser') {
         const read = await myBrowserScrape(req, context, hooks)
-        const agentHints = agentHintsFor(req, { channelsTried: [read.lane], result: read })
+        const agentHints = agentHintsFor(req, { channelsTried: [read.lane], result: read }, hintOffers(mode, req.url, fetchOptions(req, req.formats)))
         const full: ScrapeRun = { ...read, channelsTried: [read.lane], ladderTrace: [], summary: summarize([read.lane], [{ channel: read.lane, result: read }]), ...(agentHints.length === 0 ? {} : { agentHints }) }
         // Its JSON is extracted within the caller's and the engine's own signals, not the fetch's deadline: the person's time is theirs.
         return deliver(full, createExecutionScope({ signal: AbortSignal.any([...(context.signal === undefined ? [] : [context.signal]), shutdownController.signal]) }), true)
@@ -2167,7 +2171,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         : 'reason' in handed ? withHandoffHint({ ...run.result, warnings: [...(run.result.warnings ?? []), { code: 'handoff_not_through', message: `Handed to you in your Chrome, the page was not read: ${handed.reason}.` }] }, req, true)
           : answer.kind === 'fetch' && answer.missed && plan?.bounds != null ? withCacheMiss(handed.result, plan.bounds) : handed.result
       // The hints of a page read in the person's Chrome speak of that read, not of the stopped run's lanes.
-      const agentHints = read !== null ? agentHintsFor(req, { channelsTried: [result.lane], result }) : agentHintsFor(req, { ...run, result }, hintOffers(mode, req.url, fetchOptions(req, req.formats)))
+      const offers = hintOffers(mode, req.url, fetchOptions(req, req.formats))
+      const agentHints = read !== null ? agentHintsFor(req, { channelsTried: [result.lane], result }, offers) : agentHintsFor(req, { ...run, result }, offers)
       // The call's totals count the read in the person's Chrome as one more attempt, after the stopped run's.
       const summary = read === null ? run.summary : { ...run.summary, ...summarize(run.channelsTried, [...run.summary.attempts, { channel: read.lane, result: read, ordinal: run.summary.attempts.length + 1 }]) }
       const full: ScrapeRun = {

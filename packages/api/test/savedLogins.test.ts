@@ -85,7 +85,49 @@ describe('saved logins in the API engine', () => {
     for (let i = 0; i < 100 && !['completed', 'failed', 'cancelled'].includes(status?.status ?? ''); i++) { await new Promise((resolve) => setTimeout(resolve, 20)); status = await engine!.getBatch(accepted.taskId) }
     const item = (await engine!.getBatchItems(accepted.taskId))!.items[0]!
     expect(item.status).toBe('blocked')
-    expect(item.agentHints).toEqual([expect.stringMatching(/refused your saved login for example\.com.*octocrawl login import example\.com/)])
+    expect(item.agentHints).toEqual([expect.stringMatching(/www\.example\.com no longer accepts the saved login for example\.com.*octocrawl login import example\.com/)])
+  })
+
+  describe('the hint of a login wall names the routes this server has for this request', () => {
+    const walled = (): Channel[] => [{ id: 'browser_local', identity: identityBundleFrom(modeIdentity('standard')), fetch: async (url) => ({ ...page(url, 'browser_local', ''), status: 'blocked', blockReason: 'login_wall', markdown: null }) }]
+    const hintOn = async (options: { sessions: boolean; chrome: boolean }, request: Record<string, unknown> = {}) => {
+      root = await mkdtemp(join(tmpdir(), 'w2l-logins-'))
+      engine = createApiEngine({ taskRoot: join(root, 'tasks'), channelsFor: walled, sessionsFile: options.sessions ? join(root, 'sessions.json') : null, ...(options.chrome ? { userChrome: {} } : {}) })
+      const res = await engine.scrape({ url: URL_, ...request } as Parameters<ApiEngine['scrape']>[0])
+      expect(res.blockReason).toBe('login_wall')
+      return res.agentHints![0]!
+    }
+
+    it('on a server on the person\'s machine, their Chrome and a saved login', async () => {
+      const hint = await hintOn({ sessions: true, chrome: true })
+      expect(hint).toContain('ask the person first, naming www.example.com')
+      expect(hint).toContain('lane my-browser')
+      expect(hint).toContain('octocrawl login import www.example.com')
+    })
+
+    it('for a request their Chrome cannot give, the saved login alone, and not that the server has neither', async () => {
+      const hint = await hintOn({ sessions: true, chrome: true }, { formats: ['screenshot'] })
+      expect(hint).not.toContain('my-browser')
+      expect(hint).not.toContain('this server reads no')
+      expect(hint).toContain('octocrawl login import www.example.com')
+    })
+
+    it('for a request with a script, which neither route takes, says to drop it first', async () => {
+      const hint = await hintOn({ sessions: true, chrome: true }, { actions: [{ type: 'executeJavascript', script: '1 + 1' }] })
+      expect(hint).toContain('send the request without its executeJavascript action')
+      expect(hint).not.toContain('my-browser')
+    })
+
+    it('on a server with neither, says so', async () => {
+      expect(await hintOn({ sessions: false, chrome: false })).toContain('this server reads no saved login and no Chrome of the person\'s')
+    })
+
+    it('never on hosted, which keeps its own hint', async () => {
+      root = await mkdtemp(join(tmpdir(), 'w2l-logins-'))
+      engine = createApiEngine({ taskRoot: join(root, 'tasks'), channelsFor: walled, hosted: true, sessionsFile: join(root, 'sessions.json'), userChrome: {} })
+      const res = await engine.scrape({ url: URL_ } as Parameters<ApiEngine['scrape']>[0])
+      expect(res.agentHints![0]).toContain('hosted Octocrawl holds no logins')
+    })
   })
 
   it('other modes never load a saved login', async () => {

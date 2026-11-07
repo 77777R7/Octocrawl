@@ -28,6 +28,37 @@ describe('server instructions and identity', () => {
     } finally { await client.close() }
   })
 
+  describe('a page behind the person\'s login', () => {
+    const tools = ['scrape', 'get_scrape', 'map']
+    const jobs = [...tools, 'crawl', 'wait_crawl', 'get_crawl_pages', 'batch_scrape', 'wait_batch', 'get_batch_items']
+
+    it('tells a local agent what it looks like, to ask first, and how long a yes lasts, before it ever meets one', () => {
+      const text = serverInstructions(tools, { kind: 'local' })
+      expect(text).toContain('A login wall Octocrawl recognises comes back blocked (login_wall)')
+      expect(text).toMatch(/lane my-browser, handoff and mode authed read as them.*ask the person first, naming the site/)
+      expect(text).toContain('say when a page was read as them')
+      expect(text).toContain('A yes covers that site for this conversation')
+    })
+
+    it('says nothing of it on a read-only server, which refuses those options', () => {
+      const text = serverInstructions(tools, { kind: 'local', readOnly: true })
+      expect(text).not.toContain('login_wall')
+      expect(text).not.toContain('my-browser')
+    })
+
+    it('on hosted, says a login needs a local server, not this connection, and names no option hosted refuses', () => {
+      for (const [names, connection] of [[tools, 'keyless'], [tools, 'key'], [jobs, 'key'], [jobs, 'oauth']] as const) {
+        const text = serverInstructions(names, { kind: 'hosted', connection, browser: true })
+        // Nothing forwards a hosted read to the person's computer yet (ROADMAP, the decision of 2026-11-04), so it says this connection does not.
+        expect(text).toMatch(/logins(,| need).*not (this one|through this one)/)
+        expect(text).toContain('npx octocrawl serve')
+        expect(text).toContain('ask first, naming the site')
+        expect(text).not.toContain('my-browser')
+        expectUsableInstructions(text, [...names])
+      }
+    })
+  })
+
   it('writes instructions for the tools a deployment lists, and nothing about the ones it leaves out', async () => {
     const allowed = new Set(['scrape', 'get_scrape', 'map'])
     const client = await connect(createMcpServer(new W2L({ baseUrl: 'http://127.0.0.1:1' }), { allowedTools: allowed }))

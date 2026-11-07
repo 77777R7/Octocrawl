@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DeliveryStore, DeliveryWorker } from '@w2l/runtime'
 import { createApp, injectJobWebSockets, isLoopbackAuthority } from './app.js'
+import { listSavedLogins } from './chromeLogin.js'
 import { createApiEngine, defaultSessionsFile } from './engine.js'
 import { closeIdleOnlyWhenUnread } from './keepAlive.js'
 import { parseListen, parsePort } from './listen.js'
@@ -104,6 +105,12 @@ export async function runApiServer(argv: readonly string[], env: NodeJS.ProcessE
   } else if (listen.mode === 'local') {
     // Bound to another address, the server took a token: an MCP server elsewhere needs the machine's address and that token, not the bind address.
     log(`octocrawl: an MCP server on another machine reaches this one with W2L_API_URL=http://<this machine's address>:${port} and W2L_API_TOKEN=<the token this server was started with> (npx -y @octocrawl/mcp); Ctrl-C stops the server`)
+  }
+  // Where a person first sees what this server can do for them: that the Chrome they are signed in to is one way in. The rule to ask is the agent's, in its instructions, so this says it is told to.
+  if (servesLogins) {
+    // Only a count: a damaged file is the login commands' to report, and does not stop a server that is already listening.
+    const saved = await listSavedLogins(defaultSessionsFile(env)).then((logins) => logins.length, () => 0)
+    log(`octocrawl: a page behind your login: an agent is told to ask you first, then reads it in the Chrome you are signed in to (lane my-browser; you click Allow) or with a login you save once (npx octocrawl login import <site>, then mode authed); saved logins stay on this computer${saved === 0 ? '' : ` (${saved} saved: npx octocrawl login list)`}`)
   }
   return { url, close }
 }
