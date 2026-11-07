@@ -136,7 +136,7 @@ import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitF
 import type { BrowserEngineName, BrowserIdentityChoice, BrowserKeeper, CaptchaSolving, ChannelAdmission, ChannelsFiltered, InstalledChromeTestSeams, PricedExit } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
 import { agentHintsFor, withJsonHints, batchExtractionHints, batchFailureHints, batchLoginWallHint, failureGroupOf, httpLaneAskedForBrowser, mapAgentHints, MAX_AGENT_HINTS, pinnedFastModeHints, withFailure, type BatchFailures, type FailureFacts, type FastModePin, type HintOffers } from './hints.js'
-import { HandoffNotThrough, LOGIN_WAIT_MS, openUserChrome, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
+import { HandoffNotThrough, LOGIN_WAIT_MS, openUserChrome, SIGN_IN_SETTLE_MS, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
 import { importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
 import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
 import { JobWebhooks, webhookOf } from './jobWebhooks.js'
@@ -1591,7 +1591,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       catch (error) { throw new HandoffUnavailableError(error instanceof Error ? error.message : String(error)) }
       try {
         // A sign-in nobody is at holds the caller only briefly, so it can tell them; a wait it asked for is its own.
-        return await readAllowed(chrome, allowed, req.url, fetchOptions(req, req.formats), req.handoff?.waitMs, hooks, signal, started, undefined, req.handoff?.waitMs === undefined ? LOGIN_WAIT_MS : undefined, req.backgroundTabs === true)
+        return await readAllowed(chrome, allowed, req.url, fetchOptions(req, req.formats), req.handoff?.waitMs, hooks, signal, started, undefined, req.handoff?.waitMs === undefined ? LOGIN_WAIT_MS : undefined, req.backgroundTabs === true, SIGN_IN_SETTLE_MS)
       } finally {
         await allowed.close()
       }
@@ -1606,7 +1606,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * the check it still showed (`blocked`), Chrome refusing a command (`connection_error`), the site leading the tab
    * elsewhere each time it was taken back to the page (`redirect_limit`), or the wait over (`timeout`).
    */
-  async function readAllowed(chrome: UserChrome, allowed: AllowedSites, url: string, fetchOpts: FetchOptions, waitMs: number | undefined, hooks: HandoffHooks, signal: AbortSignal, started: number, hiddenWaitMs?: number, loginWaitMs?: number, background = false): Promise<FetchResult> {
+  async function readAllowed(chrome: UserChrome, allowed: AllowedSites, url: string, fetchOpts: FetchOptions, waitMs: number | undefined, hooks: HandoffHooks, signal: AbortSignal, started: number, hiddenWaitMs?: number, loginWaitMs?: number, background = false, signInSettleMs?: number): Promise<FetchResult> {
     try {
       const read = await chrome.read(url, {
         unattended: true,
@@ -1617,6 +1617,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         shownOnly: true,
         ...(hiddenWaitMs === undefined ? {} : { hiddenWaitMs }),
         ...(loginWaitMs === undefined ? {} : { loginWaitMs }),
+        // A page that holds content back behind a sign-in: the site may sign the person back in by itself.
+        ...(signInSettleMs === undefined ? {} : { signInSettleMs }),
         ...(waitMs === undefined ? {} : { waitMs }),
         ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }),
         ...(hooks.onHidden === undefined ? {} : { onHidden: hooks.onHidden }),
@@ -1666,6 +1668,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // A batch waits once for a tab out of sight: after one page's tab stayed out of sight through the wait, the pages after
     // it are read whole at once (page_read_hidden), not each after 30 s more.
     let hiddenWaitedOut = false
+    // Nor does it wait page after page for a site to sign the person back in: after a page read without their login, the
+    // pages after it are read at once, until one comes with it again.
+    let signedOut = false
     const open = (): Promise<Opened> => opened ??= (async (): Promise<Opened> => {
       if (userChrome === null) return { refused: 'this server does not read pages in your Chrome: run Octocrawl on your own machine (octocrawl serve, the local MCP host, or the octocrawl CLI)', status: 'connection_error' }
       let chrome: UserChrome
@@ -1688,11 +1693,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         if (!connection.allowed.hosts.includes(new URL(url).host)) return unread(url, 'cancelled', `${new URL(url).host} is not among the sites you allowed for this run of the batch`, started)
         if (signal.aborted || context?.signal?.aborted === true) return unread(url, 'cancelled', `the batch stopped before ${url} was read`, started)
         // The task's cancel, or this engine shutting down, ends the read; the page's own timeout does not: the person's time is theirs.
-        const pending = readAllowed(connection.chrome, connection.allowed, url, fetchOpts, undefined, {}, AbortSignal.any([signal, ...(context?.signal === undefined ? [] : [context.signal])]), started, hiddenWaitedOut ? 0 : undefined, undefined, backgroundTabs)
+        const pending = readAllowed(connection.chrome, connection.allowed, url, fetchOpts, undefined, {}, AbortSignal.any([signal, ...(context?.signal === undefined ? [] : [context.signal])]), started, hiddenWaitedOut ? 0 : undefined, undefined, backgroundTabs, signedOut ? undefined : SIGN_IN_SETTLE_MS)
         reading = pending
         try {
           const read = await pending
           if (read.warnings?.some((warning) => warning.code === 'page_read_hidden') === true) hiddenWaitedOut = true
+          if (CONTENTFUL_STATUS.has(read.status)) signedOut = readSignedOut(read)
           return { result: read, links: read.links ?? [] }
         } finally {
           if (reading === pending) reading = null
@@ -1709,6 +1715,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         connection.chrome.close()
       },
     }
+  }
+
+  /** A page read in the person's Chrome without their login: it says so (sign_in_prompt), or it still held content back behind a sign-in when its wait for the site ended. */
+  function readSignedOut(result: FetchResult): boolean {
+    if (result.warnings?.some((warning) => warning.code === 'sign_in_prompt') === true) return true
+    return result.trace.some((event) => event.event === 'user_browser_read' && (event.detail as { signInWait?: { cleared?: boolean } } | undefined)?.signInWait?.cleared === false)
   }
 
   /** The scrape's stopped page handed to the person, with its own Chrome connection: the page read, or why not. */
