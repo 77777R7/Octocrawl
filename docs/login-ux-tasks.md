@@ -145,13 +145,14 @@ ROADMAP：
 
 起因：时刻 1、2、7。tool search 下模型一开始只看到工具名和 instructions（`docs/mcp-client-ux-tasks.md` W3 的理由），这是最便宜的"第一次就问对"。
 
-- [ ] **L2.1** `instructions.ts:55` 的那句改成（本地、非只读、列出了 `scrape`）："A page behind the person's login comes back blocked with blockReason login_wall. Octocrawl never signs in for them: ask them, naming the site, whether to read it in the Chrome they are signed in to (lane my-browser) or with a login they save once (import_login, then mode authed on scrape and batch_scrape; crawl takes none). lane my-browser, handoff and mode authed act as the person: ask first, say in your answer when a page was read as them, and their yes for a site holds for its other pages in this conversation."（最后一个从句按 D7。）`import_login`、`batch_scrape` 只在列出时点名，否则用条件句，和文件里其他句子一样。
-- [ ] **L2.2** 只读版（`:54`）不变。hosted 版（`:75-76`）那句 "Monitors and saved logins run on a server on the person's computer" 加半句 "which reads a page behind their login as them, after asking them"；不提 my-browser（hosted 拒绝它）。
-- [ ] **L2.3** 量长度：本地四个面各量一次，写进 PR。本地超过 2,000 时缩别的句子，不缩这一句。
+- [ ] **L2.1** `instructions.ts:55` 的那句改成（本地、非只读、列出了 `scrape`）："A login wall Octocrawl recognises comes back blocked (login_wall). lane my-browser, handoff and mode authed read as them, in their own Chrome or with their saved login: ask the person first, naming the site, and say when a page was read as them. A yes covers that site for this conversation."（最后一句按 D7。）只写"认得出的"：邮箱优先的表单和纯 SSO 页面不会标成 `login_wall`。不点名 `import_login`，路线由 L1 的 hint 给。
+- [ ] **L2.2** 只读版（`:54`）不变。hosted 带 jobs："Monitors and logins need a local server, not this one: npx octocrawl serve; ask first, naming the site."；不带 jobs："Crawls, batches and Monitors run on a server on the person's computer: npx octocrawl serve. So do logins, on that server and not through this one: ask first, naming the site."。写明 not this one，因为 hosted 还不会转发（Phase 3 冻结）；不提 my-browser（hosted 拒绝它）。
+- [ ] **L2.3** 量长度，写进 PR。2026-11-07 实测（改前 → 改后）：本地全量 1,758 → 1,904，hosted key 带 jobs 和浏览器 1,982 → 1,997，OAuth 1,961 → 1,976，keyless 1,124 → 1,193。hosted key 那一面只剩 3 个字符，下一句要加就得先缩别的。
 - 验收：
   - 先写失败测试：本地非只读 instructions 不含 "login_wall"。
-  - 改后：本地非只读含这句；只读不含 `my-browser`；hosted 不含 `my-browser`，含 "after asking them"；每个面 < 2,000 字符，不含 `https?://`。
+  - 改后：本地非只读含这句；只读不含 `login_wall` 和 `my-browser`；hosted 不含 `my-browser`，含 "ask first, naming the site" 和 "not this one" 或 "not through this one"；每个面不超过 2,000 字符，不含 `https?://`。
   - `toolsets.test.ts:141` 的 `expectUsableInstructions`（`instructionChecks.ts:10-21`：长度 400–2,000、工具名都在列表里、无 URL 和 `utm_`）通过。
+- 实现：PR #871（`2a1dafad`），开着，合并后再勾上面几项。hosted 的文字要等 hosted 部署才生效。
 - 指标：instructions 里"结果是 login_wall 时做什么"0 句 → 1 句。
 - 决定：D7。
 
