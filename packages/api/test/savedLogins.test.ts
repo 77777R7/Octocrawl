@@ -130,6 +130,47 @@ describe('saved logins in the API engine', () => {
     })
   })
 
+  describe('a finished batch says what to do about the pages that asked for a login', () => {
+    const walled = (url: string): FetchResult => ({ ...page(url, 'browser_local', ''), status: 'blocked', blockReason: 'login_wall', markdown: null })
+    const open = 'https://open.example.org/page'
+    const channels = (): Channel[] => [{ id: 'browser_local', identity: identityBundleFrom(modeIdentity('standard')), fetch: async (url) => url === open ? page(url, 'browser_local', 'A public page with enough words to count as content for this test.') : walled(url) }]
+    const finished = async (urls: readonly string[], extra: { sessions?: boolean; chrome?: boolean } = {}) => {
+      root = await mkdtemp(join(tmpdir(), 'w2l-logins-'))
+      engine = createApiEngine({ taskRoot: join(root, 'tasks'), channelsFor: channels, sessionsFile: extra.sessions === false ? null : join(root, 'sessions.json'), ...(extra.chrome === false ? {} : { userChrome: {} }) })
+      const accepted = await engine.startBatch({ urls } as Parameters<ApiEngine['startBatch']>[0])
+      let status = await engine.getBatch(accepted.taskId)
+      for (let i = 0; i < 200 && !['completed', 'failed', 'cancelled'].includes(status?.status ?? ''); i++) { await new Promise((resolve) => setTimeout(resolve, 20)); status = await engine.getBatch(accepted.taskId) }
+      return status!
+    }
+
+    it('in one line, counting those pages alone, with the routes this server has', async () => {
+      const status = await finished(['https://www.example.com/a', 'https://www.example.com/b', open])
+      expect(status.agentHints).toEqual([expect.stringMatching(/^2 pages of www\.example\.com asked for a login: ask the person first, naming the site, whether to read them with hand_off_batch .*lane my-browser.*import_login www\.example\.com/)])
+    })
+
+    it('offers the handoff only for pages it would take: a list batch hands over lists stopped at a check, not a page at a login wall', async () => {
+      const list = 'https://list.example.org/page'
+      const stopped = (url: string): FetchResult => ({ ...page(url, 'browser_local', ''), status: 'blocked', blockReason: 'captcha', markdown: null, actions: { lists: [{ type: 'paginate', stoppedBy: 'challenge', challenge: { blockReason: 'captcha', url } }] } } as unknown as FetchResult)
+      root = await mkdtemp(join(tmpdir(), 'w2l-logins-'))
+      engine = createApiEngine({ taskRoot: join(root, 'tasks'), sessionsFile: join(root, 'sessions.json'), userChrome: {}, channelsFor: () => [{ id: 'browser_local', identity: identityBundleFrom(modeIdentity('standard')), fetch: async (url) => url === list ? stopped(url) : walled(url) }] })
+      const accepted = await engine.startBatch({ urls: [list, 'https://www.example.com/a'], actions: [{ type: 'paginate', selector: 'a.next', itemSelector: '.item', maxPages: 2 }] } as unknown as Parameters<ApiEngine['startBatch']>[0])
+      let status = await engine.getBatch(accepted.taskId)
+      for (let i = 0; i < 200 && !['completed', 'failed', 'cancelled'].includes(status?.status ?? ''); i++) { await new Promise((resolve) => setTimeout(resolve, 20)); status = await engine.getBatch(accepted.taskId) }
+      expect(status?.waitingForPerson).toBe(1)
+      expect(status?.agentHints).toEqual([expect.stringContaining('1 page of www.example.com asked for a login')])
+      expect(status?.agentHints?.[0]).not.toContain('hand_off_batch')
+    })
+
+    it('says nothing when no page asked for one', async () => {
+      expect((await finished([open])).agentHints).toBeUndefined()
+    })
+
+    it('on a server with neither route, names none as its own', async () => {
+      const status = await finished(['https://www.example.com/a'], { sessions: false, chrome: false })
+      expect(status.agentHints).toEqual([expect.stringContaining('this server reads no saved login')])
+    })
+  })
+
   it('other modes never load a saved login', async () => {
     const { seen } = await setup()
     const res = await engine!.scrape({ url: URL_ })

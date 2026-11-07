@@ -135,7 +135,7 @@ import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, de
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, verify, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { BrowserEngineName, BrowserIdentityChoice, BrowserKeeper, CaptchaSolving, ChannelAdmission, ChannelsFiltered, InstalledChromeTestSeams, PricedExit } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
-import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints, MAX_AGENT_HINTS, pinnedFastModeHints, type FastModePin, type HintOffers } from './hints.js'
+import { agentHintsFor, batchLoginWallHint, httpLaneAskedForBrowser, mapAgentHints, MAX_AGENT_HINTS, pinnedFastModeHints, type FastModePin, type HintOffers } from './hints.js'
 import { HandoffNotThrough, openUserChrome, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
 import { importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
 import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
@@ -1299,6 +1299,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const waitingForPerson = userChrome === null || !offersHandoff(task) ? undefined
         : listsPages(task) ? (await stepsOf(store, taskId, 'errors')).filter((step) => handoffNeededIn(task, step)).length
           : Object.entries(await store.countBlockReasons(taskId)).reduce((sum, [reason, count]) => sum + (HANDOFF_REASONS[reason] === undefined ? 0 : count), 0)
+      // A finished batch says what to do about the pages behind a login in one line; a batch still running has more to read first, and a handoff waits for its end.
+      const behindLogin = isTerminalStatus(task.status) && ((await store.countBlockReasons(taskId)).login_wall ?? 0) > 0
+        ? (await stepsOf(store, taskId, 'errors')).filter((step) => step.result?.blockReason === 'login_wall') : []
       return {
         ...report, requested: task.batch.urls.length, completed, remaining: Math.max(0, task.batch.urls.length - completed),
         // A page read, with or without content, succeeded; what the errors report lists failed.
@@ -1320,6 +1323,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ...(task.status === 'running' || task.status === 'pending' ? { rate: await runningRate(store, taskId, latest, Math.max(0, task.batch.urls.length - completed)) } : {}),
         ...(task.batch.invalidURLs === undefined ? {} : { invalidURLs: task.batch.invalidURLs }),
         ...(waitingForPerson === undefined ? {} : { waitingForPerson }),
+        ...(behindLogin.length === 0 ? {} : { agentHints: [batchLoginWallHint(behindLogin.map((step) => step.url), { mode: task.mode, webhook: webhookOf(task) !== undefined, ...(task.batch.lane === undefined ? {} : { lane: task.batch.lane }) }, { ...taskHintOffers(task, behindLogin[0]!.url), handoff: waitingForPerson !== undefined && behindLogin.some((step) => handoffNeededIn(task, step)) })] }),
         ...(approvalsWaiting.has(taskId) ? { waitingForApproval: true as const } : {}),
         ...(webhook === undefined ? {} : { webhook }),
         ...resultFilesField(task),

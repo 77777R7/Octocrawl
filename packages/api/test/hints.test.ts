@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { INSTALLED_CHROME_INSTALL } from '@w2l/bench'
-import { agentHintsFor, mapAgentHints, offPageHint, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, HOSTED_LOGIN_WALL_HINT, hostedFileNotKeptHint, hostedGateHint, INSTALLED_CHROME_MISSING_HINT, renderedLowYieldHint, renderedNotLoadedHint, INSTALLED_CHROME_RECOMMENDED_HINT, lowContentYieldHint, MAX_AGENT_HINTS, pinnedFastModeHints, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
+import { batchLoginWallHint, agentHintsFor, mapAgentHints, offPageHint, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, HOSTED_LOGIN_WALL_HINT, hostedFileNotKeptHint, hostedGateHint, INSTALLED_CHROME_MISSING_HINT, renderedLowYieldHint, renderedNotLoadedHint, INSTALLED_CHROME_RECOMMENDED_HINT, lowContentYieldHint, MAX_AGENT_HINTS, pinnedFastModeHints, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
 
 const URL_ = 'https://example.test/report'
 
@@ -96,6 +96,51 @@ describe('agent hints', () => {
       const again = 'example.test no longer accepts the saved login for example.test (expired or signed out); ask the person to sign in to it again in Chrome, then save it again (import_login example.test, or octocrawl login import example.test): a running server uses the new one at once'
       expect(refused({ savedLogins: true })).toEqual([again])
       expect(refused({ personChrome: true, savedLogins: true })).toEqual([`${again}; or, with their yes, read this page in their Chrome now (lane my-browser in mode standard)`])
+    })
+  })
+
+  describe('a batch whose pages asked for a login', () => {
+    const urls = (...hosts: string[]) => hosts.map((host) => `https://${host}/page`)
+    const HANDOFF = 'hand_off_batch (POST /v1/batches/:id/handoff; they get through in their Chrome, one tab at a time)'
+    const LANE = 'a new batch of those URLs with lane my-browser in mode standard'
+    const SAVED = (host: string) => `a new batch of those URLs in mode authed, after import_login ${host} (or octocrawl login import ${host})`
+
+    it('counts the pages, names the site and gives the routes this server has, asking first', () => {
+      expect(batchLoginWallHint(urls('a.test', 'a.test'), {}, { personChrome: true, savedLogins: true, handoff: true })).toBe(`2 pages of a.test asked for a login: ask the person first, naming the site, whether to read them with ${HANDOFF}, ${LANE} or ${SAVED('a.test')}`)
+      expect(batchLoginWallHint(urls('a.test'), {}, { savedLogins: true })).toBe(`1 page of a.test asked for a login: ask the person first, naming the site, whether to read it with ${SAVED('a.test')}`)
+    })
+
+    it('names three sites at most, and leaves the import to the person to name', () => {
+      const hint = batchLoginWallHint(urls('a.test', 'b.test', 'c.test', 'd.test', 'e.test', 'a.test'), {}, { savedLogins: true })
+      expect(hint).toContain('6 pages of a.test, b.test, c.test and 2 more asked for a login')
+      expect(hint).toContain('naming each site')
+      expect(hint).toContain('import_login <host>')
+    })
+
+    it('in mode authed, says the saved login did not do it', () => {
+      expect(batchLoginWallHint(urls('a.test'), { mode: 'authed' }, { savedLogins: true })).toContain('1 page of a.test still asked for a login in mode authed, so its saved login is missing or expired:')
+    })
+
+    it('on the my-browser lane, says to sign in there and offers that lane no more', () => {
+      expect(batchLoginWallHint(urls('a.test', 'a.test'), { lane: 'my-browser' }, { personChrome: true, savedLogins: true })).toBe('2 pages of a.test asked for a login in the person\'s own Chrome too: ask them to sign in there, then read those pages again')
+    })
+
+    it('with a webhook, which neither route takes, says to leave it out of the new batch', () => {
+      const hint = batchLoginWallHint(urls('a.test'), { webhook: true }, { personChrome: true, savedLogins: true })
+      expect(hint).toContain('a new batch of those URLs without its webhook with lane my-browser')
+      expect(hint).toContain('a new batch of those URLs without its webhook in mode authed')
+    })
+
+    it('with an executeJavascript action, says to drop it first', () => {
+      expect(batchLoginWallHint(urls('a.test'), {}, { savedLogins: true, scriptAction: true })).toContain('send the batch without its executeJavascript action, which mode authed refuses, and ask the person first')
+    })
+
+    it('on a server with neither route, and on a hosted one, names none as its own', () => {
+      expect(batchLoginWallHint(urls('a.test'), {}, {})).toBe('1 page of a.test asked for a login; this server reads no saved login and no Chrome of the person\'s; on their own computer Octocrawl reads it as them, after asking them (npx octocrawl serve, then lane my-browser, or octocrawl login import a.test and mode authed)')
+      const hosted = batchLoginWallHint(urls('a.test'), {}, { hosted: true })
+      expect(hosted).toContain('hosted Octocrawl holds no logins and never takes theirs')
+      expect(hosted).toContain('ask the person first, naming the site')
+      for (const local of ['hand_off_batch', 'import_login', 'my-browser']) expect(hosted).not.toContain(local)
     })
   })
 
