@@ -289,6 +289,20 @@ describe('hosted job tools over MCP', () => {
     }
   })
 
+  it('says in a finished batch\'s status what to do about its failed pages, a line a reason, before the download link\'s line', async () => {
+    const { connect, store } = await start()
+    const client = await connect('oc_account')
+    const started = structured(await client.callTool({ name: 'batch_scrape', arguments: { urls: ['https://a.test/1', 'https://b.test/2'], fastMode: true, timeout: 30_000 } }))
+    const id = started.taskId as string
+    store.jobs.set(id, { ...store.jobs.get(id)!, status: 'completed', finishedAt: new Date().toISOString(), counts: { pages: 0, errors: 2, slices: 1 }, failures: { fast_mode_declined: { count: 1, hosts: ['a.test'] }, timeout: { count: 1, hosts: ['b.test'] } } })
+    const hints = structured(await client.callTool({ name: 'get_batch', arguments: { id } })).agentHints as string[]
+    expect(hints).toEqual([
+      '1 page of a.test read empty over HTTP and asked for the browser lane, which fastMode declined: a new batch of those URLs without fastMode reads them in a browser (5 credits a page)',
+      expect.stringContaining('1 page of b.test ran out of their 30000 ms timeout: a new batch of those URLs with a longer timeout (up to 300000 ms) when the sites are slow rather than down'),
+      expect.stringContaining('export.url'),
+    ])
+  })
+
   it('measures a hosted batch\'s rate from its first slice, not from its wait in the queue, and says none for a crawl or a job that ended', () => {
     const job = { id: 'j', kind: 'batch', status: 'running', failureReason: null, request: { urls: Array.from({ length: 1_000 }, (_, i) => `https://example.com/${i}`) }, counts: { pages: 10, errors: 0, slices: 1 }, credits: { used: 10, maxCredits: null }, createdAt: '2026-11-05T00:00:00.000Z', startedAt: '2026-11-05T00:40:00.000Z', finishedAt: null, expireAt: '2026-11-12T00:00:00.000Z' } as unknown as HostedJob
     // 40 minutes in the queue, then 10 pages in 20 s: 30 a minute, 33 minutes left, not 66 hours.

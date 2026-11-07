@@ -126,6 +126,8 @@ describe('hosted job worker', () => {
     expect([...seen].sort()).toEqual(['/', '/a', '/b', '/c', '/d'])
     const job = (await store.get(id))!
     expect(job).toMatchObject({ status: 'completed', counts: { pages: 5, errors: 0 }, credits: { used: 5 } })
+    expect(job.failures).toBeUndefined()
+    expect(jobStatus(job)).not.toHaveProperty('agentHints')
     expect(await credits.balance('account-1', NOW)).toBe(995)
     expect(credits.usage.get('account-1-2026-10-19')).toMatchObject({ http: 5, credits: 5 })
     expect(job.segments).toHaveLength(job.counts.slices)
@@ -161,6 +163,9 @@ describe('hosted job worker', () => {
     await drain(id)
     const job = (await store.get(id))!
     expect(job).toMatchObject({ status: 'completed', counts: { pages: 2, errors: 1 }, outcomes: { read: 2, not_found: 1 } })
+    // The failed page is counted by reason with its site, and the finished status says what to do about it in one line.
+    expect(job.failures).toEqual({ http_error: { count: 1, hosts: ['127.0.0.1'] } })
+    expect(jobStatus(job).agentHints).toEqual(['1 page failed for other reasons (http_error 1): get_batch_errors (GET /v1/batches/:id/errors) lists them, each with its own agentHints'])
     const lines = credits.requests.get('account-1') ?? []
     expect(lines).toHaveLength(1)
     expect(lines[0]).toMatchObject({

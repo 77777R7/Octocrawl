@@ -60,6 +60,8 @@ beforeAll(async () => {
       if (cookie.includes('member=1')) return html(ARTICLE.replace('The member page', 'Your orders'))
       res.writeHead(302, { location: '/signin' }); res.end(); return
     }
+    // A page that always sends you to sign in, in any browser the tests share.
+    if (req.url === '/walled') { res.writeHead(302, { location: '/signin' }); res.end(); return }
     if (req.url === '/signin') return html('<h1>Sign in</h1><form><input name="user"><input type="password" name="pw"><button id="in" type="button" onclick="document.cookie=\'member=1; path=/\'; location.href=\'/\'">Sign in</button></form>')
     if (req.url === '/') return html(ARTICLE.replace('The member page', 'Welcome home'))
     // A page whose own data is not on it: the JSON format asks the model.
@@ -187,6 +189,26 @@ describe('reading a page in the person\'s own Chrome', () => {
 })
 
 describe('reading a page in the person\'s own Chrome once it has settled (ADR 0007)', () => {
+  it('a sign-in nobody acts on ends the read and its tab stays open; one the person acts on is waited for', async () => {
+    const reader = await openUserChrome({ userDataDir: join(root, 'chrome') })
+    const signIn = () => chrome.pages().filter((page) => page.url() === `${base}/signin`)
+    try {
+      // Octocrawl's own move to the page is not the person's act.
+      await expect(reader.read(`${base}/walled`, { unattended: true, pollMs: 50, loginWaitMs: 1_000, waitMs: 20_000 })).rejects.toThrow(/nobody acted on it for 1 s: its tab stays open there/)
+      expect(signIn()).toHaveLength(1)
+      await signIn()[0]!.close()
+
+      const click = async (page: Page) => { await page.waitForSelector('h1'); await page.click('h1') }
+      const stop = person(chrome, { '/walled': click, '/signin': click })
+      try {
+        await expect(reader.read(`${base}/walled`, { unattended: true, pollMs: 50, loginWaitMs: 1_500, waitMs: 5_000 })).rejects.toThrow(/was not through within 5 s/)
+      } finally { stop() }
+      await expect.poll(() => signIn().length).toBe(0)
+    } finally {
+      reader.close()
+    }
+  }, 30_000)
+
   it('waits while the page shows a loading message and while its text still grows, then reads it whole', async () => {
     const reader = await openUserChrome({ userDataDir: join(root, 'chrome') })
     try {

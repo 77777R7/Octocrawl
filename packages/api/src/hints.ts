@@ -240,6 +240,107 @@ export function batchLoginWallHint(urls: readonly string[], batch: { mode?: stri
   return `${head}: ${ask}, naming ${hosts.length === 1 ? 'the site' : 'each site'}, whether to read ${them} with ${routes.length === 0 ? last : `${routes.join(', ')} or ${last}`}`
 }
 
+/**
+ * What a batch's failed page comes down to, for the one line a reason its finished status carries (`batchFailureHints`):
+ * the facts a hosted slice's charge keeps of a page (engine.ts SliceCharge), so a hosted job counts them without reading
+ * its items back. `robots`: the robots.txt refusal, by a rule or by a file that could not be read. `browserDeclined`:
+ * the http lane asked for the browser lane and the batch's fastMode declined it.
+ */
+export interface FailureFacts { status: string; failureReason: string | null; blockReason: string | null; robots: 'disallowed' | 'unreachable' | null; browserDeclined: boolean }
+
+/**
+ * The group a failed page falls into in the finished batch's hint, or null for a page the hint leaves alone: a page read
+ * (with or without content), a cancelled or over-budget one (not the site's doing), and a page at a login wall, which has
+ * its own line (`batchLoginWallHint`). `fast_mode_declined`: an empty http answer whose browser lane fastMode declined.
+ * `robots_unreachable` and `robots_disallowed`: a robots.txt refusal. `gated`: a check Octocrawl does not pass. The rest
+ * is the page's own failure or block reason.
+ */
+export function failureGroupOf(facts: FailureFacts): string | null {
+  if (facts.status !== 'failed' && facts.status !== 'blocked') return null
+  if (facts.blockReason === 'login_wall') return null
+  if (facts.status === 'blocked') return facts.blockReason === null ? 'blocked' : GATES.has(facts.blockReason) ? 'gated' : facts.blockReason
+  if (facts.failureReason === 'policy_denied' && facts.robots !== null) return `robots_${facts.robots}`
+  if (facts.browserDeclined && facts.failureReason === 'empty_unverified') return 'fast_mode_declined'
+  return facts.failureReason ?? 'failed'
+}
+
+/** How many sites a failure group keeps by name: the three a hint names, and one more so the hint can say whether any are left. */
+const FAILURE_HOSTS_KEPT = BATCH_HINT_HOSTS + 1
+
+/**
+ * A finished batch's failed pages by group (`failureGroupOf`): how many, the first sites seen (at most
+ * `FAILURE_HOSTS_KEPT`), and whether more sites than those were seen. A hosted job folds each slice's charges into the
+ * record kept on the job; a local server folds the error steps of the task when its status is read.
+ */
+export type BatchFailures = Record<string, { count: number; hosts: string[]; moreHosts?: true }>
+
+/** `failures` with one more failed page of `host` in `group`, as a new record. */
+export function withFailure(failures: BatchFailures, group: string, host: string): BatchFailures {
+  const seen = failures[group] ?? { count: 0, hosts: [] }
+  const known = seen.hosts.includes(host)
+  const hosts = known || seen.hosts.length >= FAILURE_HOSTS_KEPT ? seen.hosts : [...seen.hosts, host]
+  const more = seen.moreHosts === true || (!known && seen.hosts.length >= FAILURE_HOSTS_KEPT)
+  return { ...failures, [group]: { count: seen.count + 1, hosts, ...(more ? { moreHosts: true as const } : {}) } }
+}
+
+/** The groups whose line says a next step; the rest share one line that points at the items. Listed in the order the lines come when counts tie. */
+const NAMED_FAILURE_GROUPS = ['fast_mode_declined', 'robots_unreachable', 'gated', 'timeout', 'robots_disallowed'] as const
+/** The most lines of their own a finished batch's failures take; the groups past them join the last line. */
+const MAX_FAILURE_LINES = 4
+
+/** "N pages of a, b, c and more": a group's pages and sites, as its line opens. */
+function failedPages(group: BatchFailures[string]): string {
+  const named = group.hosts.slice(0, BATCH_HINT_HOSTS).join(', ')
+  const rest = group.moreHosts === true ? ' and more sites' : group.hosts.length > BATCH_HINT_HOSTS ? ` and ${group.hosts.length - BATCH_HINT_HOSTS} more` : ''
+  return `${group.count} ${group.count === 1 ? 'page' : 'pages'} of ${named}${rest}`
+}
+
+/**
+ * The lines of a finished batch's status about its failed pages: one a reason, the next step in each, in place of an
+ * agent reading every failed item for the same. `fast_mode_declined` says to send those URLs again without fastMode;
+ * the robots and gate lines say what this server obeys and the route on the person's own computer; a timeout line names
+ * a longer timeout; every other reason shares one line that points at `get_batch_errors`, where each item keeps its
+ * own hint. Pages at a login wall are not here (`batchLoginWallHint`). `batch.timeout` is the batch's, when it named one;
+ * `browserLane` false when the key has no browser lane, so the batch ran on HTTP alone and no fastMode of its own kept it
+ * from the browser; `handoff` true when this server hands a batch's stopped pages to the person's Chrome.
+ */
+export function batchFailureHints(failures: BatchFailures, batch: { timeout?: number; hosted?: boolean; browserLane?: boolean; handoff?: boolean }): string[] {
+  const hosted = batch.hosted === true
+  const most = DEFAULT_SCRAPE_TIMEOUT_MS
+  const groups = Object.entries(failures).filter(([, group]) => group.count > 0)
+  if (groups.length === 0) return []
+  const rank = (name: string) => { const at = NAMED_FAILURE_GROUPS.indexOf(name as typeof NAMED_FAILURE_GROUPS[number]); return at < 0 ? NAMED_FAILURE_GROUPS.length : at }
+  const named = groups.filter(([name]) => rank(name) < NAMED_FAILURE_GROUPS.length).sort(([a, x], [b, y]) => y.count - x.count || rank(a) - rank(b))
+  const own = named.slice(0, MAX_FAILURE_LINES)
+  const rest = [...named.slice(MAX_FAILURE_LINES), ...groups.filter(([name]) => rank(name) === NAMED_FAILURE_GROUPS.length)].sort(([a, x], [b, y]) => y.count - x.count || a.localeCompare(b))
+  const lines = own.map(([name, group]) => {
+    const pages = failedPages(group)
+    switch (name) {
+      case 'fast_mode_declined': return batch.browserLane === false
+        ? `${pages} read empty over HTTP and asked for the browser lane, which this key does not have: the browser lane comes with an account's own key (https://octocrawl.dev/dashboard/keys/) or a signed-in MCP connection; a new batch of those URLs from one reads them in a browser${hosted ? ' (5 credits a page)' : ''}`
+        : `${pages} read empty over HTTP and asked for the browser lane, which fastMode declined: a new batch of those URLs without fastMode reads them in a browser${hosted ? ' (5 credits a page)' : ''}`
+      case 'robots_unreachable': return `${pages} were refused because their robots.txt could not be read from this server, which counts as a complete disallow${hosted
+        ? '; hosted Octocrawl obeys that for every URL: a new batch of those URLs with access: "enhanced" reads them through its own exits, on an account that has it, and on your computer Octocrawl reads a URL you name whatever robots.txt says (npx octocrawl serve)'
+        : '; Octocrawl asks for the file again after a while'}`
+      case 'robots_disallowed': return `${pages} are disallowed by their robots.txt for Octocrawl: the site owner's rule${hosted ? ', which hosted Octocrawl obeys for every URL; on your computer a URL you name is read on the record (npx octocrawl serve)' : ', kept on the record'}`
+      case 'gated': return `${pages} gate automated access (a challenge or bot check)${hosted
+        ? '; hosted Octocrawl does not solve challenges or change its identity; on your computer Octocrawl can hand them to you in your own Chrome (npx octocrawl serve, then the batch with a handoff) or read them with a login you saved there (octocrawl login import <host>, then mode authed)'
+        : batch.handoff === true ? '; get through the check yourself in your own Chrome: a batch handoff (hand_off_batch, POST /v1/batches/:id/handoff, octocrawl batch --handoff) opens them there and Octocrawl reads the page'
+        : '; this server has no Chrome of the person\'s to hand them to; on their own computer Octocrawl can (npx octocrawl serve, then the batch with a handoff)'}`
+      case 'timeout': return (batch.timeout ?? most) >= most
+        ? `${pages} ran out of the longest timeout Octocrawl takes (${most} ms): the sites were down or slower than that; a new batch of those URLs later tells one from the other`
+        : `${pages} ran out of their ${batch.timeout} ms timeout: a new batch of those URLs with a longer timeout (up to ${most} ms) when the sites are slow rather than down`
+      default: return pages
+    }
+  })
+  if (rest.length > 0) {
+    const count = rest.reduce((sum, [, group]) => sum + group.count, 0)
+    const reasons = rest.map(([name, group]) => `${name} ${group.count}`).join(', ')
+    lines.push(`${count} ${own.length > 0 ? 'more ' : ''}${count === 1 ? 'page' : 'pages'} failed for other reasons (${reasons}): get_batch_errors (GET /v1/batches/:id/errors) lists them, each with its own agentHints`)
+  }
+  return lines
+}
+
 /** The host the request named; the host answered when that cannot be read. */
 function requestedHost(result: Pick<HintedResult, 'requestedUrl' | 'evidence'>): string {
   try {

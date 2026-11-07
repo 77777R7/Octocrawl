@@ -13,7 +13,8 @@ import type { CreditsStore } from './hostedCredits.js'
 import { CREDITS } from './hostedCredits.js'
 import { asksModelFallback } from './hostedModel.js'
 import type { GcsBucket } from './hostedCloud.js'
-import { newHostedJob, type HostedJob, type HostedJobStore, type HostedJobWebhook, type HostedWebhookEvent, type JobLimits } from './hostedJobs.js'
+import { FINISHED, newHostedJob, type HostedJob, type HostedJobStore, type HostedJobWebhook, type HostedWebhookEvent, type JobLimits } from './hostedJobs.js'
+import { batchFailureHints } from '@w2l/api'
 
 /** The options of a page in a job, as hosted serves them on a scrape (HOSTED_SCRAPE_KEYS), less the scrape's own. */
 const JOB_PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'fastMode', 'blockAds', 'removeBase64Images', 'verify', 'origin', 'integration'] as const
@@ -76,6 +77,9 @@ export function jobStatus(job: HostedJob, nowMs = Date.now()): Record<string, un
     // A job waiting for the next day has no time left to promise: the rest takes the wait and then the reading.
     ...(rate !== null && (job.status === 'queued' || job.status === 'running') ? { rate: paused === null ? rate : { ...rate, etaSeconds: null } } : {}),
     ...(paused === null ? {} : { paused }),
+    // A finished batch says what to do about its failed pages, a line a reason (hints.ts batchFailureHints), as a local one does; each item keeps its own hint.
+    ...(job.kind === 'batch' && FINISHED.has(job.status) && job.failures !== undefined && Object.keys(job.failures).length > 0
+      ? { agentHints: batchFailureHints(job.failures, { hosted: true, ...(job.httpOnly === true ? { browserLane: false } : {}), ...(typeof (job.request as { timeout?: unknown }).timeout === 'number' ? { timeout: (job.request as { timeout: number }).timeout } : {}) }) } : {}),
     credits: { used: job.credits.used, maxCredits: job.credits.maxCredits },
     ...(job.webhook ? { webhook: { url: job.webhook.url, events: job.webhook.events, delivery: job.webhook.delivery } } : {}),
     createdAt: job.createdAt, finishedAt: job.finishedAt, expiresAt: job.expireAt,
@@ -326,7 +330,7 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
       expireAt: new Date(at.getTime() + IDEMPOTENCY_TTL_MS).toISOString(),
     }
     const secret = webhook === undefined ? null : `whsec_${randomBytes(32).toString('base64url')}`
-    const job = newHostedJob({ id: randomUUID(), workspaceId, uid: caller.uid, keyId: caller.keyId.slice(0, 16), requestKeyId: caller.keyId, kind, request: stored, maxCredits: (maxCredits as number | undefined) ?? null, webhook: webhook === undefined ? null : { ...webhook, secret: secret!, delivery: null } }, at)
+    const job = newHostedJob({ id: randomUUID(), workspaceId, uid: caller.uid, keyId: caller.keyId.slice(0, 16), requestKeyId: caller.keyId, kind, request: stored, maxCredits: (maxCredits as number | undefined) ?? null, webhook: webhook === undefined ? null : { ...webhook, secret: secret!, delivery: null }, httpOnly: !caller.browser }, at)
     const created = await config.store.create(job, limits, claim, at)
     if (!created.ok && created.reason === 'conflict') return refusal(409, 'idempotency_conflict', 'this idempotency key started a different job in the last 24 hours')
     if (!created.ok) return refusal(429, 'jobs_busy', `this account has ${created.running} jobs running and ${created.queued} waiting, the most it may`, ['wait for one to finish, or cancel one'], { 'Retry-After': '60' })
