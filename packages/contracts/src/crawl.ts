@@ -241,10 +241,14 @@ export const EMPTY_CRAWL_DISCOVERY: CrawlDiscovery = {
 
 /** Why a hosted job waits for the next UTC day (`paused` on its status): a day's pool of job pages has fewer left than its next slice takes. It goes on by itself at `resumesAt`. */
 export interface JobPause {
-  /** `account_daily_pages`: this account's pages of the day. `daily_pages`: the pages of every account together. */
-  reason: 'account_daily_pages' | 'daily_pages'
-  /** The day's pool, in pages read. */
+  /**
+   * `account_daily_pages`: this account's pages of the day. `daily_pages`: the pages of every account together. `credits`:
+   * the account's credits are used up; the job goes on when they come back, or sooner once more are added.
+   */
+  reason: 'account_daily_pages' | 'daily_pages' | 'credits'
+  /** The day's pool, in pages read; for `credits`, the credits the job's next page needs. */
   limit: number
+  /** When the job goes on by itself at the latest: the next UTC day for a pool, the 1st of the next month for credits. */
   resumesAt: string
   message: string
 }

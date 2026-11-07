@@ -46,7 +46,7 @@ describe('hosted job worker', () => {
   const cleanup: Array<() => Promise<void>> = []
   afterEach(async () => { while (cleanup.length) await cleanup.pop()!() })
 
-  async function setup(options: { robotsStatus?: number; twins?: boolean; balance?: number; limits?: Partial<NonNullable<JobWorkerDeps['limits']>>; gate?: string; clock?: { t: Date }; model?: HostedModel; delayMs?: number; perHostConcurrency?: number } = {}) {
+  async function setup(options: { robotsStatus?: number; twins?: boolean; balance?: number; limits?: Partial<NonNullable<JobWorkerDeps['limits']>>; gate?: string; clock?: { t: Date }; model?: HostedModel; delayMs?: number; perHostConcurrency?: number; trialCredits?: number } = {}) {
     const seen: string[] = []
     // Pages being answered right now, and the most there ever were at once: how many the slice's engine reads at once.
     let inFlight = 0
@@ -89,6 +89,7 @@ describe('hosted job worker', () => {
       webhookTransport: async (request) => { posts.push(request); const answer = receiver.answer(); if (answer instanceof Error) throw answer; return { status: answer, retryAfter: null } },
       engineOptions: () => ({ networkPolicy: policy, hosted: false, channelsFor: (mode) => buildChannels(mode, { networkPolicy: policy, localSubjects: { browser_local: { fetch: async () => { throw new Error('worker tests stay on HTTP') } } } }) }),
       limits: { slicePages: 2, sliceMs: 30_000, graceMs: 2_000, ...options.limits },
+      ...(options.trialCredits === undefined ? {} : { trialCredits: options.trialCredits }),
       ...(options.model === undefined ? {} : { model: options.model }),
     }
     let n = 0
@@ -550,16 +551,34 @@ describe('hosted job worker', () => {
     }
   })
 
-  it('reads what the credits allow, then fails the job for credits; and stops at the job\'s maxCredits', async () => {
-    const short = await setup({ balance: 3, limits: { slicePages: 5 } })
+  it('reads what the credits allow, then waits for credits with its status saying so and how to get more, goes on once they come, and stops at the job\'s maxCredits', async () => {
+    const clock = { t: NOW }
+    const short = await setup({ balance: 3, limits: { slicePages: 5 }, clock })
     const id = await short.create(parseBatchStartRequest({ urls: ['/a', '/b', '/c', '/d', '/'].map((path) => `${short.origin}${path}`), fastMode: true }))
-    await short.drain(id)
+    expect((await short.drain(id)).at(-1)).toBe('running')
     const shortJob = (await short.store.get(id))!
-    expect(shortJob).toMatchObject({ status: 'failed', failureReason: 'credits_exhausted' })
+    // Not failed: paused for credits, with the next try in six hours (the grant is further away), and the status says why.
+    expect(shortJob).toMatchObject({ status: 'running', failureReason: null, paused: { pool: 'credits', until: '2026-11-01T00:00:00.000Z' } })
+    expect(short.queue).toEqual([{ jobId: id, generation: expect.any(Number), delaySeconds: 6 * 3_600 }])
+    const status = jobStatus(shortJob, clock.t.getTime())
+    expect(status.paused).toMatchObject({ reason: 'credits', resumesAt: '2026-11-01T00:00:00.000Z', message: expect.stringContaining('hello@octocrawl.dev') })
+    expect((status.paused as { message: string }).message).toContain('need not be cancelled')
     // Every page it stored was paid for, and no more than the balance was spent.
     expect(shortJob.credits.used).toBe(shortJob.counts.pages)
     expect(shortJob.credits.used).toBeLessThanOrEqual(3)
     expect(await short.credits.balance('account-1', NOW)).toBe(3 - shortJob.credits.used)
+    // Credits added by hand: the next delivery reads the rest.
+    await short.credits.topUp('account-1', 10, 'hand-1', NOW)
+    expect((await short.drain(id)).at(-1)).toBe('completed')
+    expect((await short.store.get(id))!.paused ?? null).toBeNull()
+    // The trial pack, where the operator set one: granted once at the first wall, so the job goes on at once; the next account-wide wall gets none.
+    const trial = await setup({ balance: 3, limits: { slicePages: 5 }, trialCredits: 4 })
+    const trialId = await trial.create(parseBatchStartRequest({ urls: ['/a', '/b', '/c', '/d', '/'].map((path) => `${trial.origin}${path}`), fastMode: true }))
+    expect((await trial.drain(trialId)).at(-1)).toBe('completed')
+    expect(await trial.credits.balance('account-1', NOW)).toBe(3 + 4 - 5)
+    const again = await trial.create(parseBatchStartRequest({ urls: ['/e', '/f', '/g'].map((path) => `${trial.origin}${path}`), fastMode: true }))
+    expect((await trial.drain(again)).at(-1)).toBe('running')
+    expect((await trial.store.get(again))!.paused).toMatchObject({ pool: 'credits' })
     const capped = await setup()
     const capId = await capped.create(parseBatchStartRequest({ urls: ['/a', '/b', '/c', '/d', '/'].map((path) => `${capped.origin}${path}`), fastMode: true }), 'batch', 3)
     await capped.drain(capId)
