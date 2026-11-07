@@ -1880,7 +1880,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         // `timeout` is each page's own deadline, inside the task's.
         // A page read in the person's Chrome has no deadline of its own (the person's time is theirs), only the task's.
         const pageDeadline = myBrowser !== null ? context?.deadlineAt ?? Infinity : Math.min(context?.deadlineAt ?? Infinity, Date.now() + (selection.timeout ?? DEFAULT_SCRAPE_TIMEOUT_MS))
-        const page = createExecutionScope({ ...context, ...(pageDeadline === Infinity ? {} : { deadlineAt: pageDeadline }), ...(lane.cookieSession === undefined ? {} : { cookieSession: lane.cookieSession }) })
+        // The page's own timeout may be held while it waits for a browser slot (browserSlots.ts), never past the task's deadline.
+        const ceiling = context?.deadlineCeilingAt ?? context?.deadlineAt
+        const page = createExecutionScope({ ...context, ...(pageDeadline === Infinity ? {} : { deadlineAt: pageDeadline }), ...(ceiling === undefined ? {} : { deadlineCeilingAt: ceiling }), ...(lane.cookieSession === undefined ? {} : { cookieSession: lane.cookieSession }) })
         const formats = selection.formats ?? ['markdown']
         const wants = (name: 'markdown' | 'links' | 'json') => hasFormat(formats, name)
         const custom = customJsonFormat(formats)
@@ -1928,7 +1930,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       async scrape(url, context) {
         let used = current
         // The page's own deadline is set once: a read again on another egress gets what is left of it, not a new timeout.
-        const pageContext = selection === undefined || myBrowser !== null ? context : { ...context, deadlineAt: Math.min(context?.deadlineAt ?? Infinity, Date.now() + (selection.timeout ?? DEFAULT_SCRAPE_TIMEOUT_MS)) }
+        const pageContext = selection === undefined || myBrowser !== null ? context : { ...context, deadlineAt: Math.min(context?.deadlineAt ?? Infinity, Date.now() + (selection.timeout ?? DEFAULT_SCRAPE_TIMEOUT_MS)), ...(context?.deadlineAt === undefined ? {} : { deadlineCeilingAt: context.deadlineAt }) }
         let outcome = await pageAtom.scrape(url, pageContext)
         const events: TraceEvent[] = []
         const carried: TraceEvent[] = []

@@ -59,12 +59,22 @@ export function withBrowserSlots(channels: readonly Channel[], slots: BrowserSlo
   return channels.map((channel) => channel.waitsFor !== true ? channel : {
     ...channel,
     admit: async (url, execution) => {
-      const release = await slots.acquire(execution.signal)
+      // The wait for a slot is not the page's own time: its deadline stands still meanwhile (holdDeadline), and the wait is said.
+      const unhold = execution.holdDeadline?.()
+      const waitedFrom = performance.now()
+      let release: () => void
+      try { release = await slots.acquire(execution.signal) } finally {
+        // The ladder hands its rungs a copy of the scope (an object spread), whose deadlineAt the hold cannot move: the moved
+        // deadline is written onto the object the rungs read, the one given here.
+        const moved = unhold?.()
+        if (moved !== undefined && execution.deadlineAt !== undefined) (execution as { deadlineAt?: number }).deadlineAt = moved
+      }
+      const waitedMs = performance.now() - waitedFrom
       let own: ChannelAdmission
       try { own = channel.admit === undefined ? ADMITTED : await channel.admit(url, execution) }
       catch (error) { release(); throw error }
       if (!own.ok) { release(); return own }
-      return { ...own, settle: async (result, called) => { try { return await own.settle(result, called) } finally { release() } } }
+      return { ...own, waitedMs, settle: async (result, called) => { try { return await own.settle(result, called) } finally { release() } } }
     },
   })
 }
