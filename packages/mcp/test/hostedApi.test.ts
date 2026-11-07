@@ -1825,6 +1825,27 @@ it('logs which field a 400 named and every 4xx the inner API answers, never a va
   expect(lines.join('\n')).not.toMatch(/secret-value/)
 })
 
+it('names hosted\'s own file cap when it refuses a maxFileBytes, not a local server\'s or its variable', async () => {
+  const { url } = await start({ keylessDaily: 100 })
+  const refusal = async (maxFileBytes: unknown) => {
+    const response = await post(url, '/v1/scrape', { url: `${origin}/page`, maxFileBytes })
+    expect(response.status).toBe(400)
+    return ((await response.json()) as { error: string }).error
+  }
+  for (const value of [-1, 0, 1.5, 'big']) expect(await refusal(value), String(value)).toBe('maxFileBytes must be a whole number of bytes, 1 or more')
+  for (const value of [5 * 1024 * 1024 + 1, 500 * 1024 * 1024 + 1]) expect(await refusal(value), String(value)).toBe('maxFileBytes must be at most 5242880 on this server')
+
+  const transport = new StreamableHTTPClientTransport(new URL(`${url}/mcp`))
+  const client = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
+  try {
+    await client.connect(transport)
+    const result = await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page`, maxFileBytes: 0 } })
+    expect(result.isError).toBe(true)
+    expect(JSON.stringify(result.content)).toContain('maxFileBytes must be a whole number of bytes, 1 or more')
+    expect(JSON.stringify(result.content)).not.toContain('524288000')
+  } finally { await client.close() }
+})
+
 it('names hosted\'s own map limits when it refuses a limit or a timeout, not a local server\'s', async () => {
   const { url } = await start({ keylessDaily: 100 })
   const refusal = async (body: Record<string, unknown>) => {
