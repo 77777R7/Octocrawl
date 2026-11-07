@@ -410,7 +410,9 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(parseScrapeRequest({ url, maxFileBytes: 1 })).toMatchObject({ maxFileBytes: 1 })
     expect(parseBatchStartRequest({ urls: [url], maxFileBytes: 500 * 1024 * 1024 })).toMatchObject({ maxFileBytes: 500 * 1024 * 1024 })
     expect(parseCrawlStartRequest({ url })).not.toHaveProperty('maxFileBytes')
-    for (const maxFileBytes of [0, 1.5, '100', 500 * 1024 * 1024 + 1]) expect(() => parseCrawlStartRequest({ url, maxFileBytes })).toThrow('maxFileBytes must be an integer number of bytes from 1 to 524288000')
+    for (const maxFileBytes of [0, 1.5, '100']) expect(() => parseCrawlStartRequest({ url, maxFileBytes })).toThrow('maxFileBytes must be a whole number of bytes, 1 or more')
+    // The largest is the engine's to refuse: a hosted server's cap is smaller than a local one's.
+    expect(parseScrapeRequest({ url, maxFileBytes: 500 * 1024 * 1024 + 1 })).toMatchObject({ maxFileBytes: 500 * 1024 * 1024 + 1 })
     expect(maxFileBytesFromEnv({})).toBe(DEFAULT_MAX_FILE_BYTES)
     expect(DEFAULT_MAX_FILE_BYTES).toBe(50 * 1024 * 1024)
     expect(maxFileBytesFromEnv({ W2L_MAX_FILE_BYTES: ' 104857600 ' })).toBe(104_857_600)

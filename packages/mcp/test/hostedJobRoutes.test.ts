@@ -247,7 +247,7 @@ describe('hosted job routes', () => {
     const both = (body: Record<string, unknown>) => [['/v1/crawl', { url: 'https://example.com/', ...body }], ['/v1/batches', { urls: urls(1), ...body }]] as const
 
     it('a maxFileBytes above the hosted file cap', async () => {
-      await refusedAtStart(both({ maxFileBytes: 5 * 1024 * 1024 + 1 }), 'invalid_request', /^maxFileBytes must be at most 5242880/)
+      for (const maxFileBytes of [5 * 1024 * 1024 + 1, 500 * 1024 * 1024 + 1]) await refusedAtStart(both({ maxFileBytes }), 'invalid_request', /^maxFileBytes must be at most 5242880 on this server$/)
     })
     it('an includeTags selector Octocrawl does not match', async () => {
       await refusedAtStart(both({ includeTags: ['div:has(p)'] }), 'unsupported_parameter', /^includeTags entry uses .*: div:has\(p\)/)

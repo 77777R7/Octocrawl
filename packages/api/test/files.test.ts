@@ -5,7 +5,7 @@ import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import Ajv2020 from 'ajv/dist/2020.js'
 import { localNetworkPolicy, type CrawlPage, type EvidenceRecord, type FetchResult, type JsonFormatRequest, type NetworkPolicy } from '@w2l/contracts'
 import { FILE_TEXT_VERSION, PDF_TEXT_VERSION } from '@w2l/extract-tf'
@@ -167,7 +167,22 @@ describe('file download on scrape', () => {
     expect(valid(small.evidenceRecord)).toMatchObject({ reason: 'body_too_large', rawSha256: null, artifacts: [] })
     const above = await post('/v1/scrape', { url: `${origin}/report.pdf`, maxFileBytes: 64 * 1024 + 1 })
     expect(above.status).toBe(400)
-    expect(above.json).toMatchObject({ code: 'invalid_request' })
+    expect(above.json).toMatchObject({ code: 'invalid_request', error: `maxFileBytes must be at most ${64 * 1024} on this server` })
+  })
+
+  it('names the operator\'s variable when the cap came from it, also for a value above the largest cap it may set', async () => {
+    vi.stubEnv('W2L_MAX_FILE_BYTES', '1000')
+    const fromEnv = createApiEngine({ taskRoot: root, networkPolicy: localNetworkPolicy() })
+    try {
+      for (const maxFileBytes of [1001, 500 * 1024 * 1024 + 1]) {
+        const res = await createApp(fromEnv).request('/v1/scrape', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: `${origin}/report.pdf`, maxFileBytes }) })
+        expect(res.status).toBe(400)
+        expect(await res.json()).toMatchObject({ code: 'invalid_request', error: 'maxFileBytes must be at most 1000 on this server (W2L_MAX_FILE_BYTES)' })
+      }
+    } finally {
+      await fromEnv.close()
+      vi.unstubAllEnvs()
+    }
   })
 
   it('reads JSON fields from Label: value lines of the PDF with their page, and never asks a model', async () => {
