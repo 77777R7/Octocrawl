@@ -22,13 +22,13 @@ describe('what octocrawl serve says when it starts', () => {
   afterEach(async () => { await rm(root, { recursive: true, force: true }) })
 
   /** The lines a server prints as it starts, on a free port, with its own task root and saved logins. */
-  async function startup(args: readonly string[], logins: readonly string[] = [], damaged?: string): Promise<string[]> {
+  async function startup(args: readonly string[], logins: readonly string[] = [], damaged?: string, chromiumInstalled: () => boolean = () => true): Promise<string[]> {
     root = await mkdtemp(join(tmpdir(), 'w2l-serve-'))
     const sessionsFile = join(root, 'sessions.json')
     if (damaged !== undefined) await writeFile(sessionsFile, damaged)
     for (const domain of logins) await new FileSessionStore(sessionsFile).save({ domain, attestedBy: 'test', attestedAt: '2026-11-07T00:00:00.000Z', vendor: 'browser_local_authed', cookies: [] })
     const lines: string[] = []
-    const server = await runApiServer(['--port', String(await freePort()), ...args], { W2L_TASK_ROOT: join(root, 'tasks'), W2L_SESSIONS_FILE: sessionsFile }, { signals: false, log: (line) => lines.push(line) })
+    const server = await runApiServer(['--port', String(await freePort()), ...args], { W2L_TASK_ROOT: join(root, 'tasks'), W2L_SESSIONS_FILE: sessionsFile }, { signals: false, chromiumInstalled, log: (line) => lines.push(line) })
     await server.close()
     return lines
   }
@@ -67,6 +67,16 @@ describe('what octocrawl serve says when it starts', () => {
     const lines = await startup(['--host', '0.0.0.0', '--token', 'test-token'])
     expect(personLines(lines)).toEqual([])
     expect(lines.join('\n')).toContain('saved logins (mode authed) are not read')
+  })
+
+  it('says when the browser lane has no Chromium yet, with the command that installs it, and nothing when it has one', async () => {
+    const missing = (await startup([], [], undefined, () => false)).filter((line) => line.includes('Chromium'))
+    expect(missing).toEqual(['octocrawl: the browser lane has no Chromium yet, so a page that needs scripts to show its content comes back thin or failed; run npx playwright install chromium once'])
+    await rm(root, { recursive: true, force: true })
+    expect((await startup([])).filter((line) => line.includes('Chromium'))).toEqual([])
+    await rm(root, { recursive: true, force: true })
+    // A hosted server's Chromium is its image's, not the person's to install.
+    expect((await startup(['--hosted', '--token', 'test-token'], [], undefined, () => false)).filter((line) => line.includes('Chromium'))).toEqual([])
   })
 
   it('on a hosted server, says nothing of it', async () => {

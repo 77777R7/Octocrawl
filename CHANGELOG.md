@@ -34,6 +34,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **`octocrawl serve` says at start-up when the browser lane has no Chromium yet.** A new `npx octocrawl` install has none until `npx playwright install chromium` runs, and an update that moves Playwright to a new Chromium build needs it again (0.8.9's Playwright 1.65 wants a build an install for 0.8.7 does not have): the first page that needed scripts came back thin, with the command only in that page's hint. A server on your computer now prints one line with the command when it starts without it.
+
 ## 0.8.9 — 2026-11-07
 
 The published packages at 0.8.9, with what a first run on 0.8.7 stalled on. **A finished crawl or batch on your computer leaves each page's Markdown as a file of its own** in `markdown/`, so an agent hands the files on instead of splitting the JSONL. A `json` field left `null` with no source now says why and what reads it, on a scrape and on each batch item, and a finished batch says how many pages read held nothing selected or extracted. A compact scrape returns the page's Markdown beside an adapter's JSON that could not vouch for it, and a `my-browser` batch reads its pages in tabs behind yours.
