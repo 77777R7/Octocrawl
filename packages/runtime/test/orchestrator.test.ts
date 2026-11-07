@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { carryPaidCalls, DEFAULT_CRAWL_BUDGET, type CrawlReport, type ExecutionContext, type FetchResult, type ListPageRead, type ScrapeAtom, type ScrapeOutcome, type SitemapFileRecord, type SitemapLoadRequest, type SitemapLoadResult, type SitemapSource } from '@w2l/contracts'
 import { CrawlOrchestrator, type CrawlClock } from '../src/orchestrator.js'
-import { crawlReportFromStore } from '../src/crawlReport.js'
+import { crawlReportFromStore, notServedSteps } from '../src/crawlReport.js'
 import { MemoryTaskStore } from '../src/memoryStore.js'
 import type { TaskStore } from '../src/taskStore.js'
 
@@ -783,6 +783,57 @@ describe('CrawlOrchestrator reads a batch page again after a soft block', () => 
     expect(sentAway).toHaveLength(4)
     expect(pace.adaptive?.floorMs).toBeUndefined()
     expect(clock.t).toBeLessThan(10 * 60_000)
+  })
+
+  describe('a page far shorter than the others of its host', () => {
+    const long = (url: string): ScrapeOutcome => { const base = page(url); return { result: { ...base, markdown: 'Exhibitor details. '.repeat(60) }, links: [] } }
+    const thin = (url: string): ScrapeOutcome => { const base = page(url); return { result: { ...base, markdown: '- [Home](/)\n- List of exhibitors' }, links: [] } }
+    const urls = Array.from({ length: 8 }, (_, i) => `${HOST}/exhibitor/${i}`)
+
+    it('goes back for another read, and is kept as the page it then is', async () => {
+      const { steps } = await run(urls, (url, read) => url === urls[6] && read === 1 ? thin(url) : long(url))
+      const step = steps.find((one) => one.url === urls[6])!
+      expect(step.result?.warnings ?? []).toEqual([])
+      expect(retries(step)).toEqual([expect.objectContaining({ read: 1, signal: 'thin_page' })])
+    })
+
+    it('says so when it stays that way, as a warning: the page may really be that short, so it is neither not served nor a reason to slow the host', async () => {
+      const { steps, store, reads } = await run(urls, (url) => url === urls[6] ? thin(url) : long(url))
+      const step = steps.find((one) => one.url === urls[6])!
+      expect(step.result?.warnings).toEqual([{ code: 'thin_page', message: expect.stringContaining('fixture.test') }])
+      expect(reads.filter((url) => url === urls[6])).toHaveLength(2)
+      expect(await notServedSteps(store, 'retry-1')).toEqual([])
+      expect((await store.getTask('retry-1'))!.pacing?.['fixture.test']?.adaptive).toBeUndefined()
+    })
+
+    it('learns a site of short pages: the reads again stop, and the host keeps its pace', async () => {
+      const many = Array.from({ length: 220 }, (_, i) => `${HOST}/p/${i}`)
+      const clock = new FakeClock()
+      const store = new MemoryTaskStore()
+      await store.putTask({ id: 'retry-short', seedUrl: many[0]!, taskDir: '/tmp/w2l-batch', mode: 'standard', status: 'pending', budget: DEFAULT_CRAWL_BUDGET, batch: { urls: many, formats: ['markdown'], includeLinks: false }, createdAt: 'x', updatedAt: 'x' })
+      let reads = 0
+      const atom: ScrapeAtom = { scrape: async (url) => { reads++; clock.t += 500; return many.indexOf(url) < 20 ? long(url) : thin(url) }, close: async () => {} }
+      await new CrawlOrchestrator({ store, atom, clock, workerCount: 1, perHostMinDelayMs: 0 }).run({ seedUrl: many[0]!, taskDir: '/tmp/w2l-batch', resumeFrom: 'retry-short', skipFetchedOnResume: true, maxDepth: 0 })
+      expect(reads).toBeLessThan(260)
+      expect((await store.listSteps('retry-short')).filter((step) => (step.result?.warnings ?? []).length > 0).length).toBeLessThan(40)
+      expect((await store.getTask('retry-short'))!.pacing?.['fixture.test']?.adaptive).toBeUndefined()
+      expect(clock.t).toBeLessThan(150_000)
+    })
+
+    it('leaves a selection alone: what includeTags selects is not the page', async () => {
+      const store = new MemoryTaskStore()
+      await store.putTask({ id: 'retry-tags', seedUrl: urls[0]!, taskDir: '/tmp/w2l-batch', mode: 'standard', status: 'pending', budget: DEFAULT_CRAWL_BUDGET, batch: { urls, formats: ['markdown'], includeLinks: false, includeTags: ['main'] }, createdAt: 'x', updatedAt: 'x' })
+      const atom: ScrapeAtom = { scrape: async (url) => url === urls[6] ? thin(url) : long(url), close: async () => {} }
+      await new CrawlOrchestrator({ store, atom, clock: new FakeClock(), workerCount: 1, perHostMinDelayMs: 0 }).run({ seedUrl: urls[0]!, taskDir: '/tmp/w2l-batch', resumeFrom: 'retry-tags', skipFetchedOnResume: true, maxDepth: 0 })
+      expect((await store.listSteps('retry-tags')).flatMap((step) => step.result?.warnings ?? [])).toEqual([])
+    })
+
+    it('says nothing with too few pages to compare, of pages short alike, or of a page with no Markdown asked for', async () => {
+      expect((await run(urls.slice(0, 5), (url) => url === urls[4] ? thin(url) : long(url))).steps.flatMap((step) => step.result?.warnings ?? [])).toEqual([])
+      expect((await run(urls, (url) => thin(url))).steps.flatMap((step) => step.result?.warnings ?? [])).toEqual([])
+      const none = (url: string): ScrapeOutcome => ({ result: { ...page(url), markdown: null }, links: [] })
+      expect((await run(urls, (url) => url === urls[6] ? none(url) : long(url))).steps.flatMap((step) => step.result?.warnings ?? [])).toEqual([])
+    })
   })
 
   it('carries a signal the host settled into the next run', async () => {

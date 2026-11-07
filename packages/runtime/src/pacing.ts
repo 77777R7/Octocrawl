@@ -15,7 +15,7 @@
 
 import type { FetchResult } from '@w2l/contracts'
 
-export type SoftBlockSignal = 'rate_limited' | 'challenge' | 'redirected_off_page' | 'verification_failed'
+export type SoftBlockSignal = 'rate_limited' | 'challenge' | 'redirected_off_page' | 'thin_page' | 'verification_failed'
 
 /** Signals in a row before a host is slowed. */
 export const SIGNALS_TO_SLOW = 2
@@ -47,7 +47,30 @@ export const SETTLE_DELAY_MS = 32_000
 /** Signals a page itself can cause, whatever the pace: they can settle. A 429 or 503 is the site speaking of rate, and never does. */
 export const SETTLING_SIGNALS: ReadonlySet<SoftBlockSignal> = new Set(['redirected_off_page', 'verification_failed'])
 /** Signals a page is read again after (BatchRetry). A challenge page is not: it does not go away with a wait. */
-export const RETRIED_SIGNALS: ReadonlySet<SoftBlockSignal> = new Set(['rate_limited', 'redirected_off_page', 'verification_failed'])
+export const RETRIED_SIGNALS: ReadonlySet<SoftBlockSignal> = new Set(['rate_limited', 'redirected_off_page', 'thin_page', 'verification_failed'])
+
+/** Pages of a host read before a page can be called thin against them. */
+export const THIN_PAGE_PEERS = 5
+/** A page of more Markdown than this is never thin: some pages of a site are short, and this says only that one came empty. */
+export const THIN_PAGE_MAX_CHARS = 300
+/** How many times shorter than the median of its host's pages a thin page is, at least. */
+const THIN_PAGE_RATIO = 4
+/** The pages of a host the median is taken over, the latest. */
+const THIN_PAGE_WINDOW = 50
+
+/**
+ * The median Markdown length of `peers`, when a page of `chars` is thin against them, or null. A page can answer 200 with its
+ * frame and nothing in it: five exhibitors of www.english.ids-cologne.de came as a 213-character breadcrumb on 2026-11-07,
+ * just after a limit, where the others had about 1,090, and every one of them read in full a few minutes later. Some pages
+ * of a site really are short, so this is a reason to read the page again and a warning, not a verdict: it says nothing of
+ * the pace, and a page that reads the same twice joins `peers`, so a site of short pages stops being flagged.
+ */
+export function thinAgainst(chars: number, peers: readonly number[]): number | null {
+  if (peers.length < THIN_PAGE_PEERS || chars > THIN_PAGE_MAX_CHARS) return null
+  const sorted = [...peers.slice(-THIN_PAGE_WINDOW)].sort((a, b) => a - b)
+  const median = sorted[Math.floor(sorted.length / 2)]!
+  return chars * THIN_PAGE_RATIO < median ? median : null
+}
 
 const CHALLENGE_REASONS = new Set(['cloudflare_challenge', 'captcha', 'bot_detected_generic'])
 
@@ -72,6 +95,7 @@ export function softBlockSignal(result: FetchResult): SoftBlockSignal | null {
     return null
   }
   if ((result.warnings ?? []).some((warning) => warning.code === 'redirected_off_page') && shallower(result.evidence.finalUrl, result.requestedUrl)) return 'redirected_off_page'
+  if ((result.warnings ?? []).some((warning) => warning.code === 'thin_page')) return 'thin_page'
   // A page not read fails its contract without saying anything of the page: its own status tells what happened.
   if (result.verification?.status === 'failed' && result.verification.reason !== 'page_not_read') return 'verification_failed'
   return null
