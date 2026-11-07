@@ -436,6 +436,13 @@
             { "type": "null" }
           ]
         },
+        "allowance": {
+          "description": "How the person allowed the site of a page read in their own Chrome (the my-browser lane): clicked, Allow on Octocrawl's page for this request, or remembered, from an earlier click, with no page shown; and when they clicked. Null on every other read, and when the result does not say. Added with remembered sites: optional here so that earlier records stay valid.",
+          "anyOf": [
+            { "$ref": "#/$defs/accessAllowance" },
+            { "type": "null" }
+          ]
+        },
         "paidCalls": {
           "description": "Every paid provider call the page was read with (ROADMAP PA item 4), in order: the provider, what the spend ledger reserved and charged, the price the provider stated, and what Octocrawl made of what came back. Null when no provider was called. Added with the spend ledger: optional here so that earlier records stay valid.",
           "anyOf": [
@@ -530,6 +537,21 @@
           "description": "Origins whose localStorage was restored.",
           "type": "integer",
           "minimum": 0
+        }
+      }
+    },
+    "accessAllowance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["basis", "allowedAt"],
+      "properties": {
+        "basis": {
+          "description": "clicked: Allow on Octocrawl's page for this request; remembered: from an earlier click, with no page shown.",
+          "enum": ["clicked", "remembered"]
+        },
+        "allowedAt": {
+          "description": "When the person clicked Allow for the site (ISO 8601).",
+          "type": "string"
         }
       }
     },

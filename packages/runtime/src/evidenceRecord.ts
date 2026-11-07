@@ -23,6 +23,7 @@ import {
   type EvidenceAccessGrant,
   type EvidenceAccessSession,
   type EvidenceAccessSessionApplied,
+  type EvidenceAccessAllowance,
   type EvidenceVerification,
   type EvidencePaidCall,
   type EvidenceArtifact,
@@ -214,8 +215,11 @@ function evidenceAccess(result: FetchResult): EvidenceAccess {
   // What the lane put into the browser: counts alone, as it traced them. Whether the site took the login is not here.
   const attached = laneEvent('session_attached')
   const sessionApplied: EvidenceAccessSessionApplied | null = attached === undefined ? null : { cookies: typeof attached.cookiesHeld === 'number' ? attached.cookiesHeld : null, localStorageOrigins: typeof attached.localStorageOrigins === 'number' ? attached.localStorageOrigins : 0 }
+  // How the person allowed the site of a page read in their Chrome (my-browser): said by the lane, never inferred.
+  const granted = result.lane === 'my_browser' ? event('site_allowed') : undefined
+  const allowance: EvidenceAccessAllowance | null = (granted?.basis === 'clicked' || granted?.basis === 'remembered') && text(granted.allowedAt) !== null ? { basis: granted.basis, allowedAt: text(granted.allowedAt)! } : null
   const route = (r: EvidenceAccess['route'], executor: string | null, executorVersion: string | null = null, profile: string | null = null, completion: AccessCompletion = 'unattended'): EvidenceAccess =>
-    ({ route: r, executor, executorVersion, profile, externalCostUsd, completion: read && r !== null ? completion : null, egress: egress(r), session: session(r), sessionApplied, paidCalls: paid.calls, grant: paid.grant })
+    ({ route: r, executor, executorVersion, profile, externalCostUsd, completion: read && r !== null ? completion : null, egress: egress(r), session: session(r), sessionApplied, allowance: r === 'user_browser' ? allowance : null, paidCalls: paid.calls, grant: paid.grant })
   const laneRan = result.trace.some((e) => e.event === 'identity_sent' || e.event === 'identity_declared' || e.event === 'provider_selected')
   if (!laneRan) return route(null, null)
   // A page read in the person's Chrome: handed to them when it showed a check and they acted in its tab; theirs alone

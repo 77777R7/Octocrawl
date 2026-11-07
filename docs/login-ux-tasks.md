@@ -30,7 +30,7 @@
 | D2 | 单页的登录墙 hint 先推荐哪条路：`my-browser`（不复制 cookie，用户肉眼可见，每页顶一个 tab）还是 saved login（导入一次，之后每页不用点，适合批量）？ | L1、L2 | 单页：先 my-browser，再 saved login；批量：先 saved login（`import_login` 加 mode authed），再 `hand_off_batch` |
 | D3 | hint 是 CLI、REST、MCP 共用的纯函数（`hints.ts:272-275` 的注释）。改写后先用白话说要做什么，再在括号里给两种形式：MCP 工具名在前（`import_login`），命令在后（`octocrawl login import`）。CLI 的 verdict 行会原样打印同一句。是否接受？ | L1 | 接受 |
 | D4 | Phase 2 的 A1：Octocrawl 自己的"Allow reading these sites"按站点（精确 host）记住，用户点过一次后同一站点不再弹 Octocrawl 的页面。Chrome 自己的"Allow remote debugging?"对话框是 Chrome 的，去不掉。记住的站点在 serve 启动时列出，可以用命令撤销。这个安全权衡是否接受？ | A1 | 接受，但记录里要说明这次授权是"记住的"还是"点的" |
-| D5 | Phase 2（A1–A4）改引擎。ROADMAP 当前阶段写"引擎不接新工作，只修外部用户遇到的问题，先复现"。Phase 2 现在开工，还是等 `research/trials/` 里有记录说明首次授权的三步挡住了人？ | Phase 2 | 等试用记录，或 Howard 开口；Phase 1 不受影响 |
+| D5 | Phase 2（A1–A4）改引擎。ROADMAP 当前阶段写"引擎不接新工作，只修外部用户遇到的问题，先复现"。Phase 2 现在开工，还是等 `research/trials/` 里有记录说明首次授权的三步挡住了人？ | Phase 2 | 等试用记录，或 Howard 开口；Phase 1 不受影响。**2026-11-08 Howard 开口："现在开始 phase 2，我授权"，A1 起开工** |
 | D6 | Phase 3（hosted 转发到本机 serve、serve 的"已连接"提示、Connect MCP 的 hosted 文案、dashboard 引导）是 ROADMAP 2026-11-04 决定里的 (b)(c)(d)，冻结中。本清单只列出，不开工。是否同意？ | Phase 3 | 同意，按 ROADMAP 的解冻条件 |
 | D7 | instructions 里加一个从句："用户对某个站点说过可以，这次对话里该站点的其他页面不再问；新站点再问。"这是给 agent 的行为规则，不是产品功能。要不要加？ | L2 | 加 |
 | D8 | Phase 1 的本地改动（`@w2l/api`、`@octocrawl/mcp`、CLI）要发 npm 才到用户手里。随下一个 0.8.x 发，还是攒到 0.9？hosted 的 hint 不变，不用部署；站点文案随下一次 preview 部署。 | L1–L5 | 随下一个 0.8.x；站点随下一次 preview 部署，只在 Howard 要求时 |
@@ -235,11 +235,11 @@ ROADMAP：
 - L6 的记录显示：agent 在动用用户 Chrome 或 saved login 之前问了，问句里有站点名；my-browser 路线用户点击不超过 2 次（Chrome 的 Allow、Allow reading these sites），不含页面本身有 check 时的那一下；从撞墙到拿到页面不超过 3 轮；过期一轮 agent 用白话说。达不到的写出数字和原因，不改标准。
 - 第二个客户端有记录或写 unknown。
 
-## Phase 2 · 首次授权成本（改引擎，按 D5 开工）
+## Phase 2 · 首次授权成本（改引擎，2026-11-08 按 D5 开工）
 
 起因：时刻 3。今天 my-browser 一次连接要点两次（Chrome 的 Allow、Octocrawl 页面的 Allow reading these sites），每次请求都重来，Chrome 退出后不续。这是体验上的分水岭，但按 ROADMAP 当前阶段属于引擎新工作。
 
-- [ ] **A1 按站点记住 Octocrawl 的授权**（按 D4）。用户在 Octocrawl 页面点过 "Allow reading these sites" 的精确 host 记到 `W2L_SESSIONS_FILE` 旁边的一个文件（待定名字，用户可读、仅本人可读，和 `sessions.json` 同样的权限）。同一 host 的下一次请求不再打开 Octocrawl 的页面；Chrome 的 Allow 不受影响。`octocrawl login list` 旁边加列出和撤销（`octocrawl sites list` / `octocrawl sites revoke <host>`，或并进 `login`，待定）。记录：Evidence Record 的 `access` 多一个字段说这次授权是 `remembered`（带授权日期）还是 `clicked`；serve 启动时列出记住的 host 数。安全边界不变：只有用户在 Octocrawl 页面上的一次点击能加入；精确 host，不含子域；撤销立即生效；一个 Allow 仍然不能让调用方读用户登录的其他站点（`docs/access.md:177` 的原则）。
+- [x] **A1 按站点记住 Octocrawl 的授权**（按 D4）。2026-11-08 做完（分支 `claude/login-ux-a1-remember-sites`）：文件 `allowed-sites.json`（`W2L_SESSIONS_FILE` 同目录，0600，只存 host 和日期）；命令并进 `login`：`octocrawl login allowed` / `octocrawl login revoke <site>`；记录字段 `access.allowance: { basis: 'clicked' | 'remembered', allowedAt }`；页面上的 Revoke 也会忘掉它问过的站点，关页面只结束这一次；`octocrawl login revoke` 让进行中的读取在 1 秒内结束；没有 saved logins 的服务器（不在 loopback）不记，照旧每次问。真实 Chrome 里的点击次数未测（unknown），等 Howard 在场时测。用户在 Octocrawl 页面点过 "Allow reading these sites" 的精确 host 记到 `W2L_SESSIONS_FILE` 旁边的一个文件（待定名字，用户可读、仅本人可读，和 `sessions.json` 同样的权限）。同一 host 的下一次请求不再打开 Octocrawl 的页面；Chrome 的 Allow 不受影响。`octocrawl login list` 旁边加列出和撤销（`octocrawl sites list` / `octocrawl sites revoke <host>`，或并进 `login`，待定）。记录：Evidence Record 的 `access` 多一个字段说这次授权是 `remembered`（带授权日期）还是 `clicked`；serve 启动时列出记住的 host 数。安全边界不变：只有用户在 Octocrawl 页面上的一次点击能加入；精确 host，不含子域；撤销立即生效；一个 Allow 仍然不能让调用方读用户登录的其他站点（`docs/access.md:177` 的原则）。
   - 验收：先写失败测试（第二次请求仍打开授权页）；改后同 host 不打开、不同 host 打开、撤销后打开；记录字段正确；`docs/access.md:185-197` 更新。
 - [ ] **A2 一条 CDP 连接贯穿 serve 生命周期**。今天每个请求连一次 Chrome，Chrome 每次弹 Allow。改成第一次用时连上，保持到 serve 停止或 Chrome 退出；断了下次用再连（Chrome 再弹一次是对的）。先查：保持连接对 `navigator.webdriver`（本来 remote debugging 开着就为 true）、对 `octocrawl login import` 的并发有没有影响；"Chrome is being controlled by automated test software" 横幅是否因此常驻（`docs/access.md:164` 说 remote debugging 开着就显示）。
   - 验收：同一 serve 内两次 my-browser 请求，Chrome 只弹一次 Allow（真实 Chrome 的 integration 测试，进 TIMED 组）。
