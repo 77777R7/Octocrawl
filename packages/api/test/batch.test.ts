@@ -545,6 +545,20 @@ describe('persistent URL-array batch', () => {
     expect((await w2l.waitBatch(running.taskId)).resultFiles).toBeDefined()
   })
 
+  it('says on a finished batch how many pages read held nothing selected, and which json fields had no source on how many', async () => {
+    const f = await fixture()
+    const engine = f.engine()
+    cleanup.push(() => engine.close())
+    const { client: w2l } = client(engine)
+    const urls = [`${f.origin}/item/1`, `${f.origin}/item/2`]
+    const selected = await w2l.waitBatch((await w2l.batchScrape(urls, { includeTags: ['.no-such-part'] })).taskId)
+    expect(selected.agentHints).toEqual([expect.stringMatching(/^on 2 of 2 pages read, includeTags selected nothing to read: its selectors matched no element there/)])
+    const extracted = await w2l.waitBatch((await w2l.batchScrape(urls, { formats: [{ type: 'json', schema: { type: 'object', properties: { license: { type: ['string', 'null'] } }, required: ['license'] } }] })).taskId)
+    expect(extracted.agentHints).toEqual([expect.stringMatching(/^json found no source for \/license on 2 of 2 pages read; such a field stays null: /)])
+    // A batch whose pages gave what was asked says nothing of the kind.
+    expect((await w2l.waitBatch((await w2l.batchScrape(urls)).taskId)).agentHints).toBeUndefined()
+  })
+
   it('writes no result files on a hosted engine, which keeps no files', async () => {
     const f = await fixture()
     const engine = f.engine({ hosted: true, noFileStore: true })

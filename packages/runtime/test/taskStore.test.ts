@@ -262,6 +262,22 @@ function runStoreContract(name: string, open: () => Promise<{ store: TaskStore; 
       expect(await store.countStepsWarned('task-1', 'redirected_off')).toBe(0)
     })
 
+    it('counts the read pages whose json has an issue of a code and message, by path, each page once a path', async () => {
+      ;({ store, cleanup } = await open())
+      await seed(store)
+      const NO_SOURCE = 'no verified source'
+      const extracted = (url: string, issues: Array<{ path?: string; message: string }>) => ({ ...pageResult(url), json: { status: 'complete' as const, data: {}, evidence: [], issues: issues.map((issue) => ({ code: 'field_unavailable' as const, ...issue })), modelUsage: null } })
+      await store.putStep(step({ result: extracted('https://example.com/a/b', [{ path: '/license', message: NO_SOURCE }, { path: '/license', message: NO_SOURCE }, { path: '/stars', message: NO_SOURCE }]) }))
+      await store.putStep(step({ id: 'step-2', url: 'https://example.com/other', canonicalUrl: 'https://example.com/other', result: extracted('https://example.com/other', [{ path: '/license', message: NO_SOURCE }, { path: '/price', message: 'breaks minimum' }]), createdAt: LATER }))
+      await store.putStep(step({ id: 'step-3', url: 'https://example.com/root', canonicalUrl: 'https://example.com/root', result: extracted('https://example.com/root', [{ message: NO_SOURCE }]), createdAt: LATER }))
+      await store.putStep(step({ id: 'step-4', url: 'https://example.com/gone', canonicalUrl: 'https://example.com/gone', status: 'failed', result: { ...extracted('https://example.com/gone', [{ path: '/license', message: NO_SOURCE }]), status: 'failed' }, createdAt: LATER }))
+      // A page a model filled in, or tried to, is not counted: its null is the model's answer.
+      await store.putStep(step({ id: 'step-5', url: 'https://example.com/model', canonicalUrl: 'https://example.com/model', result: { ...extracted('https://example.com/model', [{ path: '/license', message: NO_SOURCE }]), json: { ...extracted('https://example.com/model', [{ path: '/license', message: NO_SOURCE }]).json, modelUsage: { model: 'test-model', attempts: 1, inputTokens: null, outputTokens: null, externalCostUsd: null } } }, createdAt: LATER }))
+      expect(await store.countJsonIssuePaths('task-1', 'field_unavailable', NO_SOURCE)).toEqual({ '/license': 2, '/stars': 1, '': 1 })
+      expect(await store.countJsonIssuePaths('task-1', 'missing_required', NO_SOURCE)).toEqual({})
+      expect(await store.countJsonIssuePaths('task-2', 'field_unavailable', NO_SOURCE)).toEqual({})
+    })
+
     it('finds the steps whose trace has an event by name, without a lookalike name or another task\'s', async () => {
       ;({ store, cleanup } = await open())
       await seed(store)

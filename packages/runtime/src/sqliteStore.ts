@@ -405,6 +405,13 @@ export class SqliteTaskStore implements TaskStore {
     return row.count
   }
 
+  async countJsonIssuePaths(taskId: string, code: string, message: string): Promise<Record<string, number>> {
+    const rows = this.db
+      .prepare(`SELECT COALESCE(json_extract(issue.value, '$.path'), '') AS issue_path, COUNT(DISTINCT steps.id) AS count FROM steps, json_each(steps.result_json, '$.json.issues') AS issue WHERE steps.task_id = ? AND steps.status IN (${READ_STATUSES.map(() => '?').join(', ')}) AND steps.result_json IS NOT NULL AND COALESCE(json_extract(steps.result_json, '$.json.modelUsage.attempts'), 0) = 0 AND json_extract(issue.value, '$.code') = ? AND json_extract(issue.value, '$.message') = ? GROUP BY issue_path`)
+      .all(taskId, ...READ_STATUSES, code, message) as Array<{ issue_path: string; count: number }>
+    return Object.fromEntries(rows.map((row) => [row.issue_path, row.count]))
+  }
+
   async listNotServedCandidates(taskId: string, attemptId?: string): Promise<StepRecord[]> {
     const rows = this.db
       .prepare(`SELECT * FROM steps WHERE task_id = ?${attemptId === undefined ? '' : ' AND attempt_id = ?'} AND status IN (${READ_STATUSES.map(() => '?').join(', ')}) AND result_json IS NOT NULL AND (json_extract(result_json, '$.verification.status') = 'failed' OR instr(result_json, '"sourceUnavailable":true') > 0 OR EXISTS (SELECT 1 FROM json_each(result_json, '$.warnings') WHERE json_extract(json_each.value, '$.code') IN (${NOT_SERVED_WARNINGS.map(() => '?').join(', ')}))) ORDER BY created_at ASC, id ASC`)
