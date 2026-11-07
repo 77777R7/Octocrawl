@@ -96,6 +96,13 @@ export interface EvidenceAccess {
    */
   sessionApplied?: EvidenceAccessSessionApplied | null
   /**
+   * How the person allowed the site of a page read in their own Chrome (the my-browser lane, login UX A1): `clicked`,
+   * Allow on Octocrawl's page for this request, or `remembered`, from an earlier click, with no page shown; and when they
+   * clicked. Null on every other read, and when the result does not say. Added with remembered sites: optional, so that
+   * earlier records stay valid.
+   */
+  allowance?: EvidenceAccessAllowance | null
+  /**
    * Every paid provider call the page was read with (ROADMAP PA item 4), in order: the provider, what the spend ledger
    * reserved and charged, the price the provider stated, and what Octocrawl made of what came back. Null when no
    * provider was called. Added with the spend ledger: optional, so that earlier records stay valid.
@@ -232,6 +239,12 @@ export interface EvidenceAccessSessionApplied {
   cookies: number | null
   /** Origins whose localStorage was restored. */
   localStorageOrigins: number
+}
+
+export interface EvidenceAccessAllowance {
+  basis: 'clicked' | 'remembered'
+  /** When the person clicked Allow for the site (ISO 8601). */
+  allowedAt: string
 }
 
 export interface EvidenceAccessSession {
@@ -466,11 +479,12 @@ export const EVIDENCE_RECORD_KEYS = {
   pageActions: keysOf<EvidencePageActions>()(['steps', 'scriptRan']),
   pageActionStep: keysOf<EvidencePageActionStep>()(['type', 'outcome']),
   requestHeader: keysOf<EvidenceRequestHeader>()(['name', 'valueSha256']),
-  access: keysOf<EvidenceAccess>()(['route', 'executor', 'executorVersion', 'profile', 'externalCostUsd', 'completion', 'egress', 'session', 'sessionApplied', 'paidCalls', 'grant']),
+  access: keysOf<EvidenceAccess>()(['route', 'executor', 'executorVersion', 'profile', 'externalCostUsd', 'completion', 'egress', 'session', 'sessionApplied', 'allowance', 'paidCalls', 'grant']),
   accessEgress: keysOf<EvidenceAccessEgress>()(['proxy', 'source', 'switchedFrom', 'exit', 'kind']),
   accessEgressExit: keysOf<EvidenceAccessEgressExit>()(['ip', 'country', 'observedAt']),
   accessSession: keysOf<EvidenceAccessSession>()(['id']),
   accessSessionApplied: keysOf<EvidenceAccessSessionApplied>()(['cookies', 'localStorageOrigins']),
+  accessAllowance: keysOf<EvidenceAccessAllowance>()(['basis', 'allowedAt']),
   accessPaidCall: keysOf<EvidencePaidCall>()(['provider', 'rung', 'capabilities', 'ceilingUsd', 'chargedUsd', 'reportedCostUsd', 'sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'outcome', 'reason', 'answer', 'paidCallId', 'bytesCounted', 'bytesCapped', 'solveAttempts', 'fixedMonthlyUsd']),
   accessGrant: keysOf<EvidenceAccessGrant>()(['sha256', 'tier', 'attestedAt']),
   verification: keysOf<EvidenceVerification>()(['status', 'verifier', 'contractSha256', 'reason', 'failed', 'undecided']),
@@ -488,7 +502,7 @@ export const EVIDENCE_RECORD_ADDED_KEYS: Partial<Record<keyof typeof EVIDENCE_RE
   identity: ['device', 'requestHeaders'],
   robotsDecision: ['overrideBasis'],
   fieldEvidence: ['reading'],
-  access: ['completion', 'egress', 'session', 'sessionApplied', 'paidCalls', 'grant'],
+  access: ['completion', 'egress', 'session', 'sessionApplied', 'allowance', 'paidCalls', 'grant'],
   accessEgress: ['exit', 'kind'],
   accessPaidCall: ['sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'paidCallId', 'bytesCounted', 'bytesCapped', 'solveAttempts', 'fixedMonthlyUsd'],
   verification: ['undecided'],

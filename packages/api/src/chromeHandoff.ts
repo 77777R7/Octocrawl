@@ -159,18 +159,22 @@ export class HandoffNotThrough extends Error {
 export interface AllowedSites {
   readonly hosts: readonly string[]
   readonly signal: AbortSignal
+  /** Whether the person clicked Revoke on the page (the signal also aborts when they close it). */
+  revoked?(): boolean
   /** Stops watching and closes the page. */
   close(): Promise<void>
 }
 
 /** One step of asking the person to allow sites, for the server's log: never a page's content, only the page's own state. */
-export type ApprovalLog = (step: 'shown' | 'ready' | 'answer' | 'allowed' | 'refused', detail: Record<string, unknown>) => void
+export type ApprovalLog = (step: 'shown' | 'ready' | 'answer' | 'allowed' | 'refused' | 'remembered', detail: Record<string, unknown>) => void
 
 /** The sites and the task the person is asked to allow. */
 export interface SiteScope {
   hosts: readonly string[]
   /** What the reads are for, in a few words (the request, as W2L names it). */
   task: string
+  /** The sites allowed are remembered (login UX A1): the page says so, and how to revoke them. */
+  remember?: boolean
 }
 
 export interface UserChrome {
@@ -346,16 +350,18 @@ async function allowSites(connection: CdpConnection, scope: SiteScope, options: 
     }
     // Allowed: the page is watched until it is closed or revoked.
     const revoked = new AbortController()
+    let clickedRevoke = false
     let watching = true
     void (async () => {
       while (watching && !revoked.signal.aborted) {
         await new Promise((resolve) => setTimeout(resolve, Math.max(pollMs, 500)))
         if (!watching) return
         const seen = await answerOf(sessionId, world)
+        if (seen?.answer === 'revoked') clickedRevoke = true
         if (seen === null || seen.answer === 'revoked') revoked.abort(new Error('you revoked the sites in Chrome'))
       }
     })()
-    return { hosts: [...scope.hosts], signal: revoked.signal, close: async () => { watching = false; await closeTab() } }
+    return { hosts: [...scope.hosts], signal: revoked.signal, revoked: () => clickedRevoke, close: async () => { watching = false; await closeTab() } }
   } catch (error) {
     await closeTab()
     if (error instanceof HandoffNotThrough) throw error

@@ -5,13 +5,15 @@
  * ~/.w2l/sessions.json. Cookie values are never printed.
  */
 
-import { ChromeLoginError, defaultSessionsFile, importChromeLogin, listSavedLogins, removeSavedLogin } from '@w2l/api'
+import { ChromeLoginError, defaultSessionsFile, forgetSites, importChromeLogin, listRememberedSites, listSavedLogins, rememberedSitesFile, removeSavedLogin, siteHost } from '@w2l/api'
 import type { CliIo } from './run.js'
 
 export const LOGIN_USAGE = [
   'usage: octocrawl login import <domain|url> [--chrome-user-data-dir <dir>] [--timeout <seconds>]',
   '       octocrawl login list',
   '       octocrawl login remove <domain>',
+  '       octocrawl login allowed',
+  '       octocrawl login revoke <site>',
   '',
   'import reads the login of one site from the Chrome you already use and saves it, so',
   '`octocrawl scrape <url> --mode authed` (and the API and MCP in mode authed) read the page signed in as you.',
@@ -20,6 +22,11 @@ export const LOGIN_USAGE = [
   'Octocrawl connects once, reads that site\'s cookies and the localStorage of its tabs you have open',
   '(a site that keeps its login there needs a tab of it open), disconnects, and loads nothing in your tabs.',
   'Logins are kept in W2L_SESSIONS_FILE, else ~/.w2l/sessions.json (readable by you alone).',
+  '',
+  'allowed lists the sites you allowed on the page Octocrawl opens in your Chrome for --lane my-browser:',
+  'Octocrawl remembers each one and reads it there again without asking (Chrome still asks "Allow remote debugging?"',
+  'on each connection). revoke <site> forgets one (its host, with a port that is not the default): its next read',
+  'asks again, and a read of it under way stops. They are kept beside the logins, in allowed-sites.json.',
 ].join('\n')
 
 export async function login(argv: readonly string[], io: CliIo, importLogin: typeof importChromeLogin = importChromeLogin): Promise<number> {
@@ -37,6 +44,19 @@ export async function login(argv: readonly string[], io: CliIo, importLogin: typ
       const removed = await removeSavedLogin(sessionsFile, rest[0]!)
       io.stdout(JSON.stringify({ domain: rest[0], removed }))
       return removed ? 0 : 1
+    }
+    if (action === 'allowed') {
+      const file = rememberedSitesFile(sessionsFile)
+      io.stdout(JSON.stringify({ file, sites: await listRememberedSites(file) }, null, 2))
+      return 0
+    }
+    if (action === 'revoke') {
+      if (rest.length !== 1) { io.stderr(`octocrawl login revoke takes one site\n\n${LOGIN_USAGE}`); return 2 }
+      let host: string
+      try { host = siteHost(rest[0]!) } catch { io.stderr(`octocrawl login revoke: ${rest[0]} is not a site (example.com, example.com:8443 or a URL of it)`); return 2 }
+      const revoked = (await forgetSites(rememberedSitesFile(sessionsFile), [host])).length > 0
+      io.stdout(JSON.stringify({ site: host, revoked }))
+      return revoked ? 0 : 1
     }
     if (action === 'import') {
       let site: string | undefined

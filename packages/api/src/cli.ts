@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url'
 import { DeliveryStore, DeliveryWorker } from '@w2l/runtime'
 import { createApp, injectJobWebSockets, isLoopbackAuthority } from './app.js'
 import { listSavedLogins } from './chromeLogin.js'
+import { listRememberedSites, rememberedSitesFile } from './rememberedSites.js'
 import { createApiEngine, defaultSessionsFile } from './engine.js'
 import { closeIdleOnlyWhenUnread } from './keepAlive.js'
 import { parseListen, parsePort } from './listen.js'
@@ -110,7 +111,10 @@ export async function runApiServer(argv: readonly string[], env: NodeJS.ProcessE
   if (servesLogins) {
     // Only a count: a damaged file is the login commands' to report, and does not stop a server that is already listening.
     const saved = await listSavedLogins(defaultSessionsFile(env)).then((logins) => logins.length, () => 0)
+    const allowed = (await listRememberedSites(rememberedSitesFile(defaultSessionsFile(env)))).length
     log(`octocrawl: a page behind your login: an agent is told to ask you first, then reads it in the Chrome you are signed in to (lane my-browser; you click Allow) or with a login you save once (npx octocrawl login import <site>, then mode authed); saved logins stay on this computer${saved === 0 ? '' : ` (${saved} saved: npx octocrawl login list)`}`)
+    // The sites read in the person's Chrome without asking again (login UX A1): said at each start, so they are never forgotten about.
+    if (allowed > 0) log(`octocrawl: ${allowed} ${allowed === 1 ? 'site' : 'sites'} you allowed ${allowed === 1 ? 'is' : 'are'} read in your Chrome without asking again (npx octocrawl login allowed; npx octocrawl login revoke <site> to stop)`)
   }
   return { url, close }
 }
