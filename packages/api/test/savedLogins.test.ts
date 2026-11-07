@@ -157,12 +157,32 @@ describe('saved logins in the API engine', () => {
       let status = await engine.getBatch(accepted.taskId)
       for (let i = 0; i < 200 && !['completed', 'failed', 'cancelled'].includes(status?.status ?? ''); i++) { await new Promise((resolve) => setTimeout(resolve, 20)); status = await engine.getBatch(accepted.taskId) }
       expect(status?.waitingForPerson).toBe(1)
-      expect(status?.agentHints).toEqual([expect.stringContaining('1 page of www.example.com asked for a login')])
+      // The login line offers no handoff for the page at the login wall; the list stopped at a captcha gets its own line, which names the batch handoff.
+      expect(status?.agentHints).toEqual([expect.stringContaining('1 page of www.example.com asked for a login'), expect.stringContaining('1 page of list.example.org gate automated access')])
       expect(status?.agentHints?.[0]).not.toContain('hand_off_batch')
     })
 
     it('says nothing when no page asked for one', async () => {
       expect((await finished([open])).agentHints).toBeUndefined()
+    })
+
+    it('says what to do about the rest of the failed pages too, a line a reason, after the login line', async () => {
+      const empty = 'https://empty.example.org/'
+      const slow = 'https://slow.example.org/'
+      const failing = (url: string): FetchResult => url.startsWith(empty)
+        ? { ...page(url, 'http', ''), status: 'failed', failureReason: 'empty_unverified', markdown: null, trace: [{ at: 1, lane: 'http', event: 'quality_low_yield' }] }
+        : url.startsWith(slow) ? { ...page(url, 'http', ''), status: 'failed', failureReason: 'timeout', markdown: null } : url === open ? page(url, 'http', 'A public page with enough words to count as content for this test.') : walled(url)
+      root = await mkdtemp(join(tmpdir(), 'w2l-logins-'))
+      engine = createApiEngine({ taskRoot: join(root, 'tasks'), sessionsFile: join(root, 'sessions.json'), channelsFor: () => [{ id: 'http', identity: identityBundleFrom(modeIdentity('standard')), fetch: async (url) => failing(url) }] })
+      const accepted = await engine.startBatch({ urls: [`${empty}a`, `${empty}b`, `${slow}a`, 'https://www.example.com/a', open], fastMode: true, timeout: 20_000 } as Parameters<ApiEngine['startBatch']>[0])
+      let status = await engine.getBatch(accepted.taskId)
+      for (let i = 0; i < 200 && !['completed', 'failed', 'cancelled'].includes(status?.status ?? ''); i++) { await new Promise((resolve) => setTimeout(resolve, 20)); status = await engine.getBatch(accepted.taskId) }
+      expect(status?.failed).toBe(4)
+      expect(status?.agentHints).toEqual([
+        expect.stringContaining('1 page of www.example.com asked for a login'),
+        '2 pages of empty.example.org read empty over HTTP and asked for the browser lane, which fastMode declined: a new batch of those URLs without fastMode reads them in a browser',
+        expect.stringContaining('1 page of slow.example.org ran out of their 20000 ms timeout'),
+      ])
     })
 
     it('on a server with neither route, names none as its own', async () => {

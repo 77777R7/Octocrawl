@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { gunzipSync, gzipSync } from 'node:zlib'
-import { createApiEngine, type ApiEngineOptions, type BrowserKeeper, type HostedChromeOperator, type SliceCharge } from '@w2l/api'
+import { createApiEngine, failureGroupOf, withFailure, type ApiEngineOptions, type BatchFailures, type BrowserKeeper, type HostedChromeOperator, type SliceCharge } from '@w2l/api'
 import { RequestError, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
 import { canonicalizeUrl, CHECKPOINT_FILENAME, foldCheckpoint, hostOf, SqliteTaskStore, webhookSignature, type WebhookTransport } from '@w2l/runtime'
 import { jobEngineOptions, logQuotaThresholds, type HostedLeases } from './hostedApi.js'
@@ -359,6 +359,8 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     const used = Math.min(priced.used, reservedPages * price)
     const perKind = priced.perKind
     const outcomes = result.charges.map(pageOutcome)
+    // A batch's failed pages by reason, for the finished status's lines: the job's so far plus this slice's; null when neither has one (a crawl's status has no such lines yet).
+    const failures = job.kind !== 'batch' ? null : result.charges.reduce<BatchFailures | null>((all, charge) => { const group = failureGroupOf(charge); return group === null ? all : withFailure(all ?? {}, group, charge.host) }, job.failures ?? null)
     const errors = result.charges.filter((charge) => ERROR_STATUSES.has(charge.status)).length
     const idle = result.items.length === 0 && result.status === 'paused'
     const idleSlices = idle ? (job.idleSlices ?? 0) + 1 : 0
@@ -375,6 +377,7 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
         ...(j.counts.retried === undefined ? {} : { retried: j.counts.retried + result!.charges.filter((charge) => charge.retried === true).length }),
       },
       outcomes: outcomes.reduce((all, outcome) => ({ ...all, [outcome]: (all[outcome] ?? 0) + 1 }), j.outcomes ?? {}),
+      ...(failures === null ? {} : { failures }),
       credits: { ...j.credits, used: j.credits.used + used }, idleSlices, budgetExceeded: result!.budgetExceeded ?? j.budgetExceeded ?? null,
       segments: [...(j.segments ?? []), segment], checkpoint: nextCheckpoint,
       // Kept until settled: if the settle below fails, the next delivery settles it.

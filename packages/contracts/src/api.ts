@@ -753,7 +753,7 @@ export interface BatchStatusResponse extends CrawlReport {
   waitingForPerson?: number
   /** A batch on the my-browser lane waiting for the person to allow its sites in the page Octocrawl opened in their Chrome; present only while it waits. */
   waitingForApproval?: true
-  /** The next step for the batch as a whole, once it has ended: today, for the pages that asked for a login. Each item keeps its own. */
+  /** The next step for the batch as a whole, once it has ended: a line for the pages that asked for a login, then one a reason for the rest of its failed pages (what stopped them and the step that reads them). Each item keeps its own. */
   agentHints?: AgentHints
 }
 

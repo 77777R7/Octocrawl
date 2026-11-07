@@ -172,6 +172,20 @@ describe('hosted job routes', () => {
     expect((await call('POST', '/v1/batches', 'oc_one', { urls: urls(1), maxCredits: 0 })).status).toBe(400)
   })
 
+  it('remembers that a key without the browser lane ran its batch on HTTP alone, so the finished status does not say to send its empty pages again without fastMode', async () => {
+    const { call, store } = await start()
+    const http = await (await call('POST', '/v1/batches', 'oc_http', { urls: urls(2) })).json() as { taskId: string }
+    const browser = await (await call('POST', '/v1/batches', 'oc_one', { urls: urls(2) })).json() as { taskId: string }
+    expect(store.jobs.get(http.taskId)?.httpOnly).toBe(true)
+    expect(store.jobs.get(browser.taskId)?.httpOnly).toBeUndefined()
+    const failures = { fast_mode_declined: { count: 2, hosts: ['example.com'] } }
+    const ended = (id: string) => ({ ...store.jobs.get(id)!, status: 'completed' as const, finishedAt: '2026-11-07T00:01:00.000Z', counts: { pages: 0, errors: 2, slices: 1 }, failures })
+    expect(jobStatus(ended(http.taskId)).agentHints).toEqual([expect.stringContaining('2 pages of example.com read empty over HTTP and asked for the browser lane, which this key does not have')])
+    expect(jobStatus(ended(browser.taskId)).agentHints).toEqual([expect.stringContaining('which fastMode declined: a new batch of those URLs without fastMode reads them in a browser (5 credits a page)')])
+    // A job still running says nothing yet.
+    expect(jobStatus({ ...store.jobs.get(http.taskId)!, failures })).not.toHaveProperty('agentHints')
+  })
+
   it('refuses a screenshot with fastMode at the start of a job, in any form, naming why, where it used to run five failing slices to delivery_failed; actions never get that far', async () => {
     const { call, store } = await start()
     const starts = [['/v1/batches', { urls: urls(1) }], ['/v1/crawl', { url: 'https://example.com/' }]] as const
