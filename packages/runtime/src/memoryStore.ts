@@ -125,6 +125,16 @@ export class MemoryTaskStore implements TaskStore {
     return count
   }
 
+  async countJsonIssuePaths(taskId: string, code: string, message: string): Promise<Record<string, number>> {
+    const counts: Record<string, number> = {}
+    for (const step of this.steps.values()) {
+      if (step.taskId !== taskId || !READ_STATUSES.includes(step.status) || (step.result?.json?.modelUsage?.attempts ?? 0) > 0) continue
+      const paths = new Set((step.result?.json?.issues ?? []).filter((issue) => issue.code === code && issue.message === message).map((issue) => issue.path ?? ''))
+      for (const path of paths) counts[path] = (counts[path] ?? 0) + 1
+    }
+    return counts
+  }
+
   async listNotServedCandidates(taskId: string, attemptId?: string): Promise<StepRecord[]> {
     return [...this.steps.values()]
       .filter((step) => step.taskId === taskId && (attemptId === undefined || step.attemptId === attemptId) && READ_STATUSES.includes(step.status) && step.result !== null)

@@ -135,7 +135,7 @@ import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, de
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, verify, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { BrowserEngineName, BrowserIdentityChoice, BrowserKeeper, CaptchaSolving, ChannelAdmission, ChannelsFiltered, InstalledChromeTestSeams, PricedExit } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
-import { agentHintsFor, batchFailureHints, batchLoginWallHint, failureGroupOf, httpLaneAskedForBrowser, mapAgentHints, MAX_AGENT_HINTS, pinnedFastModeHints, withFailure, type BatchFailures, type FailureFacts, type FastModePin, type HintOffers } from './hints.js'
+import { agentHintsFor, batchExtractionHints, batchFailureHints, batchLoginWallHint, failureGroupOf, httpLaneAskedForBrowser, mapAgentHints, MAX_AGENT_HINTS, pinnedFastModeHints, withFailure, type BatchFailures, type FailureFacts, type FastModePin, type HintOffers } from './hints.js'
 import { HandoffNotThrough, LOGIN_WAIT_MS, openUserChrome, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
 import { importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
 import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
@@ -145,7 +145,7 @@ import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlI
 import { FileSessionBrokerStore, FileSessionStore, hostedChromeRefusal, installedChromeRefusal, mergeListPages, publicSession, regionSpecOf, SessionBroker, type SessionStore } from '@w2l/bench'
 import { BLOCK_REASON, hostedVerifyRefusal, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, LIST_DEFAULTS, type AccessChoice, type BlockReason, type ListRun, type PageAction, type MonitorView, type MonitorRevision } from '@w2l/contracts'
 import type { JobResultFiles, ManagedSessionRef, PublicManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
-import { attributesFormat, checkVerificationFormats, customJsonFormat, listFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv, verifyScrapeResponse } from './structured.js'
+import { attributesFormat, checkVerificationFormats, customJsonFormat, listFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv, UNSOURCED_FIELD_MESSAGE, verifyScrapeResponse } from './structured.js'
 
 export interface CrawlWithSteps {
   report: CrawlReport
@@ -1303,6 +1303,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const failedSteps = isTerminalStatus(task.status) && (counts.failed ?? 0) + (counts.blocked ?? 0) > 0 ? await stepsOf(store, taskId, 'errors') : []
       const behindLogin = failedSteps.filter((step) => step.result?.blockReason === 'login_wall')
       const failureLines = batchFailureHints(failuresOf(failedSteps, task), { hosted: options.hosted === true, handoff: waitingForPerson !== undefined, ...(task.batch.timeout === undefined ? {} : { timeout: task.batch.timeout }) })
+      // And about the pages it read with nothing taken from them: a selection that held nothing, json fields with no source on the page.
+      const extractionLines = !isTerminalStatus(task.status) ? [] : batchExtractionHints({
+        read: (counts.success ?? 0) + (counts.partial ?? 0) + (counts.empty_verified ?? 0),
+        emptySelection: (task.batch.includeTags?.length ?? 0) === 0 ? 0 : await store.countStepsWarned(taskId, 'empty_selection'),
+        unsourced: hasFormat(task.batch.formats, 'json') ? await store.countJsonIssuePaths(taskId, 'field_unavailable', UNSOURCED_FIELD_MESSAGE) : {},
+      }, options.hosted === true)
       return {
         ...report, requested: task.batch.urls.length, completed, remaining: Math.max(0, task.batch.urls.length - completed),
         // A page read, with or without content, succeeded; what the errors report lists failed.
@@ -1324,9 +1330,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ...(task.status === 'running' || task.status === 'pending' ? { rate: await runningRate(store, taskId, latest, Math.max(0, task.batch.urls.length - completed)) } : {}),
         ...(task.batch.invalidURLs === undefined ? {} : { invalidURLs: task.batch.invalidURLs }),
         ...(waitingForPerson === undefined ? {} : { waitingForPerson }),
-        ...(behindLogin.length === 0 && failureLines.length === 0 ? {} : { agentHints: [
+        ...(behindLogin.length === 0 && failureLines.length === 0 && extractionLines.length === 0 ? {} : { agentHints: [
           ...(behindLogin.length === 0 ? [] : [batchLoginWallHint(behindLogin.map((step) => step.url), { mode: task.mode, webhook: webhookOf(task) !== undefined, ...(task.batch.lane === undefined ? {} : { lane: task.batch.lane }) }, { ...taskHintOffers(task, behindLogin[0]!.url), handoff: waitingForPerson !== undefined && behindLogin.some((step) => handoffNeededIn(task, step)) })]),
           ...failureLines,
+          ...extractionLines,
         ] }),
         ...(approvalsWaiting.has(taskId) ? { waitingForApproval: true as const } : {}),
         ...(webhook === undefined ? {} : { webhook }),
