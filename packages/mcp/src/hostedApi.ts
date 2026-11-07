@@ -38,7 +38,7 @@ import { serveMcpPost, servesProtocolVersion, unsupportedProtocolVersion } from 
 import { CREDITS, DEFAULT_MONTHLY_CREDITS, mapCharge, scrapeCharge, secondsToNextGrant, type CreditsStore, type RequestNote, type Reservation } from './hostedCredits.js'
 import { asksModelFallback, MODEL_REFUSALS, type HostedModel } from './hostedModel.js'
 import { grantedCapabilities, HOSTED_ACCESS_ENGINE, type HostedAccessSource } from './hostedAccess.js'
-import { createJobRoutes, HOSTED_BATCH_KEYS, HOSTED_CRAWL_KEYS, isJobRoute, JOB_MAX_CRAWL_PAGES, JOB_WORKER_COUNT, type HostedJobsConfig } from './hostedJobRoutes.js'
+import { createJobRoutes, HOSTED_BATCH_KEYS, HOSTED_CRAWL_KEYS, isJobRoute, JOB_MAX_CRAWL_PAGES, JOB_BROWSER_PAGES, JOB_WORKER_COUNT, type HostedJobsConfig } from './hostedJobRoutes.js'
 
 /** What a key holder may do. `dailyLimit` counts scrape and map starts per UTC day. */
 export interface HostedKeyRecord {
@@ -281,7 +281,7 @@ export function hostedPolicy(base: NetworkPolicy, env: NodeJS.ProcessEnv = proce
 export function jobEngineOptions(taskRoot: string, extra: Partial<ApiEngineOptions> = {}): ApiEngineOptions {
   return {
     taskRoot, hosted: true, noFileStore: true, defaultMaxPages: JOB_MAX_CRAWL_PAGES, allowRobotsOverride: false, sessionsFile: null, userChrome: null,
-    workerCount: JOB_WORKER_COUNT, resumeOnStart: false, deferLaunch: true, ...HOSTED_ACCESS_ENGINE, ...extra,
+    workerCount: JOB_WORKER_COUNT, browserPagesAtOnce: JOB_BROWSER_PAGES, resumeOnStart: false, deferLaunch: true, ...HOSTED_ACCESS_ENGINE, ...extra,
     networkPolicy: hostedPolicy(extra.networkPolicy ?? hostedNetworkPolicy()),
   }
 }

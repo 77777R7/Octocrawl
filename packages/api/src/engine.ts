@@ -9,6 +9,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { isIP } from 'node:net'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { browserSlots, withBrowserSlots, type BrowserSlots } from './browserSlots.js'
 import {
   buildChannels,
   compatHostListed,
@@ -131,7 +132,7 @@ import {
 import { accessGrantRef, createExecutionScope, createSpendLedger, evaluateGovernance, type AccessAttestationInput, type AccessGrant, type CrawlPolicy } from '@w2l/http-core'
 import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, notServedSteps, READ_STATUSES, readinessOf, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, withRegexLedger, type RegexStats, type StepPageQuery } from '@w2l/runtime'
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, verify, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
-import type { BrowserEngineName, BrowserIdentityChoice, CaptchaSolving, ChannelAdmission, ChannelsFiltered, InstalledChromeTestSeams, PricedExit } from '@w2l/bench'
+import type { BrowserEngineName, BrowserIdentityChoice, BrowserKeeper, CaptchaSolving, ChannelAdmission, ChannelsFiltered, InstalledChromeTestSeams, PricedExit } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
 import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints, MAX_AGENT_HINTS, pinnedFastModeHints, type FastModePin, type HintOffers } from './hints.js'
 import { HandoffNotThrough, openUserChrome, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
@@ -545,6 +546,17 @@ export interface ApiEngineOptions {
   batchMaxWallMs?: number | null
   /** Pages the orchestrator fetches at once per crawl, and the most a crawl's `maxConcurrency` may ask for. Default 4. */
   workerCount?: number
+  /**
+   * The pages this engine renders in a browser at once, across its scrapes and its jobs' pages: a worker whose page needs
+   * the browser waits for a slot while HTTP pages flow on the other workers (a hosted job slice renders 2 of the 8 pages it
+   * reads at once). Absent: as many as the workers read.
+   */
+  browserPagesAtOnce?: number
+  /**
+   * The process's browser keeper (@w2l/bench browserKeeper): the public browser rung's Chromium outlives this engine,
+   * launched once for the engines that come and go (a hosted job worker's slices). Absent: launched by this engine, closed with it.
+   */
+  browserKeeper?: BrowserKeeper
   /**
    * Asked before each page's json model fallback calls the model, where a call's context names no gate of its own: a
    * hosted job's slice passes the hosted switch, daily cap and credits here. Absent: the model is called whenever it is
@@ -1067,6 +1079,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const conditionalHttp = new ResilientHttpSubject('standard', networkPolicy, originScheduler, undefined, false, fileStore)
   const defaultMaxPages = options.defaultMaxPages ?? null
   const workerCount = Math.max(1, options.workerCount ?? DEFAULT_WORKER_COUNT)
+  /** The browser slots (browserPagesAtOnce), shared by every scrape and job page of this engine; null: no cap. */
+  const slots: BrowserSlots | null = options.browserPagesAtOnce === undefined ? null : browserSlots(options.browserPagesAtOnce)
   const newTaskId = options.taskIds ?? (() => crypto.randomUUID())
   // One robots.txt cache per mode, shared by the http rung and a crawl's sitemap reader, so a host's robots.txt is read once for both.
   const robotsCaches = new Map<string, RobotsOriginCache>()
@@ -1106,7 +1120,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     options.channelsFor ??
     ((mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced?: boolean) => {
       // One set of rungs per egress: each leaves through its proxy; pacing per origin stays shared (originScheduler).
-      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, vendorTariffs: accessGrant?.tariffs ?? {}, ...(accessGrant === null ? {} : { vendorGrant: accessGrantRef(accessGrant) }), browserEngine: options.browserEngine ?? 'playwright', browserIdentity: options.browserIdentity ?? 'declared', compatTransport: compatHosts.length > 0, compatAddressGuard: options.hosted === true, ...(enhanced === true ? { enhanced } : {}), ...(installedChrome ? { installedChrome, ...(options.installedChromeSeams === undefined ? {} : { installedChromeSeams: options.installedChromeSeams }) } : {}), ...(captchaSolving !== undefined && enhanced === true ? { captchaSolving } : {}) })
+      const channels = buildChannels(mode, { headed, ...(options.browserKeeper === undefined ? {} : { browserKeeper: options.browserKeeper }), networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, vendorTariffs: accessGrant?.tariffs ?? {}, ...(accessGrant === null ? {} : { vendorGrant: accessGrantRef(accessGrant) }), browserEngine: options.browserEngine ?? 'playwright', browserIdentity: options.browserIdentity ?? 'declared', compatTransport: compatHosts.length > 0, compatAddressGuard: options.hosted === true, ...(enhanced === true ? { enhanced } : {}), ...(installedChrome ? { installedChrome, ...(options.installedChromeSeams === undefined ? {} : { installedChromeSeams: options.installedChromeSeams }) } : {}), ...(captchaSolving !== undefined && enhanced === true ? { captchaSolving } : {}) })
       return options.httpOnly ? channels.filter(channel => HTTP_CHANNELS.has(channel.id)) : channels
     })
   const channelsByMode = new Map<string, Channel[]>()
@@ -1801,7 +1815,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
      * session are never cached.
      */
     const laneFor = (egress: Egress | undefined): Lane => {
-      const rungs = channelsForUrl(mode, task.seedUrl, selection ?? {}, selection?.formats ?? [], false, compat, egress, chrome)
+      const chosen = channelsForUrl(mode, task.seedUrl, selection ?? {}, selection?.formats ?? [], false, compat, egress, chrome)
+      // The rungs that render take one of the engine's browser slots each, when it caps them.
+      const rungs = slots === null ? chosen : { ...chosen, channels: withBrowserSlots(chosen.channels, slots) }
       const sessionFile = cookieSessionFileFor(task.taskDir, routeOf(egress))
       return { egress, rungs, ladder: ladderFor(rungs, egress), cookieSession: egressSessions && mode !== 'authed' ? new TaskCookieSession(sessionFile) : undefined }
     }
@@ -2051,7 +2067,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         : {}),
     }
     let turnHints: readonly string[] = []
-    const channels = context.browserTurn === undefined ? rungs.channels : withBrowserTurn(rungs.channels, context.browserTurn, (hints) => { turnHints = hints })
+    // A rung that renders takes one of the engine's browser slots, when it caps them, after the call's turn is granted.
+    const slotted = slots === null ? rungs.channels : withBrowserSlots(rungs.channels, slots)
+    const channels = context.browserTurn === undefined ? slotted : withBrowserTurn(slotted, context.browserTurn, (hints) => { turnHints = hints })
     const runner = new LadderRunner(channels, policy, historyFor(mode, scrapeEgress, req.access === 'enhanced'), null, sessionsFor(mode), { channelsFiltered: rungs.filtered, httpFallback: unproxied(scrapeEgress), ...(req.verify === undefined ? {} : { verify: req.verify }) })
     // A Monitor's capture (no record) neither reads nor fills the cache: a preview persists nothing.
     // The URL a scrape names; a Monitor's capture (no record) re-reads its URL on a schedule, as a crawler does.

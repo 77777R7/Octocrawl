@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { gunzipSync, gzipSync } from 'node:zlib'
-import { createApiEngine, type ApiEngineOptions, type HostedChromeOperator, type SliceCharge } from '@w2l/api'
+import { createApiEngine, type ApiEngineOptions, type BrowserKeeper, type HostedChromeOperator, type SliceCharge } from '@w2l/api'
 import { RequestError, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
 import { canonicalizeUrl, CHECKPOINT_FILENAME, foldCheckpoint, hostOf, SqliteTaskStore, webhookSignature, type WebhookTransport } from '@w2l/runtime'
 import { jobEngineOptions, logQuotaThresholds, type HostedLeases } from './hostedApi.js'
@@ -24,7 +24,7 @@ import type { UploadResult } from './hostedCloud.js'
 import { asksModelFallback, MODEL_REFUSALS, type HostedModel } from './hostedModel.js'
 import { grantedCapabilities, type HostedAccessSource } from './hostedAccess.js'
 import type { HostedJob, HostedJobStore, HostedWebhookDelivery } from './hostedJobs.js'
-import { exportName, JOB_WORKER_COUNT, jobPrefix, jobStatus } from './hostedJobRoutes.js'
+import { exportName, JOB_BROWSER_PAGES, JOB_WORKER_COUNT, jobPrefix, jobStatus } from './hostedJobRoutes.js'
 
 /** The bucket operations a slice needs; GcsBucket has them. */
 export interface WorkerFiles {
@@ -44,14 +44,16 @@ export interface WorkerLimits {
   /** Job pages a UTC day for every account together, and for one account (W2L_JOBS_DAILY, W2L_JOBS_ACCOUNT_DAILY). */
   jobsDaily: number
   jobsAccountDaily: number
-  /** Hosts a batch slice takes at most. */
+  /** Hosts a batch slice takes at most, each under a lease: a slice of many hosts reads about a page a host. */
   maxHostsPerSlice: number
+  /** Pages a slice may store past its limit: a drain lets the pages in flight finish, one per worker but the one that reached the limit. */
+  headroomPages: number
   /** Slices in a row that store nothing before the job fails (`no_progress`). */
   idleSlicesToFail: number
   /** Slices in a row that fail (an error, or a slice that died) before the job fails (`delivery_failed`). */
   failedAttemptsToFail: number
 }
-export const WORKER_LIMITS: WorkerLimits = { slicePages: 100, firstSlicePages: 10, sliceMs: 8 * 60_000, graceMs: 60_000, jobsDaily: 10_000, jobsAccountDaily: 2_000, maxHostsPerSlice: 20, idleSlicesToFail: 2, failedAttemptsToFail: 5 }
+export const WORKER_LIMITS: WorkerLimits = { slicePages: 100, firstSlicePages: 10, sliceMs: 8 * 60_000, graceMs: 60_000, jobsDaily: 10_000, jobsAccountDaily: 2_000, maxHostsPerSlice: 100, headroomPages: JOB_WORKER_COUNT - 1, idleSlicesToFail: 2, failedAttemptsToFail: 5 }
 
 export interface JobWorkerDeps {
   store: HostedJobStore
@@ -82,6 +84,8 @@ export interface JobWorkerDeps {
   regexChecks?: boolean
   /** The engine's network and lanes; a test passes a local policy and HTTP-only channels. Default: the hosted policy. */
   engineOptions?: () => Partial<ApiEngineOptions>
+  /** The process's browser keeper (@w2l/api browserKeeper): the slices' engines share one Chromium instead of launching one each. Absent: one a slice. */
+  browserKeeper?: BrowserKeeper
   /** A directory the worker may write task directories in. */
   workRoot: string
   limits?: Partial<WorkerLimits>
@@ -96,10 +100,10 @@ export interface SliceOutcome { status: 200 | 500 | 503; outcome: string }
 /** Attempts at a job's webhook before it is recorded failed: about 20 minutes of the queue's backoff (10 s doubling to 10 min). */
 export const WEBHOOK_MAX_ATTEMPTS = 8
 const WEBHOOK_TIMEOUT_MS = 30_000
+/** Host leases asked for at once at a slice's start. */
+const LEASES_AT_ONCE = 10
 const WEBHOOK_RETRYABLE = (status: number) => status === 408 || status === 425 || status === 429 || status >= 500
 
-/** Pages a slice may store past its limit: the engine's workers (JOB_WORKER_COUNT) less one. */
-const SLICE_HEADROOM = JOB_WORKER_COUNT - 1
 /** A crawl's page limit on hosted Octocrawl (hostedJobRoutes.ts JOB_MAX_CRAWL_PAGES), for a request stored without one. */
 const JOB_MAX_PAGES = 500
 /** A slice's lease outlasts a delivery's dispatch deadline (900 s). */
@@ -183,11 +187,13 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
   if (allowed <= 0) return pass((j) => ({ ...j, status: 'completed', failureReason: 'max_credits' }))
   // Under maxCredits the headroom page must fit too.
   const slicePages = job.counts.slices === 0 ? Math.min(limits.firstSlicePages, limits.slicePages) : limits.slicePages
-  let pages = Math.min(slicePages, job.credits.maxCredits === null ? allowed : Math.max(1, allowed - SLICE_HEADROOM))
+  let pages = Math.min(slicePages, job.credits.maxCredits === null ? allowed : Math.max(1, allowed - limits.headroomPages))
   // No more than the job has left: a batch's URLs not yet read, a crawl's pages under its maxPages. A slice that asks for
   // all of them gets no headroom, as there is no page past them; the day's pool and the credits are taken for what is left.
   const left = Math.max(1, (job.kind === 'batch' ? (request as ParsedBatchStartRequest).urls.length : ((request as ParsedCrawlStartRequest).maxPages ?? JOB_MAX_PAGES)) - job.counts.pages - job.counts.errors)
-  const headroom = left > pages ? SLICE_HEADROOM : 0
+  // A batch that asks for all it has left gets no headroom: its URLs run out, so no page is stored past them. A crawl's `left`
+  // is a count under its maxPages, which its frontier may not reach, or may pass by a page a worker: it keeps the headroom.
+  const headroom = job.kind === 'crawl' || left > pages ? limits.headroomPages : 0
   pages = Math.min(pages, left)
 
   const tag = holder.slice(0, 8)
@@ -207,11 +213,15 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
 
     // The hosts this slice reads, each under a lease no other slice holds: a crawl's seed host, a batch's next hosts.
     const wanted = await hostsOf(job, checkpoint === null || job.kind === 'crawl' ? null : taskDir)
+    // Leases are asked for a few hosts at a time (each is three Firestore calls): a hundred hosts in order, one at a time, would take the slice 10 to 20 s before its first page.
     const hosts: string[] = []
-    for (const host of wanted) {
-      if (hosts.length >= limits.maxHostsPerSlice) break
-      const lease = await deps.hostLeases.acquire(`host-${host}`, leaseMs, now())
-      if (lease.ok) { hosts.push(host); releases.push(lease.release) }
+    for (let at = 0; at < wanted.length && hosts.length < limits.maxHostsPerSlice; at += LEASES_AT_ONCE) {
+      const asked = wanted.slice(at, at + Math.min(LEASES_AT_ONCE, limits.maxHostsPerSlice - hosts.length))
+      const leases = await Promise.allSettled(asked.map(async (host) => ({ host, lease: await deps.hostLeases.acquire(`host-${host}`, leaseMs, now()) })))
+      for (const settled of leases) if (settled.status === 'fulfilled' && settled.value.lease.ok) { hosts.push(settled.value.host); releases.push(settled.value.lease.release) }
+      // A lease call that failed fails the slice as before, once the leases taken beside it are on the list to be released.
+      const failed = leases.find((settled) => settled.status === 'rejected')
+      if (failed !== undefined) throw failed.reason
     }
     if (wanted.length > 0 && hosts.length === 0) { line('hosted_job_hosts_busy'); return await pass(unchanged, 30) }
 
@@ -220,7 +230,7 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     const day = now().toISOString().slice(0, 10)
     const pools = (n: number) => [{ id: `${day}-jobs`, limit: limits.jobsDaily, amount: n, alert: true }, { id: `${day}-jobs-account-${job.uid}`, limit: limits.jobsAccountDaily, amount: n }]
     // What goes back when the slice settles: the pools count the pages it read, not the ones it held. A slice of many hosts
-    // reads a page a host, 20 of the 100 it holds; counted as held, 400 pages would use up an account's 2,000.
+    // reads a page a host (20 of the 100 it held, before 2026-11-07); counted as held, 400 pages would use up an account's 2,000.
     const poolsBack = (n: number) => pools(n).map(({ id, amount }) => ({ id, amount }))
     const reservationId = `${jobId}-${generation}-${holder}`
     // Under maxCredits the reservation stays within what is left of it; a page a drain stores past it is not charged.
@@ -237,7 +247,13 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     if (!reserved.ok && reserved.limited === 'credits' && reserved.remaining >= price) {
       reservedPages = Math.floor(reserved.remaining / price)
       // What is left of the job fits: no headroom needed. Otherwise a page of the reservation is the headroom.
-      pages = left <= reservedPages ? left : Math.max(1, reservedPages - SLICE_HEADROOM)
+      pages = left <= reservedPages ? left : Math.max(1, reservedPages - limits.headroomPages)
+      reserved = await deps.credits.reserve(job.uid, reservedPages * price, pools(reservedPages), now(), reservationId)
+    }
+    // The day's pool has no room for the headroom: the pages alone, then, read one at a time (the engine's workers below), so
+    // a small pool still gets its pages read and the slice never stores a page it did not reserve.
+    if (!reserved.ok && reserved.limited === 'quota' && reservedPages > pages) {
+      reservedPages = pages
       reserved = await deps.credits.reserve(job.uid, reservedPages * price, pools(reservedPages), now(), reservationId)
     }
     if (!reserved.ok) {
@@ -259,13 +275,17 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     // The policy a hosted scrape reads under (its 5 MiB file cap and the operator's contact), on whatever network a test gives.
     // Each page's regular-expression checks, when the operator switched them on: one log line a page, by the job, never its text.
     const regex: Partial<ApiEngineOptions> = { hostedRegexChecks: deps.regexChecks === true, onRegexChecks: (stats) => log(JSON.stringify({ event: 'regex_checks', kind: 'page', jobId, scans: stats.scans, memoHits: stats.memoHits, totalMs: Math.round(stats.totalMs * 10) / 10, maxMs: Math.round(stats.maxMs * 10) / 10, maxCallMs: Math.round(stats.maxCallMs * 10) / 10, limited: stats.limited })) }
-    const extra = { ...(deps.hostedChrome === undefined ? {} : { hostedChrome: deps.hostedChrome }), ...regex, ...deps.engineOptions?.() }
+    const extra = { ...(deps.hostedChrome === undefined ? {} : { hostedChrome: deps.hostedChrome }), ...(deps.browserKeeper === undefined ? {} : { browserKeeper: deps.browserKeeper }), ...regex, ...deps.engineOptions?.() }
     // Each page's model call is admitted by the switch and the day's cap, and only while the slice holds its two credits;
     // a worker without a hosted model refuses every call, whatever engine options a caller passed.
     const model = deps.model?.gate(modelRefusal) ?? { gate: { admit: async () => ({ ok: false as const, message: MODEL_REFUSALS.notOffered }) } }
     // What the slice's pages hold (ADR 0005 compatible_transport), as the operator's switch grants it to the job's account now.
     const capabilities = await grantedCapabilities(deps.access, { uid: job.uid })
-    const engine = createApiEngine({ ...jobEngineOptions(taskRoot, { taskIds: () => jobId, ...extra }), modelGate: model.gate })
+    // The pages a drain may store past the limit are the reserved headroom, one per worker but one: the slice runs as many
+    // workers as that allows (JOB_WORKER_COUNT with the full headroom, or for a batch reading all it has left, which no
+    // worker can overrun), and renders at most JOB_BROWSER_PAGES of them at once.
+    const workers = job.kind === 'batch' && left <= pages ? JOB_WORKER_COUNT : Math.max(1, Math.min(JOB_WORKER_COUNT, reservedPages - pages + 1))
+    const engine = createApiEngine({ ...jobEngineOptions(taskRoot, { taskIds: () => jobId, ...extra, workerCount: workers, browserPagesAtOnce: Math.min(JOB_BROWSER_PAGES, workers) }), modelGate: model.gate })
     const off = new AbortController()
     let result: Awaited<ReturnType<typeof engine.runSlice>> = null
     /** The engine's refusal of the stored request: retrying would be refused the same way. */

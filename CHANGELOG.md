@@ -31,6 +31,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **A hosted job reads 8 pages at once, 2 of them in a browser, across up to 100 sites a slice.** A slice read 2 pages at once and took 20 hosts, so a batch of many light sites read about a page a host and 20 pages a slice; it also launched Chromium for every slice. Now its engine runs 8 workers, renders at most 2 pages at once (`browserPagesAtOnce`, a new engine option a local server may set too), takes up to 100 hosts with their leases asked for ten at a time, and the worker instance keeps one Chromium across its slices (`browserKeeper`). `maxConcurrency` on hosted goes up to 8. A day's pool with no room for a slice's headroom gives its pages alone, read with fewer workers, instead of pausing the job until the next day.
 - **Hosted Octocrawl no longer names a path on its own server for a file.** A hosted read of a PDF, CSV or text file said it was `kept at /tmp/octocrawl-hosted/files/…`, in `agentHints`, `file.path` and the `artifacts` of `snapshot` and the Evidence Record, a place no client could read and that was swept after ten minutes. Hosted now saves no files: `file.path` is `null`, `artifacts` is empty, `file.sha256` still identifies the bytes, and a file with no Markdown names `npx octocrawl scrape <url>`, which saves it on your computer. A self-hosted `serve --hosted` server keeps its files as before.
 
 ## 0.8.6 — 2026-11-07
