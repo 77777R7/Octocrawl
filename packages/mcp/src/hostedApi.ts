@@ -38,6 +38,7 @@ import { serveMcpPost, servesProtocolVersion, unsupportedProtocolVersion } from 
 import { CREDITS, DEFAULT_MONTHLY_CREDITS, mapCharge, scrapeCharge, secondsToNextGrant, type CreditsStore, type RequestNote, type Reservation } from './hostedCredits.js'
 import { asksModelFallback, MODEL_REFUSALS, type HostedModel } from './hostedModel.js'
 import { grantedCapabilities, HOSTED_ACCESS_ENGINE, type HostedAccessSource } from './hostedAccess.js'
+import { refusedFields } from './refusedFields.js'
 import { createJobRoutes, HOSTED_BATCH_KEYS, HOSTED_CRAWL_KEYS, isJobRoute, JOB_MAX_CRAWL_PAGES, JOB_WORKER_COUNT, type HostedJobsConfig } from './hostedJobRoutes.js'
 
 /** What a key holder may do. `dailyLimit` counts scrape and map starts per UTC day. */
@@ -870,7 +871,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   const browserLaneRefusal = (req: ReturnType<typeof parseScrapeRequest>, lacks: keyof typeof BROWSER_LANE_REFUSALS): RequestError | null => {
     const wait = req.waitFor !== undefined && req.waitFor > 0
     if (!wait && !hasFormat(req.formats ?? [], 'screenshot')) return null
-    return new RequestError(`${wait ? 'waitFor' : 'a screenshot'} ${BROWSER_LANE_REFUSALS[lacks]}`, 'invalid_request', undefined, [`leave out ${wait ? 'waitFor' : 'the screenshot format'} to read this page over HTTP alone`, ...(lacks === 'keyless' ? [signInHint] : []), LOCAL_HINT])
+    return new RequestError(`${wait ? 'waitFor' : 'a screenshot'} ${BROWSER_LANE_REFUSALS[lacks]}`, 'invalid_request', { parameters: [wait ? 'waitFor' : 'formats'] }, [`leave out ${wait ? 'waitFor' : 'the screenshot format'} to read this page over HTTP alone`, ...(lacks === 'keyless' ? [signInHint] : []), LOCAL_HINT])
   }
   const policy = hostedPolicy(config.networkPolicy ?? hostedNetworkPolicy(), env)
   const engine = createApiEngine({
@@ -910,16 +911,22 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   sweeper.unref()
 
   /**
-   * A refusal, and its log line: `hosted_refused` with the status, the code, the path, who was refused (`keyless`, `key`,
-   * `oauth`, `site`, or null before the caller is known) and, for a limit, which pool or limit it was (`pool`), so the
-   * request log's 4xx counts can be read by cause (the 2026-11-05 audit could not tell a bad key from a used-up day).
+   * The log line of a refusal: `hosted_refused` with the status, the code, the path, who was refused (`keyless`, `key`,
+   * `oauth`, `site`, or null before the caller is known), so the request log's 4xx counts can be read by cause (the
+   * 2026-11-05 audit could not tell a bad key from a used-up day).
    */
-  const refuse = (c: Context, status: 401 | 403 | 404 | 429, code: string, message: string, hints: readonly string[], headers: Record<string, string> = {}, detail: Record<string, unknown> = {}) => {
-    for (const [name, value] of Object.entries(headers)) c.header(name, value)
+  const logRefusal = (c: Context, status: number, code: unknown, detail: Record<string, unknown>) => {
     let who: HostedCaller | undefined
     try { who = (c as Context<GateEnv>).get('caller') } catch { who = undefined }
+    log(JSON.stringify({ severity: 'INFO', event: 'hosted_refused', status, code, path: c.req.path, caller: who === undefined ? null : who.via ?? who.kind, ...detail }))
+  }
+
+  /** A refusal of the gate's own, and its line, with which pool or limit it was (`pool`) for a limit. */
+  const refuse = (c: Context, status: 401 | 403 | 404 | 429, code: string, message: string, hints: readonly string[], headers: Record<string, string> = {}, detail: Record<string, unknown> = {}) => {
+    for (const [name, value] of Object.entries(headers)) c.header(name, value)
     const pool = code === 'rate_limited' ? { pool: 'minute' } : code === 'browser_busy' ? { pool: 'browser' } : {}
-    log(JSON.stringify({ severity: 'INFO', event: 'hosted_refused', status, code, path: c.req.path, caller: who === undefined ? null : who.via ?? who.kind, ...pool, ...detail }))
+    logRefusal(c, status, code, { ...pool, ...detail })
+    ;(c as Context<GateEnv>).set('refused', true)
     return c.json({ error: message, code, agentHints: hints }, status)
   }
 
@@ -962,7 +969,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     return { kind: 'keyless', id: digest(config.hashKey, 'ip', address), dailyLimit: keylessDaily, browser: false, plan: 'keyless' }
   }
 
-  type GateEnv = { Bindings: { socketAddress: string }; Variables: { caller: HostedCaller } }
+  type GateEnv = { Bindings: { socketAddress: string }; Variables: { caller: HostedCaller; refused: boolean } }
   const gate = new Hono<GateEnv>()
   // /health, not /healthz: Google's front end answers /healthz on a Cloud Run URL itself (a 404 page) and the request never reaches the container.
   gate.get('/health', (c) => c.json({ ok: true, service: 'octocrawl-hosted-api', tools: [...HOSTED_API_TOOLS] }))
@@ -972,6 +979,20 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   // /mcp-oauth signs in, so its metadata is published (RFC 9728); /mcp needs no sign-in and has none.
   gate.get('/.well-known/oauth-protected-resource/mcp-oauth', (c) => c.json(oauthResourceMetadata(), 200, { 'cache-control': 'public, max-age=3600', 'access-control-allow-origin': '*' }))
   gate.all('/.well-known/*', (c) => refuse(c, 404, 'not_found', `${c.req.path} is not published by hosted Octocrawl`, ['the server card is at /.well-known/mcp/server-card.json; no sign-in is needed: call POST /mcp without an Authorization header']))
+  // The 4xx answers `refuse` did not write and log: a request's own 400, and what the inner API and the job routes answer.
+  gate.use('*', async (c, next) => {
+    await next()
+    const status = c.res.status
+    if (status < 400 || status >= 500 || c.get('refused') === true) return
+    // Read and put back by hand: the node server's Response loses headers set on it after it was made (X-Credits-Used) when cloned.
+    const headers = new Headers(c.res.headers)
+    const text = await c.res.text()
+    c.res = undefined
+    c.res = new Response(text, { status, headers })
+    let answer: { code?: unknown } | null = null
+    try { answer = JSON.parse(text) as { code?: unknown } | null } catch { /* a 4xx with no JSON body: its code stays unknown */ }
+    logRefusal(c, status, answer?.code ?? null, status === 400 ? { fields: refusedFields(answer) } : {})
+  })
   gate.use('*', async (c, next) => {
     const method = c.req.method
     const path = c.req.path
@@ -1270,7 +1291,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
 
   gate.route('/', inner)
   gate.onError((error, c) => {
-    if (error instanceof RequestError) return c.json({ error: error.message, code: error.code, ...(error.agentHints && error.agentHints.length > 0 ? { agentHints: error.agentHints } : {}) }, API_ERROR_STATUS[error.code])
+    if (error instanceof RequestError) return c.json({ error: error.message, code: error.code, ...(error.details === undefined ? {} : { details: error.details }), ...(error.agentHints && error.agentHints.length > 0 ? { agentHints: error.agentHints } : {}) }, API_ERROR_STATUS[error.code])
     log(JSON.stringify({ severity: 'ERROR', event: 'hosted_api_error', message: error instanceof Error ? error.message : String(error) }))
     return c.json({ error: 'internal error', code: 'internal_error' }, 500)
   })
@@ -1375,7 +1396,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       minimalResults: true,
       repeatedScrapes: { tracker: repeatedScrapes, caller: caller.id },
       // Each tool call's end, by tool: the JSON-RPC body is the only other place the tool's name is, and it is not logged.
-      onCall: (call) => log(JSON.stringify({ severity: 'INFO', event: 'hosted_mcp_call', endpoint: oauth ? '/mcp-oauth' : '/mcp', caller: oauth ? 'oauth' : caller.kind, ...call })),
+      // A RequestError here was refused before the gate, by the tool's own reading of its arguments, so no hosted_refused line says which field.
+      onCall: ({ failure, ...call }) => log(JSON.stringify({ severity: 'INFO', event: 'hosted_mcp_call', endpoint: oauth ? '/mcp-oauth' : '/mcp', caller: oauth ? 'oauth' : caller.kind, ...call, ...(failure instanceof RequestError ? { fields: refusedFields({ error: failure.message, details: failure.details }) } : {}) })),
       // What a scrape result's re-judgements cost, when they ran a pattern scan: the engine's line does not see them.
       onRegexChecks: (stats) => log(regexChecksLine(config.hashKey, stats, { kind: 'mcp_result', ...(caller.uid === undefined ? {} : { account: caller.uid }) })),
       calls: post,
