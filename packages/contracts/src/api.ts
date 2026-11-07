@@ -206,7 +206,9 @@ export interface ScrapeRequest extends PageOptions, RequestAttribution {
    * debugging, without W2L fetching it first. The person allows the
    * connection in Chrome, then the site in a page W2L opens there; the page
    * is read without a click of theirs only on a site they allowed, and a
-   * check it shows waits for them (`handoff.waitMs`, default 10 min). Lane
+   * check it shows waits for them (`handoff.waitMs`, default 10 min); a
+   * sign-in they do not act on within 90 s ends the read, unless a
+   * `handoff.waitMs` was given, and its tab stays open. Lane
    * `my_browser`; never cached. Offered only by a server on the person's
    * own machine; refused elsewhere, with `actions` or a screenshot, and with
    * a mode other than standard (`unsupported_parameter`).

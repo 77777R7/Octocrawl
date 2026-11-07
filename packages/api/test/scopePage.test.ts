@@ -37,6 +37,7 @@ describe('the page that asks the person to allow sites', () => {
     const html = page(['site.test'])
     expect(html).toContain('class="mark chrome"')
     expect(html).toContain('It reads as you, where you are signed in')
+    expect(html).toContain('asks you to sign in, or shows a check, waits for you')
   })
 
   it('stands still for reduced motion', () => {
