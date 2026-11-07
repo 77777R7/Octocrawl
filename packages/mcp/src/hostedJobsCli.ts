@@ -71,6 +71,8 @@ const worker = await startJobWorker({
     regexChecks: regex.enabled,
     workRoot: process.env.W2L_JOBS_WORK_ROOT ?? '/tmp/octocrawl-jobs',
     limits: { jobsDaily: positive('W2L_JOBS_DAILY', 10_000), jobsAccountDaily: positive('W2L_JOBS_ACCOUNT_DAILY', 2_000) },
+    // 0 or unset: no trial pack (W2L_TRIAL_CREDITS, as the API reads it).
+    ...((process.env.W2L_TRIAL_CREDITS ?? '').trim() === '' || process.env.W2L_TRIAL_CREDITS === '0' ? {} : { trialCredits: positive('W2L_TRIAL_CREDITS', 0) }),
   },
 })
 console.log(JSON.stringify({ service: 'octocrawl-jobs', port: worker.server.address(), project: cloud.project, regexChecks: regex.enabled, node: process.version, extractModel: structuredModelConfigFromEnv()?.model ?? null, hostedChrome: chromeConfig === null ? null : { egress: chromeConfig.egress?.vendor ?? 'google' }, sourceCommit: process.env.W2L_SOURCE_COMMIT ?? null }))
