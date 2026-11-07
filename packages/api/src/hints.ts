@@ -91,6 +91,9 @@ export function offPageHint(result: Pick<HintedResult, 'requestedUrl' | 'evidenc
   return `${hostOf(result)} answered ${result.evidence.finalUrl} in place of ${result.requestedUrl}, and the content is that page's, not the requested page's; check that the link is still live (the site may have moved or removed the page, or sent an automated request to its home page), and scrape ${result.evidence.finalUrl} on purpose only when it is the page you want`
 }
 
+/** The hint a `sign_in_prompt` warning carries: the page came, without what a login shows, and how to get it. */
+export const SIGN_IN_PROMPT_HINT = 'the page came without what your login shows: sign in to the site again in that browser, then read this page again'
+
 /** What hosted Octocrawl says of a file it gave no text for: it keeps none, so the file is had on the person's own computer. */
 export function hostedFileNotKeptHint(kind: string): string {
   return `the response was a ${kind} file; it has no markdown, and hosted Octocrawl keeps no files; on your computer Octocrawl saves it as received: npx octocrawl scrape <url>`
@@ -318,6 +321,7 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode' | 'waitFor'>, 
   }
   // The site answered another page in place of the one asked for: the content is real, and it is not the requested page's.
   if (result.warnings?.some((warning) => warning.code === 'redirected_off_page')) hints.push(offPageHint(result))
+  if (result.warnings?.some((warning) => warning.code === 'sign_in_prompt')) hints.push(SIGN_IN_PROMPT_HINT)
   // The selection holds nothing to read: the answer stays a success, and what was left out of it is named.
   if (result.warnings?.some((warning) => warning.code === 'empty_selection')) hints.push(EMPTY_SELECTION_HINT)
   if (result.retryAt !== undefined) {

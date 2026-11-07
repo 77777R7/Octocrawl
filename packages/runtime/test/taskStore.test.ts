@@ -12,6 +12,7 @@ import {
   type StepRecord,
   type Task,
 } from '@w2l/contracts'
+import { notServedSteps } from '../src/crawlReport.js'
 import { CHECKPOINT_FILENAME, MemoryTaskStore, SqliteTaskStore, type TaskStore } from '../src/index.js'
 
 const NOW = '2026-09-18T00:00:00.000Z'
@@ -233,6 +234,16 @@ function runStoreContract(name: string, open: () => Promise<{ store: TaskStore; 
       expect(await store.countVerifications('task-1')).toEqual({ verified: 1, verificationFailed: 2 })
       expect(await store.countVerifications('task-1', 'attempt-1')).toEqual({ verified: 1, verificationFailed: 2 })
       expect(await store.countVerifications('task-1', 'attempt-2')).toEqual({ verified: 0, verificationFailed: 0 })
+    })
+
+    it('counts as not served a page read without the login, as it does a page sent away', async () => {
+      ;({ store, cleanup } = await open())
+      await seed(store)
+      const warned = (code: string) => ({ ...pageResult('https://example.com/a/b'), lane: 'my_browser' as const, warnings: [{ code, message: code }] })
+      await store.putStep(step({ result: warned('sign_in_prompt') }))
+      await store.putStep(step({ id: 'step-2', url: 'https://example.com/other', canonicalUrl: 'https://example.com/other', result: warned('redirected_off_page'), createdAt: LATER }))
+      await store.putStep(step({ id: 'step-3', url: 'https://example.com/plain', canonicalUrl: 'https://example.com/plain', result: pageResult('https://example.com/plain'), createdAt: LATER }))
+      expect((await notServedSteps(store, 'task-1')).map(({ code }) => code).sort()).toEqual(['redirected_off_page', 'sign_in_prompt'])
     })
 
     it('counts the steps that carry a warning of a code, among those succeeded and failed count, each once', async () => {

@@ -35,6 +35,7 @@ import { createHash } from 'node:crypto'
 import { BROWSER_INSTALL_COMMAND } from '../browserInstall.js'
 import { INSTALLED_CHROME_INSTALL } from '../subjects/installedChrome.js'
 import { withEmptySelectionWarning } from '../subjects/errorPage.js'
+import { withSignInWarning } from '../signInAsked.js'
 import type { DomainHistory, RouteContext, RouteEnvironment, RouteObservation, RoutingHistory, VendorOutcome } from './vendorRouter.js'
 import { rankVendors, shadowRankVendors, startingVendor } from './vendorRouter.js'
 import { identityCompromised } from './identity.js'
@@ -915,7 +916,8 @@ export class LadderRunner {
           }
         } finally { localScope?.dispose() }
         if (fetched === null) continue
-        const result = fetched
+        // A page that came with the saved login and holds content back: the login lapsed part way, which a page refused outright (sessionRejection) is not.
+        const result = channel === sessionFirst && sessionRejection(url, fetched) === null ? withSignInWarning(fetched) : fetched
         attempts.push(attemptOf(channel, channel.id, result, attempts.length + 1, startedAt))
         // A vendor rung the run reached after setting aside only an unreadable robots.txt read it itself, and refused the
         // URL under it before opening a session: that refusal is not the answer, the earlier rung's stands.
