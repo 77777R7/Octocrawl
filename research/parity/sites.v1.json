@@ -2115,9 +2115,9 @@
         {"item": "map-search.map-limit", "type": "field", "path": "refused.overLimit", "min": 1, "record": true},
         {"item": "map-search.map-limit", "type": "countWhere", "field": "url", "pattern": "/print$", "max": 0},
         {"item": "map-search.map-limit", "type": "field", "path": "probes.0.httpStatus", "equals": 400},
-        {"item": "map-search.map-limit", "type": "field", "path": "probes.0.error", "equals": "limit must be an integer from 1 to 100000"},
+        {"item": "map-search.map-limit", "type": "field", "path": "probes.0.error", "equals": "limit must be a whole number, 1 or more"},
         {"item": "map-search.map-limit", "type": "field", "path": "probes.1.httpStatus", "equals": 400},
-        {"item": "map-search.map-limit", "type": "field", "path": "probes.1.error", "equals": "limit must be an integer from 1 to 100000"}
+        {"item": "map-search.map-limit", "type": "field", "path": "probes.1.error", "equals": "limit must be a whole number, 1 or more"}
       ]
     },
     {

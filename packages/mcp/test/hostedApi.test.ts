@@ -1823,3 +1823,26 @@ it('logs which field a 400 named and every 4xx the inner API answers, never a va
   expect(calls[0]).not.toHaveProperty('failure')
   expect(lines.join('\n')).not.toMatch(/secret-value/)
 })
+
+it('names hosted\'s own map limits when it refuses a limit or a timeout, not a local server\'s', async () => {
+  const { url } = await start({ keylessDaily: 100 })
+  const refusal = async (body: Record<string, unknown>) => {
+    const response = await post(url, '/v1/map', { url: `${origin}/page`, ...body })
+    expect(response.status).toBe(400)
+    return ((await response.json()) as { error: string }).error
+  }
+  for (const limit of [-1, 0, 1.5, 'many']) expect(await refusal({ limit }), String(limit)).toBe('limit must be a whole number, 1 or more')
+  expect(await refusal({ limit: 5_001 })).toBe('limit must be at most 5000 on this server')
+  for (const timeout of [999, 'soon']) expect(await refusal({ timeout }), String(timeout)).toBe('timeout must be a whole number of milliseconds, 1000 or more')
+  expect(await refusal({ timeout: 60_001 })).toBe('timeout must be at most 60000 on this server')
+
+  const transport = new StreamableHTTPClientTransport(new URL(`${url}/mcp`))
+  const client = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
+  try {
+    await client.connect(transport)
+    const result = await client.callTool({ name: 'map', arguments: { url: `${origin}/page`, limit: -1 } })
+    expect(result.isError).toBe(true)
+    expect(JSON.stringify(result.content)).toContain('limit must be a whole number, 1 or more')
+    expect(JSON.stringify(result.content)).not.toContain('100000')
+  } finally { await client.close() }
+})
