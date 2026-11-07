@@ -7,7 +7,7 @@
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
-import { batchFloorSeconds, batchRate, CRAWL_SCOPE_KEYS, evaluateHostname, hostedNetworkPolicy, hostedVerifyRefusal, parseBatchStartRequest, parseCrawlPageFields, parseCrawlStartRequest, projectCrawlPage, readWebhook, RequestError, type CrawlPageField, type JobPause, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
+import { batchFloorSeconds, batchRate, CRAWL_SCOPE_KEYS, evaluateHostname, hostedNetworkPolicy, hostedVerifyRefusal, parseBatchStartRequest, parseCrawlPageFields, parseCrawlStartRequest, projectCrawlPage, readWebhook, RequestError, type ApiErrorDetails, type CrawlPageField, type JobPause, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
 import type { CreditsStore } from './hostedCredits.js'
 import { CREDITS } from './hostedCredits.js'
 import { asksModelFallback } from './hostedModel.js'
@@ -167,7 +167,7 @@ export interface HostedJobsConfig {
 export interface JobCaller { uid: string; keyId: string; browser: boolean }
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } })
-const refusal = (status: number, code: string, error: string, agentHints: readonly string[] = [], headers: Record<string, string> = {}) => json({ error, code, agentHints }, status, headers)
+const refusal = (status: number, code: string, error: string, agentHints: readonly string[] = [], headers: Record<string, string> = {}, details?: ApiErrorDetails) => json({ error, code, ...(details === undefined ? {} : { details }), agentHints }, status, headers)
 
 /** Whether a method and path are a job route; the gate hands those to handleJob. */
 export function isJobRoute(method: string, path: string): boolean {
@@ -250,7 +250,7 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
     // access enhanced, from an account hosted_chrome's switch admits; anyone else's `access` is refused as before.
     const enhanced = body.access === 'enhanced' && config.admitsEnhanced !== undefined && await config.admitsEnhanced(caller.uid)
     const unsupported = Object.keys(body).filter((key) => !allowed.has(key) && !(key === 'access' && enhanced))
-    if (unsupported.length > 0) return refusal(400, 'invalid_request', `hosted ${kind} jobs do not take ${unsupported.join(', ')}`, ['run it on your computer for every option: npx octocrawl serve'])
+    if (unsupported.length > 0) return refusal(400, 'invalid_request', `hosted ${kind} jobs do not take ${unsupported.join(', ')}`, ['run it on your computer for every option: npx octocrawl serve'], {}, { parameters: unsupported })
     const headerKey = request.headers.get('idempotency-key') ?? request.headers.get('x-idempotency-key')
     if (headerKey !== null && body.idempotencyKey === undefined) body.idempotencyKey = headerKey
     const maxCredits = body.maxCredits
@@ -264,8 +264,8 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
     if (body.mode === 'authed') return refusal(400, 'invalid_request', 'hosted Octocrawl holds no saved logins, so it has no authed mode', [AUTHED_ROUTE_HINT])
     // A key without the browser lane reads every page over HTTP alone, as its scrapes do.
     if (!caller.browser) {
-      if (typeof body.waitFor === 'number' && body.waitFor > 0) return refusal(400, 'invalid_request', 'waitFor needs the browser lane, which this key does not have', [BROWSER_LANE_HINT])
-      if (Array.isArray(body.formats) && body.formats.some((format) => String(typeof format === 'object' && format !== null ? (format as { type?: unknown }).type : format).startsWith('screenshot'))) return refusal(400, 'invalid_request', 'a screenshot needs the browser lane, which this key does not have', [BROWSER_LANE_HINT])
+      if (typeof body.waitFor === 'number' && body.waitFor > 0) return refusal(400, 'invalid_request', 'waitFor needs the browser lane, which this key does not have', [BROWSER_LANE_HINT], {}, { parameters: ['waitFor'] })
+      if (Array.isArray(body.formats) && body.formats.some((format) => String(typeof format === 'object' && format !== null ? (format as { type?: unknown }).type : format).startsWith('screenshot'))) return refusal(400, 'invalid_request', 'a screenshot needs the browser lane, which this key does not have', [BROWSER_LANE_HINT], {}, { parameters: ['formats'] })
       body.fastMode = true
     }
     if (kind === 'crawl') {
@@ -275,12 +275,12 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
     }
     let parsed: ParsedBatchStartRequest | ParsedCrawlStartRequest
     try { parsed = kind === 'batch' ? parseBatchStartRequest(body) : parseCrawlStartRequest(body) }
-    catch (error) { return refusal(400, 'invalid_request', error instanceof RequestError || error instanceof Error ? error.message : String(error)) }
+    catch (error) { return refusal(400, 'invalid_request', error instanceof RequestError || error instanceof Error ? error.message : String(error), [], {}, error instanceof RequestError ? error.details : undefined) }
     if (kind === 'crawl' && !((parsed as ParsedCrawlStartRequest).maxPages! >= 1 && (parsed as ParsedCrawlStartRequest).maxPages! <= JOB_MAX_CRAWL_PAGES)) return refusal(400, 'invalid_request', `maxPages must be 1 to ${JOB_MAX_CRAWL_PAGES} on hosted Octocrawl`)
     // The worker's hosted engine refuses these at the job's first slice (unless its operator switched them on), which fails
     // and is retried until the job ends failed (delivery_failed) without naming why: the start refuses them by name instead.
     const regexRefusal = hostedVerifyRefusal(parsed.verify, { regexChecks: config.regexChecks === true })
-    if (regexRefusal !== null) return refusal(400, 'unsupported_parameter', regexRefusal)
+    if (regexRefusal !== null) return refusal(400, 'unsupported_parameter', regexRefusal, [], {}, { parameters: ['verify'] })
     // A slice runs JOB_WORKER_COUNT pages at once: a larger maxConcurrency is lowered here, so the stored request and the status
     // say what the slices run. A crawl's engine would refuse one above its workers; a batch's would lower it when it runs (engine.ts).
     if (parsed.maxConcurrency != null && parsed.maxConcurrency > JOB_WORKER_COUNT) parsed = { ...parsed, maxConcurrency: JOB_WORKER_COUNT }
@@ -291,7 +291,7 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
       else config.checkStart?.crawl(parsed as ParsedCrawlStartRequest)
     } catch (error) {
       if (!(error instanceof RequestError)) throw error
-      return refusal(400, error.code, error.message, error.agentHints ?? [])
+      return refusal(400, error.code, error.message, error.agentHints ?? [], {}, error.details)
     }
 
     const pages = kind === 'batch' ? (parsed as ParsedBatchStartRequest).urls.length : (parsed as ParsedCrawlStartRequest).maxPages ?? JOB_DEFAULT_CRAWL_PAGES

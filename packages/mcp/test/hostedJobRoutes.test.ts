@@ -28,7 +28,7 @@ let close: (() => Promise<void>) | undefined
 let root: string | undefined
 afterEach(async () => { await close?.(); close = undefined; if (root) await rm(root, { recursive: true, force: true }); root = undefined })
 
-async function start(options: { credits?: MemoryCreditsStore; enabled?: boolean; allowed?: readonly string[]; failEnqueue?: boolean | ((job: HostedJob) => boolean); finish?: boolean; failFinish?: boolean; regexChecks?: boolean } = {}) {
+async function start(options: { credits?: MemoryCreditsStore; enabled?: boolean; allowed?: readonly string[]; failEnqueue?: boolean | ((job: HostedJob) => boolean); finish?: boolean; failFinish?: boolean; regexChecks?: boolean; log?: (line: string) => void } = {}) {
   root = await mkdtemp(join(tmpdir(), 'octocrawl-job-routes-'))
   const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening')
   const port = (probe.address() as AddressInfo).port
@@ -45,7 +45,7 @@ async function start(options: { credits?: MemoryCreditsStore; enabled?: boolean;
   const keys = new MemoryHostedKeys(new Map(Object.entries(KEYS).map(([key, record]) => [keyDigest(HASH_KEY, key), record])))
   const service = createHostedApi({
     port, host: '127.0.0.1', taskRoot: root, hashKey: HASH_KEY, keys, oauthTokens: new MemoryHostedOAuthTokens(new Map()), quota: new MemoryHostedQuota(), credits,
-    networkPolicy: hostedNetworkPolicy(), log: () => {}, ...(options.regexChecks === undefined ? {} : { regexChecks: options.regexChecks }),
+    networkPolicy: hostedNetworkPolicy(), log: options.log ?? (() => {}), ...(options.regexChecks === undefined ? {} : { regexChecks: options.regexChecks }),
     jobs: {
       store, files,
       enqueueSlice: async (job) => { if (options.failEnqueue === true || (typeof options.failEnqueue === 'function' && options.failEnqueue(job))) throw new Error('queue down'); enqueued.push(job) },
@@ -124,6 +124,29 @@ describe('hosted job routes', () => {
     expect((await call('POST', '/v1/batches', 'oc_nobody', { urls: urls(1) })).status).toBe(401)
     // Resume, handoff and the event streams are not hosted.
     for (const [method, path] of [['POST', '/v1/crawl/6f1c2a4e-1b2c-4d3e-8f90-0123456789ab/resume'], ['GET', '/v1/crawl/6f1c2a4e-1b2c-4d3e-8f90-0123456789ab/events']]) expect((await call(method!, path!, 'oc_one')).status, path).toBe(403)
+  })
+
+  it('logs which field a start refused, and a job route\'s own 4xx, once each', async () => {
+    const lines: string[] = []
+    const { call } = await start({ log: (line) => lines.push(line) })
+    const refusals = () => lines.flatMap((line) => { try { return [JSON.parse(line) as Record<string, unknown>] } catch { return [] } }).filter((line) => line.event === 'hosted_refused')
+    const options = await call('POST', '/v1/batches', 'oc_one', { urls: urls(1), robotsOverrides: [], useCached: true })
+    expect(((await options.json()) as { details: unknown }).details).toEqual({ parameters: ['robotsOverrides', 'useCached'] })
+    await call('POST', '/v1/batches', 'oc_http', { urls: urls(1), formats: ['screenshot'] })
+    await call('POST', '/v1/batches', 'oc_one', { urls: urls(1), maxCredits: 0 })
+    await call('POST', '/v1/crawl', 'oc_one', { url: 'https://example.com/', maxDepth: 'deep' })
+    const verify = await call('POST', '/v1/batches', 'oc_one', { urls: urls(1), verify: { checks: [{ type: 'markdownMatches', pattern: 'a' }] } })
+    expect(((await verify.json()) as { details: unknown }).details).toEqual({ parameters: ['verify'] })
+    expect(refusals().map((line) => [line.path, line.code, line.fields])).toEqual([
+      ['/v1/batches', 'invalid_request', ['robotsOverrides', 'useCached']],
+      ['/v1/batches', 'invalid_request', ['formats']],
+      ['/v1/batches', 'invalid_request', ['maxCredits']],
+      ['/v1/crawl', 'invalid_request', ['maxDepth']],
+      ['/v1/batches', 'unsupported_parameter', ['verify']],
+    ])
+    lines.length = 0
+    expect((await call('GET', '/v1/batches/no-such-job', 'oc_one')).status).toBe(404)
+    expect(refusals()).toEqual([expect.objectContaining({ status: 404, code: 'not_found', caller: 'key' })])
   })
 
   it('refuses an option hosted jobs do not take by name, an authed mode, and a key without the browser lane asking for it', async () => {

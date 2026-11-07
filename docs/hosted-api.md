@@ -558,11 +558,11 @@ The service's own structured lines (`jsonPayload.event`), each one JSON on stdou
 - `hosted_usage`: a key's or account's start that passed its allowance or reserved its credits (the key's HMAC prefix, plan, `uid`, endpoint, day); `hosted_keyless_usage`: a keyless start (address prefix or the `claude` pool).
 - `hosted_credits`: what an account's call cost once settled (`uid`, kind, used, reserved, the model's part).
 - `hosted_scrape_phases`: one line per scrape with its rungs and waits, and since 2026-11-05 `caller` (`keyless`, `key`, `oauth` or `site`) and `uid`, so the phases can be split by who called.
-- `hosted_mcp_initialize`: each MCP `initialize` with the client's name and version; `hosted_mcp_call` (since 2026-11-05): each tool call's end with `endpoint`, `caller`, `tool`, `ms`, `truncated` (the answer was cut to the size budget) and `error` (it ended as a tool error).
-- `hosted_refused` (since 2026-11-05): every 401, 403, 404 and 429 the gate answers, with `status`, `code`, `path`, `caller` (null before the caller is known) and, for a limit, `pool`: `minute` (the per-minute rate), `browser` (browser_busy), `credits`, `account`, `accounts`, or the day's pool (`site`, `keyless`, `keyless-<address prefix>`, `keyless-claude`, `key-<prefix>`).
+- `hosted_mcp_initialize`: each MCP `initialize` with the client's name and version; `hosted_mcp_call` (since 2026-11-05): each tool call's end with `endpoint`, `caller`, `tool`, `ms`, `truncated` (the answer was cut to the size budget) and `error` (it ended as a tool error), and `fields`, as on `hosted_refused`, when the tool refused its own arguments before calling the API.
+- `hosted_refused` (since 2026-11-05): every 4xx of the API routes, with `status`, `code`, `path`, `caller` (null before the caller is known); for a 400, `fields`: the top-level names of the request fields it refused (a key hosted does not take is named as sent, and what was sent in a field never is), null when the answer names none; and, for a limit, `pool`: `minute` (the per-minute rate), `browser` (browser_busy), `credits`, `account`, `accounts`, or the day's pool (`site`, `keyless`, `keyless-<address prefix>`, `keyless-claude`, `key-<prefix>`).
 - `hosted_quota_threshold` (WARNING): a shared pool at 70% of its day; `hosted_api_error` and `hosted_mcp_error` (ERROR): a request that threw.
 
-Not logged: which field an `invalid_request` named (the 400 body is not written), and the inner API's own 4xx answers, which pass through the gate unlogged.
+Not logged: what `/mcp` and `/mcp-oauth` answer themselves before a tool runs (a bad key or token, a body too large or not JSON, an address over its rate).
 
 ### Alerts
 
