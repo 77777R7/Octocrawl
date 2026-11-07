@@ -158,7 +158,7 @@ describe('saved logins in the API engine', () => {
       for (let i = 0; i < 200 && !['completed', 'failed', 'cancelled'].includes(status?.status ?? ''); i++) { await new Promise((resolve) => setTimeout(resolve, 20)); status = await engine.getBatch(accepted.taskId) }
       expect(status?.waitingForPerson).toBe(1)
       // The login line offers no handoff for the page at the login wall; the list stopped at a captcha gets its own line, which names the batch handoff.
-      expect(status?.agentHints).toEqual([expect.stringContaining('1 page of www.example.com asked for a login'), expect.stringContaining('1 page of list.example.org gate automated access')])
+      expect(status?.agentHints).toEqual([expect.stringContaining('1 page of www.example.com asked for a login'), expect.stringContaining('1 page of list.example.org gates automated access')])
       expect(status?.agentHints?.[0]).not.toContain('hand_off_batch')
     })
 
@@ -181,7 +181,7 @@ describe('saved logins in the API engine', () => {
       expect(status?.agentHints).toEqual([
         expect.stringContaining('1 page of www.example.com asked for a login'),
         '2 pages of empty.example.org read empty over HTTP and asked for the browser lane, which fastMode declined: a new batch of those URLs without fastMode reads them in a browser',
-        expect.stringContaining('1 page of slow.example.org ran out of their 20000 ms timeout'),
+        expect.stringContaining('1 page of slow.example.org ran out of its 20000 ms timeout'),
       ])
     })
 

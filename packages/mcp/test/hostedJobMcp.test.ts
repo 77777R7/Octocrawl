@@ -297,8 +297,8 @@ describe('hosted job tools over MCP', () => {
     store.jobs.set(id, { ...store.jobs.get(id)!, status: 'completed', finishedAt: new Date().toISOString(), counts: { pages: 0, errors: 2, slices: 1 }, failures: { fast_mode_declined: { count: 1, hosts: ['a.test'] }, timeout: { count: 1, hosts: ['b.test'] } } })
     const hints = structured(await client.callTool({ name: 'get_batch', arguments: { id } })).agentHints as string[]
     expect(hints).toEqual([
-      '1 page of a.test read empty over HTTP and asked for the browser lane, which fastMode declined: a new batch of those URLs without fastMode reads them in a browser (5 credits a page)',
-      expect.stringContaining('1 page of b.test ran out of their 30000 ms timeout: a new batch of those URLs with a longer timeout (up to 300000 ms) when the sites are slow rather than down'),
+      '1 page of a.test read empty over HTTP and asked for the browser lane, which fastMode declined: a new batch of that URL without fastMode reads it in a browser (5 credits a page)',
+      expect.stringContaining('1 page of b.test ran out of its 30000 ms timeout: a new batch of that URL with a longer timeout (up to 300000 ms) when the site is slow rather than down'),
       expect.stringContaining('export.url'),
     ])
   })
