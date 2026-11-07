@@ -313,8 +313,10 @@ export interface CrawlReport {
 export interface JobResultFiles {
   /** A page a line, as the job's item list gives them: the Evidence Record and Markdown of each, no trace. */
   jsonl: string
-  /** A row a page, the CLI's evidence columns (docs/cli.md): the URL, status, reason, final URL, fetch time, HTTP status and hashes; no Markdown. */
+  /** A row a page, the CLI's evidence columns (docs/cli.md): the URL, status, reason, final URL, fetch time, HTTP status, hashes and `markdown_file`, the page's Markdown file under `markdown`. */
   csv: string
+  /** A directory with each page's Markdown, a file a page, named by its line in the results (`0001-<host-path>.md`). Absent for a job that ended before its server wrote Markdown files. */
+  markdown?: string
 }
 
 /** A finished hosted job's download: a signed link to one gzip JSONL file, a page a line, good for `expiresInSeconds`. */

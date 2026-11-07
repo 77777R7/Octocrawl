@@ -848,11 +848,11 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: T
  */
 function withResultsHint(name: 'get_batch' | 'wait_batch' | 'get_crawl' | 'wait_crawl', status: unknown): unknown {
   if (status === null || typeof status !== 'object') return status
-  const { resultFiles, export: download, agentHints } = status as { resultFiles?: { jsonl?: unknown; csv?: unknown }; export?: { url?: unknown; expiresInSeconds?: unknown }; agentHints?: unknown }
+  const { resultFiles, export: download, agentHints } = status as { resultFiles?: { jsonl?: unknown; csv?: unknown; markdown?: unknown }; export?: { url?: unknown; expiresInSeconds?: unknown }; agentHints?: unknown }
   const pages = name.endsWith('crawl') ? 'get_crawl_pages' : 'get_batch_items'
   const read = name.endsWith('crawl') ? 'get_crawl' : 'get_batch'
   const hint = typeof resultFiles?.jsonl === 'string' && typeof resultFiles.csv === 'string'
-    ? `every page is on this computer: ${resultFiles.jsonl} (a page a line, as ${pages} lists them) and ${resultFiles.csv} (a row a page, its evidence columns); ${pages} reads a few at a time`
+    ? `every page is on this computer: ${resultFiles.jsonl} (a page a line, as ${pages} lists them) and ${resultFiles.csv} (a row a page, its evidence columns)${typeof resultFiles.markdown === 'string' ? `, with each page's Markdown as a file of its own in ${resultFiles.markdown} (the CSV's markdown_file names it); hand those files on rather than splitting the JSONL` : ''}; ${pages} reads a few at a time`
     : typeof download?.url === 'string' && typeof download.expiresInSeconds === 'number'
       ? `every page read so far downloads at export.url: one gzip JSONL file, a page a line, as ${pages} lists them; the link is good for ${linkLife(download.expiresInSeconds)}, and ${read} gives a fresh one; ${pages} reads a few at a time`
       : null
