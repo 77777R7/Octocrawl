@@ -1450,6 +1450,17 @@ describe('LadderRunner — a saved login goes first', () => {
     expect(run.ladderTrace.find((t) => t.event === 'ladder_session_rejected')?.detail).toMatchObject({ domain: 'example.com', signInPrompt: 'Log in to view your wishlists' })
   })
 
+  it('a page that came under the saved login and holds content back says so; the same page on a public rung does not', async () => {
+    const url = 'https://example.com/exhibitor/kerr'
+    const lapsed = (lane: 'http' | 'browser_local_authed'): FetchResult => ({ ...contentfulResult(url, lane), markdown: `# Kerr\n\n${'A maker of dental materials.\n\n'.repeat(12)}**Log in for contact details**\n` })
+    const store = new MemorySessionStore()
+    await store.save(saved('example.com'))
+    const signedIn = await new LadderRunner([channel('http', [lapsed('http')]), channel('authed_session', [lapsed('browser_local_authed')])], { mode: 'authed' }, null, null, store).run(url)
+    expect(signedIn.result).toMatchObject({ status: 'success', warnings: [{ code: 'sign_in_prompt' }] })
+    const publicRead = await new LadderRunner([channel('http', [lapsed('http')])], { mode: 'standard' }, null, null, null).run(url)
+    expect(publicRead.result.warnings ?? []).toEqual([])
+  })
+
   it('reads a sign-in prompt only where a page asks for one, not a link or a sentence that mentions signing in', () => {
     const page = (markdown: string): FetchResult => ({ ...contentfulResult('https://example.com/x', 'browser_local_authed'), markdown })
     const asks = (markdown: string) => sessionRejection('https://example.com/x', page(markdown)) !== null

@@ -414,6 +414,10 @@ export interface FetchWarning {
    * as `not_served`. A redirect that keeps the page (scheme, www, a trailing
    * slash, index.html, a language prefix, a new slug, a deeper page) raises
    * none; a page a request's `actions` led elsewhere raises none either.
+   * `sign_in_prompt`: a page read with the person's login (lane my-browser, a
+   * handoff, or mode authed with a saved login) shows a line that holds content back behind a sign-in, "Log
+   * in for contact details": the login did not reach the page, or has lapsed.
+   * The message quotes the line; `readiness` reads it as `not_served`.
    * `empty_selection`: `includeTags` was asked and the Markdown shows nothing,
    * because no element was named or those named hold no text and no image
    * (script blocks are left out as always). The answer stays a `success` and
