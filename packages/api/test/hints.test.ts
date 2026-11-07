@@ -60,12 +60,46 @@ describe('agent hints', () => {
     expect(hints(result({ status: 'failed', failureReason: 'policy_denied', markdown: null }))).toEqual([])
   })
 
-  it('points a login wall to mode authed and a gate to a proxy or session of your own, naming the lanes tried', () => {
+  describe('a login wall', () => {
     const wall = result({ status: 'blocked', blockReason: 'login_wall', markdown: null })
-    expect(hints(wall)).toEqual(['the page asks for a login; Octocrawl does not create accounts; use mode authed with your own session (octocrawl login import <host> saves it from your Chrome)'])
-    // The saved login was used and refused: the fix is a fresh import, not mode authed.
-    const refused = agentHintsFor({}, { channelsTried: ['authed_session'], result: wall, ladderTrace: [{ at: 0, event: 'ladder_session_rejected', channel: 'authed_session', detail: { domain: 'example.test', blockReason: 'login_wall' } }] })
-    expect(refused).toEqual(['example.test refused your saved login for example.test (expired or signed out); sign in to it again in Chrome and run octocrawl login import example.test'])
+    const CHROME = 'in the Chrome they are signed in to (lane my-browser in mode standard on a scrape or batch, octocrawl scrape --lane my-browser; they turn on remote debugging at chrome://inspect/#remote-debugging, click Allow there, then Allow reading these sites)'
+    const SAVED = 'with a login they save once (import_login example.test, or octocrawl login import example.test, then mode authed on a scrape or batch: no click per page after that)'
+    const ASK = 'the page asks for a login; Octocrawl does not sign in or create accounts for anyone; ask the person first, naming example.test, whether to read it'
+    const on = (offers: Parameters<typeof agentHintsFor>[2], res = wall, channelsTried: readonly string[] = ['http']) => agentHintsFor({}, { channelsTried, result: res }, offers)
+
+    it('offers the routes this server has for this request, and asks the person first', () => {
+      expect(on({ personChrome: true, savedLogins: true })).toEqual([`${ASK} ${CHROME} or ${SAVED}`])
+      // A request with actions or a screenshot cannot be read in their Chrome: the saved login is what is left.
+      expect(on({ savedLogins: true })).toEqual([`${ASK} ${SAVED}`])
+      expect(on({ personChrome: true })).toEqual([`${ASK} ${CHROME}`])
+      // Mode authed refuses an executeJavascript action, and their Chrome takes no actions: it goes first, or neither route reads the page.
+      expect(on({ savedLogins: true, scriptAction: true })).toEqual([`the page asks for a login; Octocrawl does not sign in or create accounts for anyone; send the request without its executeJavascript action, which mode authed refuses, and ask the person first, naming example.test, whether to read it ${SAVED}`])
+    })
+
+    it('on a server with neither route, names none as its own and points to the person\'s computer', () => {
+      expect(on({})).toEqual(['the page asks for a login; this server reads no saved login and no Chrome of the person\'s; on their own computer Octocrawl reads it as them, after asking them (npx octocrawl serve, then lane my-browser, or octocrawl login import example.test and mode authed)'])
+    })
+
+    it('read in the person\'s own Chrome and still asking, says to sign in there and offers that lane no more', () => {
+      expect(on({ personChrome: true, savedLogins: true }, { ...wall, lane: 'my_browser' }, ['my_browser'])).toEqual(['example.test asks for a login in the person\'s own Chrome too: ask them to sign in to it there, then read it again'])
+    })
+
+    it('names the site asked for, not the sign-in host it redirected to', () => {
+      const redirected = { ...wall, evidence: { finalUrl: 'https://accounts.idp.test/signin', httpStatus: 200 } }
+      const [hint] = on({ savedLogins: true }, redirected)
+      expect(hint).toContain('octocrawl login import example.test')
+      expect(hint).not.toContain('idp.test')
+    })
+
+    it('a saved login the site refused: says what happened, and the fix is to sign in and save it again', () => {
+      const refused = (offers: Parameters<typeof agentHintsFor>[2]) => agentHintsFor({}, { channelsTried: ['authed_session'], result: wall, ladderTrace: [{ at: 0, event: 'ladder_session_rejected', channel: 'authed_session', detail: { domain: 'example.test', blockReason: 'login_wall' } }] }, offers)
+      const again = 'example.test no longer accepts the saved login for example.test (expired or signed out); ask the person to sign in to it again in Chrome, then save it again (import_login example.test, or octocrawl login import example.test): a running server uses the new one at once'
+      expect(refused({ savedLogins: true })).toEqual([again])
+      expect(refused({ personChrome: true, savedLogins: true })).toEqual([`${again}; or, with their yes, read this page in their Chrome now (lane my-browser in mode standard)`])
+    })
+  })
+
+  it('points a gate to a proxy or session of your own, naming the lanes tried', () => {
     for (const blockReason of ['cloudflare_challenge', 'captcha', 'bot_detected_generic'] as const) {
       expect(hints(result({ status: 'blocked', blockReason, markdown: null, evidence: { finalUrl: URL_, httpStatus: 403 } }), ['http', 'browser_local']), blockReason).toEqual([
         'example.test gates automated access on the lanes tried (http, browser_local); Octocrawl does not solve challenges or change its identity unless this server\'s access grant names a provider that does (--access-grant, ADR 0005); a proxy or session you own is the supported route, or, on your own machine, getting through the check yourself in your own Chrome: handoff: true on a scrape (octocrawl scrape --handoff), or a batch handoff (octocrawl batch --handoff, POST /v1/batches/:id/handoff)',

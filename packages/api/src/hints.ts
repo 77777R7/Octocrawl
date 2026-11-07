@@ -140,6 +140,12 @@ export interface HintOffers {
   hosted?: boolean
   /** True on hosted Octocrawl's own service, which saves no file; a self-hosted hosted server keeps its files. */
   noFiles?: boolean
+  /** True where this request can be read in the person's Chrome: a server on their machine, and nothing asked that a page read there cannot give. */
+  personChrome?: boolean
+  /** True on a server that reads the person's saved logins, which a request personChrome is false for can often still use. */
+  savedLogins?: boolean
+  /** True when the request has an executeJavascript action: mode authed refuses it, so it goes before a saved login can read the page. */
+  scriptAction?: boolean
 }
 
 /** A fastMode the scrape's caller pinned, not the person asking (the hosted gate, for a caller without the browser lane). */
@@ -166,6 +172,41 @@ const BROWSER_LANES: ReadonlySet<string> = new Set(['browser_local', 'browser_lo
  */
 export function httpLaneAskedForBrowser(result: Pick<FetchResult, 'escalations' | 'trace'>): boolean {
   return result.escalations.some((hop) => hop.improved === null) || result.trace.some((event) => QUALITY_EVENTS.has(event.event))
+}
+
+/**
+ * The hint of a page behind a login. It says what happened and the routes this server has for this request, each one a
+ * step taken as the person, so it asks them first. The site named is the one asked for: a page that sent the browser to
+ * a sign-in host stays behind the login of the site it belongs to.
+ */
+function loginWallHint(run: HintedRun, offers: HintOffers): string {
+  const { result } = run
+  // A saved login was used and the site refused it: it expired or was signed out.
+  const rejected = run.ladderTrace?.find((event) => event.event === 'ladder_session_rejected')
+  const site = requestedHost(result)
+  if (rejected !== undefined) {
+    const domain = String(rejected.detail?.domain ?? site)
+    const again = `${site} no longer accepts the saved login for ${domain} (expired or signed out); ask the person to sign in to it again in Chrome, then save it again (import_login ${domain}, or octocrawl login import ${domain}): a running server uses the new one at once`
+    return offers.personChrome === true ? `${again}; or, with their yes, read this page in their Chrome now (lane my-browser in mode standard)` : again
+  }
+  if (offers.hosted === true) return HOSTED_LOGIN_WALL_HINT
+  if (result.lane === 'my_browser') return `${site} asks for a login in the person's own Chrome too: ask them to sign in to it there, then read it again`
+  const routes = [
+    ...(offers.personChrome === true ? ['in the Chrome they are signed in to (lane my-browser in mode standard on a scrape or batch, octocrawl scrape --lane my-browser; they turn on remote debugging at chrome://inspect/#remote-debugging, click Allow there, then Allow reading these sites)'] : []),
+    ...(offers.savedLogins === true ? [`with a login they save once (import_login ${site}, or octocrawl login import ${site}, then mode authed on a scrape or batch: no click per page after that)`] : []),
+  ]
+  if (routes.length === 0) return `the page asks for a login; this server reads no saved login and no Chrome of the person's; on their own computer Octocrawl reads it as them, after asking them (npx octocrawl serve, then lane my-browser, or octocrawl login import ${site} and mode authed)`
+  const ask = offers.scriptAction === true ? 'send the request without its executeJavascript action, which mode authed refuses, and ask the person first' : 'ask the person first'
+  return `the page asks for a login; Octocrawl does not sign in or create accounts for anyone; ${ask}, naming ${site}, whether to read it ${routes.join(' or ')}`
+}
+
+/** The host the request named; the host answered when that cannot be read. */
+function requestedHost(result: Pick<HintedResult, 'requestedUrl' | 'evidence'>): string {
+  try {
+    const host = new URL(result.requestedUrl).hostname
+    if (host.length > 0) return host
+  } catch {}
+  return hostOf(result)
 }
 
 /** The host the result is about: the final URL's, else the requested URL's. */
@@ -289,13 +330,7 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode' | 'waitFor'>, 
     hints.push('lockdown answers from stored results only and none of this page fits the request (same options, within maxAge and minAge); send it without lockdown to fetch the page')
   }
   const hosted = offers.hosted === true
-  if (result.status === 'blocked' && result.blockReason === 'login_wall') {
-    // A saved login was used and the site refused it: it expired or was signed out.
-    const rejected = run.ladderTrace?.find((event) => event.event === 'ladder_session_rejected')
-    hints.push(rejected === undefined
-      ? hosted ? HOSTED_LOGIN_WALL_HINT : 'the page asks for a login; Octocrawl does not create accounts; use mode authed with your own session (octocrawl login import <host> saves it from your Chrome)'
-      : `${host} refused your saved login for ${String(rejected.detail?.domain ?? host)} (expired or signed out); sign in to it again in Chrome and run octocrawl login import ${String(rejected.detail?.domain ?? host)}`)
-  }
+  if (result.status === 'blocked' && result.blockReason === 'login_wall') hints.push(loginWallHint(run, offers))
   if (result.status === 'blocked' && result.blockReason !== null && GATES.has(result.blockReason)) {
     hints.push(hosted ? hostedGateHint(host, run.channelsTried) : `${host} gates automated access on the lanes tried (${run.channelsTried.join(', ')}); Octocrawl does not solve challenges or change its identity unless this server's access grant names a provider that does (--access-grant, ADR 0005); a proxy or session you own is the supported route, or, on your own machine, getting through the check yourself in your own Chrome: handoff: true on a scrape (octocrawl scrape --handoff), or a batch handoff (octocrawl batch --handoff, POST /v1/batches/:id/handoff)`)
     // The bundled browser met the check too: the rung after it, on the person's machine, is their installed Chrome; a run
