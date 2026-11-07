@@ -16,7 +16,7 @@
  * (hostedAccess.ts), read when the slice starts; hosted_chrome likewise by `hostedConfig/hostedChrome`, for a job that
  * chose access enhanced, counted against the same D5 numbers as the hosted API's scrapes.
  */
-import { loadImpit, structuredModelConfigFromEnv } from '@w2l/api'
+import { browserKeeper, loadImpit, structuredModelConfigFromEnv } from '@w2l/api'
 import { hostedNetworkPolicy } from '@w2l/contracts'
 import { createHttpsWebhookTransport } from '@w2l/runtime'
 import { FirestoreHostedLeases, FirestoreHostedQuota, serviceAccessToken } from './hostedApi.js'
@@ -49,6 +49,8 @@ const hostedChrome = chromeConfig === null ? undefined : hostedChromeOperator(ch
 // The regular-expression checks: the operator's switch, honoured only when this process's self-test passes.
 const regex = hostedRegexChecksFromEnv(process.env)
 if (regex.failures.length > 0) console.log(JSON.stringify({ severity: 'ERROR', event: 'regex_self_test_failed', failures: regex.failures, node: process.version }))
+// One Chromium for the slices this instance runs, closed after ten minutes without a page (an instance Cloud Run keeps warm holds it meanwhile, about 190 MiB).
+const keeper = browserKeeper({ idleMs: 10 * 60_000 })
 const worker = await startJobWorker({
   port: positive('PORT', 8080),
   verify: googleOidcVerifier({ audience: cloud.workerUrl, email: cloud.tasksAccount }),
@@ -65,10 +67,11 @@ const worker = await startJobWorker({
     model: new HostedModel({ model: structuredModelConfigFromEnv(), settings: firestoreModelSettings(cloud.project, serviceAccessToken()), spend: new FirestoreModelSpend(cloud.project, serviceAccessToken()) }),
     access,
     ...(hostedChrome === undefined ? {} : { hostedChrome }),
+    browserKeeper: keeper,
     regexChecks: regex.enabled,
     workRoot: process.env.W2L_JOBS_WORK_ROOT ?? '/tmp/octocrawl-jobs',
     limits: { jobsDaily: positive('W2L_JOBS_DAILY', 10_000), jobsAccountDaily: positive('W2L_JOBS_ACCOUNT_DAILY', 2_000) },
   },
 })
 console.log(JSON.stringify({ service: 'octocrawl-jobs', port: worker.server.address(), project: cloud.project, regexChecks: regex.enabled, node: process.version, extractModel: structuredModelConfigFromEnv()?.model ?? null, hostedChrome: chromeConfig === null ? null : { egress: chromeConfig.egress?.vendor ?? 'google' }, sourceCommit: process.env.W2L_SOURCE_COMMIT ?? null }))
-for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => { void worker.close().then(() => process.exit(0)) })
+for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => { void worker.close().then(() => keeper.close()).then(() => process.exit(0)) })

@@ -46,13 +46,17 @@ describe('hosted job worker', () => {
   const cleanup: Array<() => Promise<void>> = []
   afterEach(async () => { while (cleanup.length) await cleanup.pop()!() })
 
-  async function setup(options: { robotsStatus?: number; twins?: boolean; balance?: number; limits?: Partial<NonNullable<JobWorkerDeps['limits']>>; gate?: string; clock?: { t: Date }; model?: HostedModel } = {}) {
+  async function setup(options: { robotsStatus?: number; twins?: boolean; balance?: number; limits?: Partial<NonNullable<JobWorkerDeps['limits']>>; gate?: string; clock?: { t: Date }; model?: HostedModel; delayMs?: number; perHostConcurrency?: number } = {}) {
     const seen: string[] = []
+    // Pages being answered right now, and the most there ever were at once: how many the slice's engine reads at once.
+    let inFlight = 0
+    const most = { pages: 0 }
     const handler = async (req: IncomingMessage, res: ServerResponse) => {
       const path = req.url ?? '/'
       if (path === '/robots.txt') { res.writeHead(options.robotsStatus ?? 200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n'); return }
       if (path === '/sitemap.xml') { res.writeHead(404).end(); return }
       seen.push(path)
+      if (options.delayMs !== undefined) { inFlight++; most.pages = Math.max(most.pages, inFlight); await new Promise<void>((resolve) => setTimeout(resolve, options.delayMs)); inFlight-- }
       if (path === options.gate) return
       if (options.twins && path !== '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page('/twin')); return }
       if (path.startsWith('/moved/')) { res.writeHead(302, { location: '/' }).end(); return }
@@ -76,7 +80,7 @@ describe('hosted job worker', () => {
     const receiver = { answer: (): number | Error => 204 }
     const hostLeases = new MemoryHostedLeases()
     const clock = options.clock ?? { t: NOW }
-    const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }
+    const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0, ...(options.perHostConcurrency === undefined ? {} : { perHostConcurrency: options.perHostConcurrency }) }
     const deps: JobWorkerDeps = {
       store, credits, files, hostLeases, workRoot, pollMs: 20, log: () => {}, now: () => clock.t,
       enqueueSlice: async (job, delaySeconds = 0) => { queue.push({ jobId: job.id, generation: job.generation, delaySeconds }) },
@@ -107,7 +111,7 @@ describe('hosted job worker', () => {
       return outcomes
     }
     const exportLines = (job: HostedJob) => { const object = files.objects.get(exportName(job)); return object === undefined ? null : gunzipSync(object.body).toString('utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { url: string; status: string }) }
-    return { origin, seen, store, credits, files, queue, expiries, webhooks, posts, receiver, hostLeases, deps, create, drain, exportLines, clock }
+    return { origin, seen, store, credits, files, queue, expiries, webhooks, posts, receiver, hostLeases, deps, create, drain, exportLines, clock, most }
   }
 
   it('runs a batch a slice at a time to the end: each URL read once, pages and credits counted, segments, export and expiry written', async () => {
@@ -276,7 +280,7 @@ describe('hosted job worker', () => {
   it('counts on the day\'s job pools the pages a slice read, not the ones it reserved, so pages never read stop no batch', async () => {
     // One host a slice: the first reserves five pages and the headroom page, and reads the three of its host. Counted as
     // reserved, nine pages would pass the limit of eight before the second slice could start.
-    const { origin, credits, create, drain } = await setup({ limits: { slicePages: 5, maxHostsPerSlice: 1, jobsAccountDaily: 8 } })
+    const { origin, credits, create, drain } = await setup({ limits: { slicePages: 5, maxHostsPerSlice: 1, jobsAccountDaily: 8, headroomPages: 1 } })
     const other = origin.replace('127.0.0.1', 'localhost')
     const id = await create(parseBatchStartRequest({ urls: [...['/a', '/b', '/c'].map((path) => `${origin}${path}`), ...['/d', '/e', '/f'].map((path) => `${other}${path}`)], fastMode: true }))
     expect((await drain(id)).at(-1)).toBe('completed')
@@ -665,6 +669,19 @@ describe('hosted job worker', () => {
     expect(await busy.drain(busyId, 1)).toEqual(['running'])
     expect(busy.queue).toEqual([{ jobId: busyId, generation: 1, delaySeconds: 30 }])
     expect(busy.seen).toEqual([])
+  })
+
+  it('reads the last of a batch with every worker: a slice that holds all the URLs left reserves no headroom and no worker can overrun it', async () => {
+    // Two hosts at four pages each: the second slice holds every URL left, so it reserves no headroom; with one worker it
+    // would read one page at a time (the regression the review of 2026-11-07 found), with the engine's eight several.
+    const { origin, create, drain, most } = await setup({ limits: { slicePages: 50, firstSlicePages: 2 }, delayMs: 60, perHostConcurrency: 4 })
+    const other = origin.replace('127.0.0.1', 'localhost')
+    const urls = [...Array.from({ length: 12 }, (_, i) => `${origin}/a${i}`), ...Array.from({ length: 12 }, (_, i) => `${other}/b${i}`)]
+    const id = await create(parseBatchStartRequest({ urls, fastMode: true }))
+    expect(await drain(id, 1)).toEqual(['running'])
+    most.pages = 0
+    expect((await drain(id)).at(-1)).toBe('completed')
+    expect(most.pages).toBeGreaterThanOrEqual(3)
   })
 
   it('fails a job whose slices store nothing twice in a row', async () => {
