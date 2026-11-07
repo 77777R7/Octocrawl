@@ -95,6 +95,8 @@ const PAGE_LIST_MAX = 100
 /** A page of items stays under this many bytes of JSON, well under Cloud Run's 32 MiB response limit; one larger item is a page alone. */
 const PAGE_LIST_MAX_BYTES = 16_000_000
 const EXPORT_LINK_SECONDS = 900
+/** How long the download link a finished job's status carries is good: a day, so a reader who comes back to the chat finds it alive; the status read again gives a fresh one. */
+export const STATUS_EXPORT_LINK_SECONDS = 86_400
 const JOB_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /** A job's files in GCS: `w/{workspaceId}/jobs/{jobId}/`. */
@@ -108,7 +110,8 @@ export function personalWorkspace(uid: string): string { return `ws_${uid}` }
 export interface JobFiles {
   /** One slice's pages, a JSON object a line; null when the slice wrote none (yet). */
   segment(job: HostedJob, slice: number): Promise<string[] | null>
-  exportUrl(job: HostedJob): Promise<string>
+  /** A signed link to the job's export, good for `expiresSeconds` (EXPORT_LINK_SECONDS when none is given). */
+  exportUrl(job: HostedJob, expiresSeconds?: number): Promise<string>
 }
 
 export function gcsJobFiles(bucket: GcsBucket): JobFiles {
@@ -119,7 +122,7 @@ export function gcsJobFiles(bucket: GcsBucket): JobFiles {
       if (object === null) return null
       return gunzipSync(object.body).toString('utf8').split('\n').filter((line) => line.length > 0)
     },
-    exportUrl: (job) => bucket.signedUrl(exportName(job), EXPORT_LINK_SECONDS),
+    exportUrl: (job, expiresSeconds = EXPORT_LINK_SECONDS) => bucket.signedUrl(exportName(job), expiresSeconds),
   }
 }
 
@@ -449,7 +452,11 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
       if (method !== 'GET') return refusal(404, 'not_found', `${method} ${url.pathname} is not a job route`)
       const found = await owned(id, caller, kind)
       if (found instanceof Response) return found
-      if (action === undefined && kind !== null) return json(status(found))
+      // A finished job's status names its export, by a link good for a day; the finish that writes the file may still be a moment away (finishNow).
+      if (action === undefined && kind !== null) {
+        if (found.finishedAt === null || found.status === 'expired') return json(status(found))
+        return json({ ...status(found), export: { url: await config.files.exportUrl(found, STATUS_EXPORT_LINK_SECONDS), expiresInSeconds: STATUS_EXPORT_LINK_SECONDS } })
+      }
       if (action === 'export' && kind === null) {
         if (found.finishedAt === null) return refusal(409, 'job_running', `job ${id} has not finished; its export is written when it does`)
         return json({ url: await config.files.exportUrl(found), expiresInSeconds: EXPORT_LINK_SECONDS })
