@@ -112,7 +112,7 @@ Hosted batch (1–1,000 URLs) and crawl (at most 500 pages) jobs (ROADMAP PH sta
 | `W2L_FIRESTORE_PROJECT_ID` | the project |
 | `W2L_JOBS_BUCKET` | `octocrawl-jobs-${W2L_PROJECT_ID}` |
 | `W2L_JOBS_QUEUE` | `asia-southeast1/octocrawl-jobs` |
-| `W2L_JOBS_WORKER_URL` | `https://octocrawl-jobs-c7fpmz73tq-as.a.run.app` |
+| `W2L_JOBS_WORKER_URL` | `https://octocrawl-jobs-c7fpmz73tq-as.a.run.app` | A revision's tag URL (`https://<tag>---octocrawl-jobs-…`) works too, on a tagged API and tagged worker that both carry it, to exercise a worker revision before traffic moves; the task's token still names the service URL as its audience (`workerAudience`), since Cloud Run refuses a tag URL there with 401. The template keeps the value, so the next deploy sets it back. |
 | `W2L_JOBS_TASKS_ACCOUNT` | `octocrawl-jobs-tasks@${W2L_PROJECT_ID}.iam.gserviceaccount.com` |
 
 The global switch is the Firestore document `hostedConfig/jobs`, field `enabled`; absent means on, and both services read it at most every 30 s.

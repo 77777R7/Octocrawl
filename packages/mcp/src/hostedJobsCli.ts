@@ -53,7 +53,7 @@ if (regex.failures.length > 0) console.log(JSON.stringify({ severity: 'ERROR', e
 const keeper = browserKeeper({ idleMs: 10 * 60_000 })
 const worker = await startJobWorker({
   port: positive('PORT', 8080),
-  verify: googleOidcVerifier({ audience: cloud.workerUrl, email: cloud.tasksAccount }),
+  verify: googleOidcVerifier({ audience: cloud.workerAudience, email: cloud.tasksAccount }),
   deps: {
     store: new FirestoreHostedJobStore(cloud.project, serviceAccessToken()),
     credits: new FirestoreCreditsStore(cloud.project, serviceAccessToken(), positive('W2L_MONTHLY_CREDITS', 1_000)),
