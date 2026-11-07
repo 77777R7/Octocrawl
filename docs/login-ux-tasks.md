@@ -207,9 +207,10 @@ ROADMAP：
 
 起因：时刻 6。batch 的状态有 `waitingForPerson`（`contracts/src/api.ts:752`；`engine.ts:1280-1282`、`:1303`），有 `hand_off_batch`，但 batch 报告没有 `agentHints` 字段（`BatchStatusResponse`，`api.ts:727`；`CrawlReport`，`contracts/src/crawl.ts:252-301`）：只有每一项各自的 hint（`crawl.ts:330`，`engine.ts:3359`）。agent 要自己数有几页撞墙、在哪个站。
 
-- [ ] **L7.1** 给 batch 状态加 `agentHints`（可选字段，REST 只增不改；MCP 的 `get_batch`、`wait_batch` 跟着带出来），在 `engine.ts:1283-1306` 组状态时填（按 D10）。有 N 个 `login_wall` 的项时一句："N pages of <host>[, <host2>] asked for a login (waitingForPerson): ask the person, then either hand_off_batch (they get through in their Chrome, one tab at a time) or batch_scrape those URLs again in mode authed after import_login <host> (or with lane my-browser)"。多于三个 host 只列前三个加 "and K more"。hosted 的版本按 `HintOffers.hosted` 只说本机的路（和 `HOSTED_LOGIN_WALL_HINT` 一致），不点名 `hand_off_batch`、`import_login`。
-- [ ] **L7.2** crawl 拒绝 `mode authed` 的消息（`contracts/src/api.ts:2236`："mode authed is not available for crawl: a crawl follows every link, and a sign-out link would end your session in Chrome too; list the pages and send them as a batch in mode authed"）已经说了用 batch；确认它在 MCP 的 `isError` 结果里原样可见。
-- 验收：先写失败测试（batch fixture 有两项 `login_wall` 时状态没有 `agentHints`）；改后 N、host 正确，没有 `login_wall` 的 batch 不带这句；hosted 的 batch 状态不提 `hand_off_batch`、`import_login`；`BatchStatusResponse` 的字段表和 SDK 类型同步；CHANGELOG 写一条（新增字段）。
+- [x] **L7.1** 给 batch 状态加 `agentHints`（可选字段，REST 只增不改；MCP 的 `get_batch`、`wait_batch` 跟着带出来，按 D10）。`hints.ts` 的 `batchLoginWallHint` 组句，`engine.ts` 的 `loadBatch` 填。只在 batch 结束后、有 `login_wall` 的项时才有：`hand_off_batch` 要等 batch 结束才能用，轮询中也不用多读一次结果。一句里说 N 页、站点（三个之后写 "and K more"），再按这个 batch 的情况说路：`mode authed` 的 batch 说登录缺失或过期，`lane my-browser` 的 batch 说到 Chrome 里登录，普通 batch 让 agent 先问用户，再说这台服务器有的路。`hand_off_batch` 只在这些登录页本身能交接时才点名，不看 `waitingForPerson` 的总数（它还算验证码等别的原因）；带 webhook 的 batch 说新 batch 要去掉 webhook，因为 my-browser 和 `mode authed` 都拒绝 webhook。hosted 的句子说先问用户，再说本机的路，不点名 `hand_off_batch`、`import_login`。
+- [x] **L7.2** crawl 拒绝 `mode authed` 的消息（`contracts/src/api.ts`："mode authed is not available for crawl: ..."）已经说了用 batch。2026-11-07 用构建好的 stdio MCP 实测，它在 `isError` 结果里原样可见，不用改代码。
+- 验收：先写失败测试（batch fixture 有两项 `login_wall` 时状态没有 `agentHints`）；改后 N、host 正确，没有 `login_wall` 的 batch 不带这句；hosted 的句子不提 `hand_off_batch`、`import_login`；`BatchStatusResponse` 的类型同步；CHANGELOG 写一条（新增字段）。2026-11-07 结果：全部满足（PR #879）。对本地 fixture 跑 3 个 URL 的 batch，`waitingForPerson` 是 2，hint 也只数这 2 页。
+- 没做：hosted job 的状态走 `packages/mcp/src/hostedJobRoutes.ts` 的 `jobStatus`，不走 `loadBatch`，所以 hosted job 只有每一项各自的 hint，没有这句汇总。要补，得先给 hosted job 加 `login_wall` 计数。
 - 决定：D2、D10。
 
 ### Phase 1 完成标准

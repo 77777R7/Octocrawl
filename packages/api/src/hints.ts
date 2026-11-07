@@ -208,6 +208,38 @@ function loginWallHint(run: HintedRun, offers: HintOffers): string {
   return `the page asks for a login; Octocrawl does not sign in or create accounts for anyone; ${ask}, naming ${site}, whether to read it ${routes.join(' or ')}`
 }
 
+/** How many sites a batch's hint names before it counts the rest. */
+const BATCH_HINT_HOSTS = 3
+
+/**
+ * The hint of a finished batch some of whose pages asked for a login: one line in place of an agent adding up its items,
+ * and one question to the person in place of one a page. `urls` are those pages, a URL a page. The routes are the ones
+ * this server has for this batch, as `loginWallHint`'s are; `handoff` is true when `hand_off_batch` would take these
+ * pages. A new batch leaves a webhook out: pages read as the person are not sent elsewhere, so both routes refuse one.
+ */
+export function batchLoginWallHint(urls: readonly string[], batch: { mode?: string; lane?: string; webhook?: boolean }, offers: HintOffers & { handoff?: boolean }): string {
+  const hosts = [...new Set(urls.map((url) => { try { return new URL(url).hostname } catch { return url } }))]
+  const named = hosts.slice(0, BATCH_HINT_HOSTS).join(', ')
+  const list = hosts.length > BATCH_HINT_HOSTS ? `${named} and ${hosts.length - BATCH_HINT_HOSTS} more` : named
+  const one = urls.length === 1
+  const pages = `${urls.length} ${one ? 'page' : 'pages'} of ${list}`
+  const them = one ? 'it' : 'them'
+  const site = hosts.length === 1 ? hosts[0]! : '<host>'
+  if (offers.hosted === true) return `${pages} asked for a login; hosted Octocrawl holds no logins and never takes theirs; ask the person first, naming ${hosts.length === 1 ? 'the site' : 'each site'}: on their computer Octocrawl reads ${them} as them (npx octocrawl serve, then octocrawl login import ${site}, where the login stays, then the batch in mode authed)`
+  if (batch.lane === 'my-browser') return `${pages} asked for a login in the person's own Chrome too: ask them to sign in there, then read ${one ? 'that page' : 'those pages'} again`
+  const fresh = `a new batch of those URLs${batch.webhook === true ? ' without its webhook' : ''}`
+  const routes = [
+    ...(offers.handoff === true ? ['hand_off_batch (POST /v1/batches/:id/handoff; they get through in their Chrome, one tab at a time)'] : []),
+    ...(offers.personChrome === true ? [`${fresh} with lane my-browser in mode standard`] : []),
+    ...(offers.savedLogins === true ? [`${fresh} in mode authed, after import_login ${site} (or octocrawl login import ${site})`] : []),
+  ]
+  if (routes.length === 0) return `${pages} asked for a login; this server reads no saved login and no Chrome of the person's; on their own computer Octocrawl reads ${them} as them, after asking them (npx octocrawl serve, then lane my-browser, or octocrawl login import ${site} and mode authed)`
+  const head = batch.mode === 'authed' ? `${pages} still asked for a login in mode authed, so ${one ? 'its' : 'their'} saved login is missing or expired` : `${pages} asked for a login`
+  const ask = offers.scriptAction === true ? 'send the batch without its executeJavascript action, which mode authed refuses, and ask the person first' : 'ask the person first'
+  const last = routes.pop()!
+  return `${head}: ${ask}, naming ${hosts.length === 1 ? 'the site' : 'each site'}, whether to read ${them} with ${routes.length === 0 ? last : `${routes.join(', ')} or ${last}`}`
+}
+
 /** The host the request named; the host answered when that cannot be read. */
 function requestedHost(result: Pick<HintedResult, 'requestedUrl' | 'evidence'>): string {
   try {

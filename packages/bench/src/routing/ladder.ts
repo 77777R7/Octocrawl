@@ -137,7 +137,7 @@ export interface PricedExit {
  * that says no figure has it charged its ceiling.
  */
 export type ChannelAdmission =
-  | { ok: true; exit?: PricedExit; settle(result: FetchResult | null, called: boolean): Promise<number | void> }
+  | { ok: true; exit?: PricedExit; settle(result: FetchResult | null, called: boolean): Promise<number | void>; /** How long the admission kept the call waiting for its turn (a browser slot), in ms; absent or 0 when it did not. */ waitedMs?: number }
   | { ok: false; reason: string; warning: FetchWarning; detail?: Readonly<Record<string, unknown>> }
 
 /** The human in the loop. Called exactly when a result asks for takeover. */
@@ -1358,6 +1358,9 @@ export class LadderRunner {
       if (!progress.notAdmitted.some((held) => held.code === admission.warning.code && held.message === admission.warning.message)) progress.notAdmitted.push(admission.warning)
       return null
     }
+    // A call that waited its turn (a browser slot) says so, on the ladder's trace and on the page's own, before the rung's events.
+    const waitedMs = admission.waitedMs !== undefined && admission.waitedMs > 0 ? Math.round(admission.waitedMs) : 0
+    if (waitedMs > 0) progress.ladderTrace.push({ at: Math.round(performance.now() - progress.startedAt), event: 'ladder_admission_waited', channel: label, detail: { waitedMs } })
     let called = false
     let result: FetchResult | null
     try {
@@ -1366,7 +1369,8 @@ export class LadderRunner {
       await settleAdmitted(progress, admission, label, null, called)
       throw error
     }
-    return await settleAdmitted(progress, admission, label, result, called)
+    const settled = await settleAdmitted(progress, admission, label, result, called)
+    return settled !== null && waitedMs > 0 ? { ...settled, trace: [{ at: 0, lane: settled.lane, event: 'slot_wait', detail: { waitedMs } }, ...settled.trace] } : settled
   }
 
   private async meteredFetch(channel: Channel, label: string, url: string, session: SessionSnapshot | null | undefined, execution: ExecutionContext, options: FetchOptions, progress: LadderProgress, onCall: () => void): Promise<FetchResult | null> {
