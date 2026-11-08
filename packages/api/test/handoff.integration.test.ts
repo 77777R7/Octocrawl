@@ -228,7 +228,8 @@ describe('one connection to the person\'s Chrome for a server\'s life (login UX 
       }
       expect((await itemsOf(engine, taskId)).map((item) => item.status)).toEqual(['success', 'success'])
       expect(connections).toBe(1)
-      // No tab of Octocrawl's left in the person's Chrome.
+      // No tab of Octocrawl's left in the person's Chrome: closed, though Playwright's list of pages hears of it a moment later.
+      for (let i = 0; i < 40 && chrome.pages().some((page) => page.url().startsWith(base)); i++) await new Promise((resolve) => setTimeout(resolve, 50))
       expect(chrome.pages().filter((page) => page.url().startsWith(base))).toEqual([])
     } finally {
       await engine.close()
