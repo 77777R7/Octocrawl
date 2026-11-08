@@ -419,7 +419,9 @@ export interface FetchWarning {
    * `sign_in_prompt`: a page read with the person's login (lane my-browser, a
    * handoff, or mode authed with a saved login) shows a line that holds content back behind a sign-in, "Log
    * in for contact details": the login did not reach the page, or has lapsed.
-   * The message quotes the line; `readiness` reads it as `not_served`.
+   * The message quotes the line; `readiness` reads it as `not_served`. On lane
+   * my-browser the page was first given time for the site to sign the person
+   * back in by itself (the trace's `user_browser_read` `signInWait`).
    * `thin_page`: a batch page of 300 characters of Markdown or fewer, under a
    * quarter of the median of at least five other plain pages of its host in
    * the run, still so after any read again. A page that really is that short
