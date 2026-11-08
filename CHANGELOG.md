@@ -35,6 +35,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **A finished crawl or batch on your computer tells the agent to give you the folder its Markdown files are in.** The files sit under the hidden `.w2l/api/<task id>/markdown/`, which a file browser does not list, and the hint named that folder last, after the JSONL and CSV. It now names the Markdown folder first, asks the agent to give you its path, and says when the folder is hidden that you open it by that path. The files stay where they were: that folder is readable by you alone and kept out of git, because it can hold pages read with your login.
+
 ## 0.8.10 — 2026-11-08
 
 The published packages at 0.8.10. **`octocrawl serve` says at start-up when the browser lane has no Chromium yet**, as after an update that moves Playwright to a new Chromium build, and **a page read in your Chrome that came without your login waits for the site to sign you back in** before it is read.

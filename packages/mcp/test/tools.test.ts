@@ -565,13 +565,23 @@ describe('MCP tools', () => {
     for (const [name, pages] of [['get_batch', 'get_batch_items'], ['wait_batch', 'get_batch_items'], ['get_crawl', 'get_crawl_pages'], ['wait_crawl', 'get_crawl_pages']] as const) {
       const status = await callTool(local, name, { id: name.endsWith('crawl') ? 'crawl-1' : 'batch-1' }) as { resultFiles: unknown; agentHints: string[] }
       expect(status.resultFiles, name).toEqual(files)
-      expect(status.agentHints, name).toEqual([`every page is on this computer: ${files.jsonl} (a page a line, as ${pages} lists them) and ${files.csv} (a row a page, its evidence columns); ${pages} reads a few at a time`])
+      expect(status.agentHints, name).toEqual([`every page is on this computer: ${files.jsonl} (a page a line, as ${pages} lists them) and ${files.csv} (a row a page, its evidence columns): give the person these paths; ${pages} reads a few at a time`])
     }
-    // A server that wrote each page's Markdown names the directory, so the agent does not split the JSONL itself.
+    // A server that wrote each page's Markdown names the directory first, for the agent to give the person and hand on
+    // rather than split the JSONL itself.
     const withMarkdown = { ...files, markdown: '/tasks/batch-1/markdown' }
     const markdownServer = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async () => json({ taskId: 'batch-1', status: 'completed', completed: 2, requested: 2, remaining: 0, resultFiles: withMarkdown })) as typeof fetch })
     const written = await callTool(markdownServer, 'wait_batch', { id: 'batch-1' }) as { agentHints: string[] }
-    expect(written.agentHints).toEqual([`every page is on this computer: ${files.jsonl} (a page a line, as get_batch_items lists them) and ${files.csv} (a row a page, its evidence columns), with each page's Markdown as a file of its own in /tasks/batch-1/markdown (the CSV's markdown_file names it); hand those files on rather than splitting the JSONL; get_batch_items reads a few at a time`])
+    expect(written.agentHints).toEqual([`each page's Markdown is a file of its own in /tasks/batch-1/markdown (the CSV's markdown_file names it): give the person that folder's path, and hand those files on rather than splitting the JSONL; every page is also in ${files.jsonl} (a page a line, as get_batch_items lists them) and ${files.csv} (a row a page, its evidence columns); get_batch_items reads a few at a time`])
+    // Under the default task root, .w2l/api, the folder is hidden: the person is told to open it by its path.
+    const dot = '/Users/me/project/.w2l/api/batch-1'
+    const hiddenFiles = { jsonl: `${dot}/results.jsonl`, csv: `${dot}/results.csv` }
+    for (const [resultFiles, start] of [[{ ...hiddenFiles, markdown: `${dot}/markdown` }, `each page's Markdown is a file of its own in ${dot}/markdown`], [hiddenFiles, 'every page is on this computer']] as const) {
+      const server = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async () => json({ taskId: 'batch-1', status: 'completed', completed: 2, requested: 2, remaining: 0, resultFiles })) as typeof fetch })
+      const [hint] = (await callTool(server, 'wait_batch', { id: 'batch-1' }) as { agentHints: string[] }).agentHints
+      expect(hint?.startsWith(start)).toBe(true)
+      expect(hint).toContain('(it is inside a hidden folder a file browser does not list, so they open it by that path)')
+    }
     const hosted = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async () => json({ taskId: 'batch-1', status: 'failed', failureReason: 'credits_exhausted', completed: 1, requested: 2, remaining: 1, export: { url: 'https://storage.example/batch-1', expiresInSeconds: 86_400 } })) as typeof fetch })
     const failed = await callTool(hosted, 'get_batch', { id: 'batch-1' }) as { agentHints: string[] }
     expect(failed.agentHints).toEqual(['every page read so far downloads at export.url: one gzip JSONL file, a page a line, as get_batch_items lists them; the link is good for 24 hours, and get_batch gives a fresh one; get_batch_items reads a few at a time'])
