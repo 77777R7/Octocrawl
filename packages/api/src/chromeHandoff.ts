@@ -36,7 +36,7 @@
 import { extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 import { classifyGate, type GateVerdict } from '@w2l/http-core'
 import { contentHeldBack, isLoginPath, LOADING_PROBE, REGION_WAIT_MAX_MS, RegionTracker, sessionCoversHost, STEADY_WAIT_MAX_MS, type RegionSpec, type SteadyOutcome, type UserBrowserRead } from '@w2l/bench'
-import { chromeEndpoint, chromeUserDataDir, ChromeLoginError, connectCdp, type CdpConnection } from './chromeLogin.js'
+import { chromeEndpoint, chromeReachable, chromeUserDataDir, ChromeLoginError, connectCdp, type CdpConnection } from './chromeLogin.js'
 import { scopePage } from './scopePage.js'
 
 export interface UserChromeOptions {
@@ -52,6 +52,28 @@ export interface UserChromeOptions {
   loginWaitMs?: number
   /** Replaces a read's signInSettleMs (a test shortens it). */
   signInSettleMs?: number
+  /** How long a batch waits for a Chrome that quit mid-run to come back (login UX A3). Default CHROME_RETURN_WAIT_MS. */
+  returnWaitMs?: number
+  /** Whether Chrome listens at the endpoint, without asking its Allow; a test passes its own. Default a TCP probe. */
+  reachable?: (endpoint: string) => Promise<boolean>
+}
+
+/** How long a batch on the my-browser lane waits for the person's Chrome to come back after it quit: 10 minutes. */
+export const CHROME_RETURN_WAIT_MS = 600_000
+
+/**
+ * Why a page asking to allow sites stopped answering: Chrome closed the connection (it quit, or remote debugging was
+ * turned off), not the person closing that page or clicking Revoke.
+ */
+export class ChromeQuit extends Error {
+  constructor() { super('Chrome quit or closed the connection') }
+}
+
+/** Whether the person's Chrome is back after it quit: its DevToolsActivePort names an address it listens at. Asks nothing. */
+export async function chromeReturned(options: UserChromeOptions = {}): Promise<boolean> {
+  let endpoint: string
+  try { endpoint = await chromeEndpoint(options.userDataDir ?? chromeUserDataDir()) } catch { return false }
+  return (options.reachable ?? chromeReachable)(endpoint)
 }
 
 export interface UserChromeReadOptions {
@@ -189,7 +211,7 @@ export interface AllowedSites {
 }
 
 /** One step of asking the person to allow sites, for the server's log: never a page's content, only the page's own state. */
-export type ApprovalLog = (step: 'shown' | 'ready' | 'answer' | 'allowed' | 'refused' | 'remembered', detail: Record<string, unknown>) => void
+export type ApprovalLog = (step: 'shown' | 'ready' | 'answer' | 'allowed' | 'refused' | 'remembered' | 'chrome_lost' | 'chrome_back', detail: Record<string, unknown>) => void
 
 /** The sites and the task the person is asked to allow. */
 export interface SiteScope {
@@ -213,6 +235,8 @@ export interface UserChrome {
    * a wait that ends unanswered can be told from a click that was not recognised.
    */
   allow(scope: SiteScope, options?: { waitMs?: number; pollMs?: number; signal?: AbortSignal; log?: ApprovalLog }): Promise<AllowedSites>
+  /** Whether Chrome closed the connection (it quit, or remote debugging was turned off). */
+  gone(): boolean
   close(): void
 }
 
@@ -310,6 +334,7 @@ export async function openUserChrome(options: UserChromeOptions = {}, signal?: A
     }),
     readList: (url, readOptions) => readList(connection, browser, url, readOptions),
     allow: (scope, allowOptions = {}) => allowSites(connection, scope, allowOptions),
+    gone: () => connection.isClosed?.() === true,
     close: () => connection.close(),
   }
 }
@@ -382,7 +407,8 @@ async function allowSites(connection: CdpConnection, scope: SiteScope, options: 
         if (!watching) return
         const seen = await answerOf(sessionId, world)
         if (seen?.answer === 'revoked') clickedRevoke = true
-        if (seen === null || seen.answer === 'revoked') revoked.abort(new Error('you revoked the sites in Chrome'))
+        // The page gone with the connection: Chrome quit, which is not the person revoking the sites.
+        if (seen === null || seen.answer === 'revoked') revoked.abort(seen === null && connection.isClosed?.() === true ? new ChromeQuit() : new Error('you revoked the sites in Chrome'))
       }
     })()
     return { hosts: [...scope.hosts], signal: revoked.signal, revoked: () => clickedRevoke, close: async () => { watching = false; await closeTab() } }

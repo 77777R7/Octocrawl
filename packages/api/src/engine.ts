@@ -136,8 +136,8 @@ import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitF
 import type { BrowserEngineName, BrowserIdentityChoice, BrowserKeeper, CaptchaSolving, ChannelAdmission, ChannelsFiltered, InstalledChromeTestSeams, PricedExit } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
 import { agentHintsFor, withJsonHints, batchExtractionHints, batchFailureHints, batchLoginWallHint, failureGroupOf, httpLaneAskedForBrowser, mapAgentHints, MAX_AGENT_HINTS, pinnedFastModeHints, withFailure, type BatchFailures, type FailureFacts, type FastModePin, type HintOffers } from './hints.js'
-import { HandoffNotThrough, LOGIN_WAIT_MS, openUserChrome, SIGN_IN_SETTLE_MS, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
-import { importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
+import { CHROME_RETURN_WAIT_MS, chromeReturned, ChromeQuit, HandoffNotThrough, LOGIN_WAIT_MS, openUserChrome, SIGN_IN_SETTLE_MS, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
+import { ENABLE_HINT, importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
 import { sharedChrome } from './sharedChrome.js'
 import { forgetSites, listRememberedSites, rememberedSitesFile, rememberSites, watchRevoked } from './rememberedSites.js'
 import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
@@ -1711,15 +1711,23 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * in the page Octocrawl opens there, to allow every site of the batch (host and port). A page on a site not among
    * them is not read; nor is any after they revoked the sites, or when Chrome was not reached or the sites not
    * allowed. A run resumed later (a restart, a pause) asks again. Nothing is cached.
+   *
+   * Chrome quitting mid-run (or closing the connection, remote debugging turned off) does not end it (login UX A3): the
+   * batch waits for Chrome to come back, up to `returnWaitMs` (10 minutes), saying it waits for the person
+   * (waitingForApproval), connects again (Chrome asks its Allow) and reads on, from the page it was reading. The sites
+   * remembered (A1) are not asked for again; the others are, as at the start. Chrome not back in time ends the pages
+   * left `cancelled`, saying so.
    */
   function myBrowserBatchReader(urls: readonly string[], taskId: string, fetchOpts: FetchOptions, backgroundTabs: boolean): { scrape(url: string, context?: ExecutionContext): Promise<ScrapeOutcome>; close(): Promise<void> } {
     const hosts = [...new Set(urls.map((url) => new URL(url).host))]
-    type Opened = { chrome: UserChrome; allowed: Allowed } | { refused: string; status: 'cancelled' | 'connection_error' }
+    type Connected = { chrome: UserChrome; allowed: Allowed }
+    type Opened = Connected | { refused: string; status: 'cancelled' | 'connection_error' }
     let opened: Promise<Opened> | null = null
     // Closing the reader (the task cancelled, paused or out of time, or the engine shutting down) ends the wait for the
-    // person and every read; close() waits for the read in flight, so its tab is closed before the connection is.
+    // person and every read; close() waits for the page in flight, so its tab is closed before the connection is.
     const stop = new AbortController()
     const signal = AbortSignal.any([shutdownController.signal, handoffClosing.signal, stop.signal])
+    const log = approvalLog('batch', taskId)
     let reading: Promise<unknown> | null = null
     // A batch waits once for a tab out of sight: after one page's tab stayed out of sight through the wait, the pages after
     // it are read whole at once (page_read_hidden), not each after 30 s more.
@@ -1727,45 +1735,84 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // Nor does it wait page after page for a site to sign the person back in: after a page read without their login, the
     // pages after it are read at once, until one comes with it again.
     let signedOut = false
-    const open = (): Promise<Opened> => opened ??= (async (): Promise<Opened> => {
+    const connect = async (): Promise<Opened> => {
       if (userChrome === null) return { refused: 'this server does not read pages in your Chrome: run Octocrawl on your own machine (octocrawl serve, the local MCP host, or the octocrawl CLI)', status: 'connection_error' }
       let chrome: UserChrome
       try { chrome = await openUserChrome(personChrome!, signal) }
       catch (error) { return { refused: error instanceof Error ? error.message : String(error), status: 'connection_error' } }
       // The batch says it waits for the person while it does (waitingForApproval).
       approvalsWaiting.add(taskId)
-      try { return { chrome, allowed: await allowHosts(chrome, hosts, `batch ${taskId}: ${urls.length} page${urls.length === 1 ? '' : 's'}`, signal, approvalLog('batch', taskId)) } }
+      try { return { chrome, allowed: await allowHosts(chrome, hosts, `batch ${taskId}: ${urls.length} page${urls.length === 1 ? '' : 's'}`, signal, log) } }
       catch (error) { chrome.close(); return { refused: error instanceof Error ? error.message : String(error), status: 'cancelled' } }
       finally { approvalsWaiting.delete(taskId) }
-    })()
+    }
+    // Chrome closed the connection, and nothing the person did stopped the run first: Revoke or closing Octocrawl's page
+    // (in Chrome, before it quit), or `octocrawl login revoke`.
+    const chromeLost = (connection: Connected) => connection.chrome.gone() && !(connection.allowed.signal.aborted && !(connection.allowed.signal.reason instanceof ChromeQuit))
+    // Waits for Chrome to come back, then connects again: the connection the pages after read on, or why not.
+    const reconnect = async (lost: Connected): Promise<Opened> => {
+      await lost.allowed.close()
+      lost.chrome.close()
+      const waitMs = userChrome!.returnWaitMs ?? CHROME_RETURN_WAIT_MS
+      const waited = waitMs % 60_000 === 0 ? `${waitMs / 60_000} minute${waitMs === 60_000 ? '' : 's'}` : `${Math.round(waitMs / 1000)} s`
+      const since = Date.now()
+      log('chrome_lost', { waitMs })
+      approvalsWaiting.add(taskId)
+      try {
+        for (;;) {
+          if (signal.aborted) return { refused: 'the batch stopped while it waited for Chrome to come back', status: 'cancelled' }
+          if (await chromeReturned(userChrome!)) break
+          if (Date.now() - since >= waitMs) return { refused: `Chrome did not come back within ${waited} after it quit or closed the connection: open Chrome with remote debugging on (${ENABLE_HINT}) and run the batch again for the pages left`, status: 'cancelled' }
+          // A second between looks, cut short when the batch stops.
+          await new Promise<void>((resolve) => {
+            const done = () => { clearTimeout(timer); signal.removeEventListener('abort', done); resolve() }
+            const timer = setTimeout(done, 1_000)
+            signal.addEventListener('abort', done, { once: true })
+          })
+        }
+        log('chrome_back', { afterMs: Date.now() - since })
+        return await connect()
+      } finally {
+        approvalsWaiting.delete(taskId)
+      }
+    }
     const unread = (url: string, status: 'cancelled' | 'connection_error', message: string, started: number): ScrapeOutcome =>
       ({ result: unreadInUserBrowser(url, status === 'cancelled' ? { status } : { status: 'failed', failureReason: status }, message, Date.now() - started), links: [] })
-    return {
-      async scrape(url, context) {
-        const started = Date.now()
-        const connection = await open()
+    const scrapeOne = async (url: string, context: ExecutionContext | undefined): Promise<ScrapeOutcome> => {
+      const started = Date.now()
+      for (;;) {
+        const current = opened ??= connect()
+        const connection = await current
         if ('refused' in connection) return unread(url, connection.status, connection.refused, started)
+        // Chrome quit since the last page: read on once it is back.
+        if (chromeLost(connection)) { if (opened === current) opened = reconnect(connection); continue }
         if (connection.allowed.signal.aborted) return unread(url, 'cancelled', `${revokedBy(connection.allowed.signal)} before ${url} was read`, started)
         if (!connection.allowed.hosts.includes(new URL(url).host)) return unread(url, 'cancelled', `${new URL(url).host} is not among the sites you allowed for this run of the batch`, started)
         if (signal.aborted || context?.signal?.aborted === true) return unread(url, 'cancelled', `the batch stopped before ${url} was read`, started)
         // The task's cancel, or this engine shutting down, ends the read; the page's own timeout does not: the person's time is theirs.
-        const pending = readAllowed(connection.chrome, connection.allowed, url, fetchOpts, undefined, {}, AbortSignal.any([signal, ...(context?.signal === undefined ? [] : [context.signal])]), started, hiddenWaitedOut ? 0 : undefined, undefined, backgroundTabs, signedOut ? undefined : SIGN_IN_SETTLE_MS)
+        let read: FetchResult
+        try { read = await readAllowed(connection.chrome, connection.allowed, url, fetchOpts, undefined, {}, AbortSignal.any([signal, ...(context?.signal === undefined ? [] : [context.signal])]), started, hiddenWaitedOut ? 0 : undefined, undefined, backgroundTabs, signedOut ? undefined : SIGN_IN_SETTLE_MS) }
+        catch (error) { if (chromeLost(connection)) continue; throw error }
+        // Chrome quit while the page was read: it is read again once Chrome is back, not answered as cut off.
+        if (!CONTENTFUL_STATUS.has(read.status) && chromeLost(connection)) continue
+        if (read.warnings?.some((warning) => warning.code === 'page_read_hidden') === true) hiddenWaitedOut = true
+        if (CONTENTFUL_STATUS.has(read.status)) signedOut = readSignedOut(read)
+        return { result: read, links: read.links ?? [] }
+      }
+    }
+    return {
+      async scrape(url, context) {
+        const pending = scrapeOne(url, context)
         reading = pending
-        try {
-          const read = await pending
-          if (read.warnings?.some((warning) => warning.code === 'page_read_hidden') === true) hiddenWaitedOut = true
-          if (CONTENTFUL_STATUS.has(read.status)) signedOut = readSignedOut(read)
-          return { result: read, links: read.links ?? [] }
-        } finally {
-          if (reading === pending) reading = null
-        }
+        try { return await pending }
+        finally { if (reading === pending) reading = null }
       },
       async close() {
         stop.abort()
+        // The page in flight ends at its next poll (or its wait for Chrome) and closes its own tab; the connection after it.
+        while (reading !== null) await reading.catch(() => undefined)
         if (opened === null) return
         const connection = await opened
-        // The read in flight ends at its next poll and closes its own tab; the connection is closed after it.
-        while (reading !== null) await reading.catch(() => undefined)
         if ('refused' in connection) return
         await connection.allowed.close()
         connection.chrome.close()

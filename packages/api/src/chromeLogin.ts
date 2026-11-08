@@ -14,6 +14,7 @@
  */
 
 import { readFile } from 'node:fs/promises'
+import { connect as connectTcp } from 'node:net'
 import { homedir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import type { LoginStorage } from '@w2l/contracts'
@@ -114,6 +115,22 @@ export async function chromeEndpoint(userDataDir: string): Promise<string> {
     throw new ChromeLoginError(`Chrome's DevToolsActivePort in ${userDataDir} is not a port and a browser path: ${ENABLE_HINT}`)
   }
   return `ws://127.0.0.1:${port.trim()}${path.trim()}`
+}
+
+/**
+ * Whether Chrome listens at `endpoint` (a ws:// address): a TCP connection opened and closed at once, with no request
+ * sent, so Chrome does not ask its Allow. A Chrome that quit, or one that has not turned remote debugging on again,
+ * refuses it.
+ */
+export function chromeReachable(endpoint: string, timeoutMs = 1_000): Promise<boolean> {
+  const { hostname, port } = new URL(endpoint)
+  return new Promise((resolve) => {
+    const socket = connectTcp({ host: hostname, port: Number(port) })
+    const done = (up: boolean) => { clearTimeout(timer); socket.destroy(); resolve(up) }
+    const timer = setTimeout(() => done(false), timeoutMs)
+    socket.once('connect', () => done(true))
+    socket.once('error', () => done(false))
+  })
 }
 
 /** `example.com`, or the host of a URL; lower case, no leading dot. */
