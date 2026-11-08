@@ -136,7 +136,7 @@ import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitF
 import type { BrowserEngineName, BrowserIdentityChoice, BrowserKeeper, CaptchaSolving, ChannelAdmission, ChannelsFiltered, InstalledChromeTestSeams, PricedExit } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
 import { agentHintsFor, withJsonHints, batchExtractionHints, batchFailureHints, batchLoginWallHint, failureGroupOf, httpLaneAskedForBrowser, mapAgentHints, MAX_AGENT_HINTS, pinnedFastModeHints, withFailure, type BatchFailures, type FailureFacts, type FastModePin, type HintOffers } from './hints.js'
-import { CHROME_RETURN_WAIT_MS, chromeReturned, ChromeQuit, HandoffNotThrough, QUIT_SETTLE_MS, LOGIN_WAIT_MS, openUserChrome, SIGN_IN_SETTLE_MS, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
+import { CHROME_RETURN_WAIT_MS, chromeReturned, ChromeQuit, HandoffNotThrough, QUIT_SETTLE_MS, LOGIN_WAIT_MS, openUserChrome, REFUSED_AT_ONCE_MS, SIGN_IN_SETTLE_MS, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
 import { ENABLE_HINT, importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
 import { sharedChrome } from './sharedChrome.js'
 import { forgetSites, listRememberedSites, rememberedSitesFile, rememberSites, watchRevoked } from './rememberedSites.js'
@@ -1751,20 +1751,34 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const chromeLost = (connection: Connected) => connection.chrome.gone() && !(connection.allowed.signal.aborted && !(connection.allowed.signal.reason instanceof ChromeQuit))
     // A page cut off as its tab went: Chrome quitting closes its tabs a moment before the connection, so the connection is given that moment.
     const quitWhileRead = async (connection: Connected) => chromeLost(connection) || (await connection.chrome.goneWithin(QUIT_SETTLE_MS) && chromeLost(connection))
-    // Waits for Chrome to come back, then connects again: the connection the pages after read on, or why not.
+    // Waits for Chrome to come back, then connects again: the connection the pages after read on, or why not. A connection
+    // Chrome refuses at once is asked for again, a second later, until the wait is up.
     const reconnect = async (lost: Connected): Promise<Opened> => {
       await lost.allowed.close()
       lost.chrome.close()
       const waitMs = userChrome!.returnWaitMs ?? CHROME_RETURN_WAIT_MS
       const waited = waitMs % 60_000 === 0 ? `${waitMs / 60_000} minute${waitMs === 60_000 ? '' : 's'}` : `${Math.round(waitMs / 1000)} s`
       const since = Date.now()
+      let back = false
+      let refused = false
       log('chrome_lost', { waitMs })
       approvalsWaiting.add(taskId)
       try {
         for (;;) {
           if (signal.aborted) return { refused: 'the batch stopped while it waited for Chrome to come back', status: 'cancelled' }
-          if (await chromeReturned(userChrome!)) break
-          if (Date.now() - since >= waitMs) return { refused: `Chrome did not come back within ${waited} after it quit or closed the connection: open Chrome with remote debugging on (${ENABLE_HINT}) and run the batch again for the pages left`, status: 'cancelled' }
+          if (await chromeReturned(userChrome!)) {
+            if (!back) { back = true; log('chrome_back', { afterMs: Date.now() - since }) }
+            const tried = Date.now()
+            const again = await connect()
+            // A Chrome just started refuses a connection at once for a moment, its debugging port already open (seen with a
+            // real Chrome, 2026-11-08): it is asked again. A refusal after a while is the person declining Chrome's Allow,
+            // and stands: asking again would ask them again.
+            if (!('refused' in again) || again.status !== 'connection_error' || Date.now() - tried >= REFUSED_AT_ONCE_MS) return again
+            // Said once: a real Chrome refused for 48 s, a connection a second (2026-11-08).
+            if (!refused) { refused = true; log('chrome_refused', { afterMs: Date.now() - since }) }
+            approvalsWaiting.add(taskId)
+            if (Date.now() - since >= waitMs) return again
+          } else if (Date.now() - since >= waitMs) return { refused: `Chrome did not come back within ${waited} after it quit or closed the connection: open Chrome with remote debugging on (${ENABLE_HINT}) and run the batch again for the pages left`, status: 'cancelled' }
           // A second between looks, cut short when the batch stops.
           await new Promise<void>((resolve) => {
             const done = () => { clearTimeout(timer); signal.removeEventListener('abort', done); resolve() }
@@ -1772,8 +1786,6 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
             signal.addEventListener('abort', done, { once: true })
           })
         }
-        log('chrome_back', { afterMs: Date.now() - since })
-        return await connect()
       } finally {
         approvalsWaiting.delete(taskId)
       }

@@ -322,6 +322,7 @@ export function connectCdp(endpoint: string, timeoutMs: number, signal?: AbortSi
     let opened = false
     let closed = false
     const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', cancel)
       socket.close()
       reject(new ChromeLoginError(`no answer from Chrome within ${Math.round(timeoutMs / 1000)} s: Chrome asks "Allow remote debugging?"; click Allow, or ${ENABLE_HINT}`))
     }, timeoutMs)
@@ -386,7 +387,11 @@ export function connectCdp(endpoint: string, timeoutMs: number, signal?: AbortSi
       clearTimeout(timer)
       for (const waiter of pending.values()) waiter.reject(new ChromeLoginError('Chrome closed the connection'))
       pending.clear()
-      if (!opened) reject(new ChromeLoginError(`Chrome did not accept the connection (Allow not clicked, or remote debugging is off): ${ENABLE_HINT}`))
+      if (!opened) {
+        // A batch waiting for Chrome asks again after a refusal, each time with its one signal: none of them is left on it.
+        signal?.removeEventListener('abort', cancel)
+        reject(new ChromeLoginError(`Chrome did not accept the connection (Allow not clicked, or remote debugging is off): ${ENABLE_HINT}`))
+      }
     }
     socket.addEventListener('close', lost)
     socket.addEventListener('error', lost)

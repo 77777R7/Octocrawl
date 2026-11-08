@@ -75,6 +75,12 @@ export class ChromeQuit extends Error {
  */
 export const QUIT_SETTLE_MS = 2_000
 
+/**
+ * A connection refused within this long after it was asked for was refused by Chrome itself, not by the person: a Chrome
+ * just started refuses one at once for a moment (2026-11-08, Chrome 156). Declining Chrome's Allow takes longer.
+ */
+export const REFUSED_AT_ONCE_MS = 1_000
+
 /** Whether the connection closes within `ms` (closed already included). */
 async function closedWithin(connection: CdpConnection, ms: number): Promise<boolean> {
   for (const until = Date.now() + ms; ;) {
@@ -226,7 +232,7 @@ export interface AllowedSites {
 }
 
 /** One step of asking the person to allow sites, for the server's log: never a page's content, only the page's own state. */
-export type ApprovalLog = (step: 'shown' | 'ready' | 'answer' | 'allowed' | 'refused' | 'remembered' | 'chrome_lost' | 'chrome_back', detail: Record<string, unknown>) => void
+export type ApprovalLog = (step: 'shown' | 'ready' | 'answer' | 'allowed' | 'refused' | 'remembered' | 'chrome_lost' | 'chrome_back' | 'chrome_refused', detail: Record<string, unknown>) => void
 
 /** The sites and the task the person is asked to allow. */
 export interface SiteScope {

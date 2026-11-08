@@ -33,9 +33,10 @@ type Answer = { answer: '' | 'allowed' | 'revoked'; active: boolean } | 'closed'
  * the first `shownFails` times the page has just moved on to another document, and the next `shownMoved` times was read on
  * another address; `quitAt`: Chrome quits as the page tab of that number (from 1) goes to its page, and takes no
  * connection until `comeBack()`; `tabsFirst`: as it quits, Chrome closes every tab 1 s before the connection, as Chrome
- * does on Cmd-Q.
+ * does on Cmd-Q; `refusedOnReturn`: once back, Chrome refuses that many connections, each after `refusedAfterMs` (at
+ * once by default), as a Chrome just started does, or as Chrome does when the person declines its Allow.
  */
-function fakeChrome(answers: Answer[], page: { href?: string; html: string; htmls?: Record<string, string>; documentStatus?: number; refuseTabs?: boolean; shown?: string; shownFails?: number; shownMoved?: number; hidden?: boolean; touched?: boolean; quitAt?: number; tabsFirst?: boolean }) {
+function fakeChrome(answers: Answer[], page: { href?: string; html: string; htmls?: Record<string, string>; documentStatus?: number; refuseTabs?: boolean; shown?: string; shownFails?: number; shownMoved?: number; hidden?: boolean; touched?: boolean; quitAt?: number; tabsFirst?: boolean; refusedOnReturn?: number; refusedAfterMs?: number }) {
   const listeners = new Map<string, (params: Record<string, unknown>) => void>()
   const written: string[] = []
   const created: string[] = []
@@ -68,8 +69,17 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; html
   let pageNavigations = 0
   // Every tab closed, the connection not yet (Chrome quitting, tabs first).
   let tabsGone = false
+  // Connections asked for, taken or not; and those Chrome still refuses since it came back.
+  let attempts = 0
+  let refusing = 0
   const connect = async (): Promise<CdpConnection> => {
+    attempts++
     if (down) throw new ChromeLoginError('Chrome did not accept the connection (Allow not clicked, or remote debugging is off)')
+    if (refusing > 0) {
+      refusing--
+      await new Promise((resolve) => setTimeout(resolve, page.refusedAfterMs ?? 0))
+      throw new ChromeLoginError('Chrome did not accept the connection (Allow not clicked, or remote debugging is off)')
+    }
     connectionClosed = false; tabsGone = false; connects++; return {
     async send(method, params, sessionId) {
       const p = (params ?? {}) as Record<string, unknown>
@@ -138,7 +148,7 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; html
     close() { connectionClosed = true },
   } }
   // quit(): Chrome closes the connection (it quit, or remote debugging was turned off).
-  return { connect, written, created, activated, backgrounded, navigated, mostOpen: () => mostOpen, live, afterClose, closed: () => connectionClosed, regionReads: () => regionReads, connects: () => connects, sent: () => sent, quit: () => { connectionClosed = true }, down: () => down, comeBack: () => { down = false } }
+  return { connect, written, created, activated, backgrounded, navigated, mostOpen: () => mostOpen, live, afterClose, closed: () => connectionClosed, regionReads: () => regionReads, connects: () => connects, sent: () => sent, quit: () => { connectionClosed = true }, down: () => down, comeBack: () => { down = false; refusing = page.refusedOnReturn ?? 0 }, attempts: () => attempts }
 }
 
 describe('the my-browser lane', () => {
@@ -643,6 +653,34 @@ describe('the my-browser lane in a batch', () => {
     for (const url of urls) expect(items[url]).toMatchObject({ status: 'success', lane: 'my_browser' })
     expect(chrome.connects()).toBe(2)
     expect(chrome.written).toHaveLength(1)
+  }, 30_000)
+
+  it('connects again when Chrome refuses the first connections at once as it starts, seen with a real Chrome', async () => {
+    const chrome = fakeChrome([{ answer: 'allowed', active: true }], { html: PAGE, quitAt: 2, refusedOnReturn: 2 })
+    const app = await setup(chrome, { logins: true })
+    const urls = ['https://site.test/a', 'https://site.test/b', 'https://site.test/c']
+    const started = await post(app, { urls, lane: 'my-browser' })
+    const id = String(started.body.id ?? started.body.taskId)
+    await quitAndComeBack(app, chrome, id)
+    const { report, items } = await settled(app, id)
+    expect(report).toMatchObject({ status: 'completed', completed: 3 })
+    for (const url of urls) expect(items[url]).toMatchObject({ status: 'success', lane: 'my_browser' })
+    expect(chrome.connects()).toBe(2)
+  }, 30_000)
+
+  it('does not connect again when Chrome refused a connection after a while: the person declined its Allow', async () => {
+    const chrome = fakeChrome([{ answer: 'allowed', active: true }], { html: PAGE, quitAt: 2, refusedOnReturn: 5, refusedAfterMs: 2_500 })
+    const app = await setup(chrome, { logins: true })
+    const urls = ['https://site.test/a', 'https://site.test/b', 'https://site.test/c']
+    const started = await post(app, { urls, lane: 'my-browser' })
+    const id = String(started.body.id ?? started.body.taskId)
+    await quitAndComeBack(app, chrome, id)
+    const before = chrome.attempts()
+    const { report, items } = await settled(app, id)
+    expect(report).toMatchObject({ status: 'completed', completed: 3, succeeded: 1 })
+    expect(items['https://site.test/c']).toMatchObject({ status: 'failed', failureReason: 'connection_error' })
+    // One connection asked for once Chrome was back, and no more: each would ask the person again.
+    expect(chrome.attempts() - before).toBe(1)
   }, 30_000)
 
   it('asks again for the sites it could not remember when Chrome comes back after it quit', async () => {
