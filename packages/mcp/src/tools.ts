@@ -851,13 +851,25 @@ function withResultsHint(name: 'get_batch' | 'wait_batch' | 'get_crawl' | 'wait_
   const { resultFiles, export: download, agentHints } = status as { resultFiles?: { jsonl?: unknown; csv?: unknown; markdown?: unknown }; export?: { url?: unknown; expiresInSeconds?: unknown }; agentHints?: unknown }
   const pages = name.endsWith('crawl') ? 'get_crawl_pages' : 'get_batch_items'
   const read = name.endsWith('crawl') ? 'get_crawl' : 'get_batch'
+  const both = `${resultFiles?.jsonl} (a page a line, as ${pages} lists them) and ${resultFiles?.csv} (a row a page, its evidence columns)`
   const hint = typeof resultFiles?.jsonl === 'string' && typeof resultFiles.csv === 'string'
-    ? `every page is on this computer: ${resultFiles.jsonl} (a page a line, as ${pages} lists them) and ${resultFiles.csv} (a row a page, its evidence columns)${typeof resultFiles.markdown === 'string' ? `, with each page's Markdown as a file of its own in ${resultFiles.markdown} (the CSV's markdown_file names it); hand those files on rather than splitting the JSONL` : ''}; ${pages} reads a few at a time`
+    ? typeof resultFiles.markdown === 'string'
+      ? `each page's Markdown is a file of its own in ${resultFiles.markdown} (the CSV's markdown_file names it): give the person that folder's path${hiddenNote(resultFiles.markdown)}, and hand those files on rather than splitting the JSONL; every page is also in ${both}; ${pages} reads a few at a time`
+      : `every page is on this computer: ${both}: give the person these paths${hiddenNote(resultFiles.jsonl)}; ${pages} reads a few at a time`
     : typeof download?.url === 'string' && typeof download.expiresInSeconds === 'number'
       ? `every page read so far downloads at export.url: one gzip JSONL file, a page a line, as ${pages} lists them; the link is good for ${linkLife(download.expiresInSeconds)}, and ${read} gives a fresh one; ${pages} reads a few at a time`
       : null
   if (hint === null) return status
   return { ...status, agentHints: [...(Array.isArray(agentHints) ? agentHints : []), hint] }
+}
+
+/**
+ * What to add when a result path runs through a hidden folder (a part starting with a dot, as the default `.w2l/api`
+ * task root) on macOS or Linux, whose file browsers do not list it, so the person reaches the files by the path alone.
+ * Nothing otherwise, a Windows path among them: Explorer hides by attribute, not by name, and lists `.w2l`.
+ */
+function hiddenNote(path: string): string {
+  return /^\/(?:[^/]*\/)*\.[^/.]/.test(path) ? ' (it is inside a hidden folder a file browser does not list, so they open it by that path)' : ''
 }
 
 /** How long a link lives, in the unit that reads well: hours from one hour, minutes below. */
