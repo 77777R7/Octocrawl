@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DeliveryStore, DeliveryWorker } from '@w2l/runtime'
+import { BROWSER_INSTALL_COMMAND, playwrightChromiumInstalled } from '@w2l/bench'
 import { createApp, injectJobWebSockets, isLoopbackAuthority } from './app.js'
 import { listSavedLogins } from './chromeLogin.js'
 import { listRememberedSites, rememberedSitesFile } from './rememberedSites.js'
@@ -25,7 +26,7 @@ export { parseListen, parsePort }
  * `close` that stops it as SIGINT does; `signals: false` leaves the process
  * signals to the caller (tests).
  */
-export async function runApiServer(argv: readonly string[], env: NodeJS.ProcessEnv = process.env, options: { signals?: boolean; log?: (line: string) => void } = {}): Promise<{ url: string; close: () => Promise<void> }> {
+export async function runApiServer(argv: readonly string[], env: NodeJS.ProcessEnv = process.env, options: { signals?: boolean; log?: (line: string) => void; chromiumInstalled?: () => boolean } = {}): Promise<{ url: string; close: () => Promise<void> }> {
   const log = options.log ?? ((line: string) => console.log(line))
   const listen = parseListen([...argv], env)
   // Patchright (an optional install) and impit (a native module) are checked to load before the server listens, not on the first page.
@@ -106,6 +107,11 @@ export async function runApiServer(argv: readonly string[], env: NodeJS.ProcessE
   } else if (listen.mode === 'local') {
     // Bound to another address, the server took a token: an MCP server elsewhere needs the machine's address and that token, not the bind address.
     log(`octocrawl: an MCP server on another machine reaches this one with W2L_API_URL=http://<this machine's address>:${port} and W2L_API_TOKEN=<the token this server was started with> (npx -y @octocrawl/mcp); Ctrl-C stops the server`)
+  }
+  // A new npx install has no Chromium: say so now, with the command, rather than on the first page that needs scripts.
+  // Only for stock Playwright's: Patchright names its own install when it loads, and a hosted server's is its image's.
+  if (listen.mode === 'local' && listen.browserEngine === 'playwright' && !(options.chromiumInstalled ?? playwrightChromiumInstalled)()) {
+    log(`octocrawl: the browser lane has no Chromium yet, so a page that needs scripts to show its content comes back thin or failed; run ${BROWSER_INSTALL_COMMAND} once`)
   }
   // Where a person first sees what this server can do for them: that the Chrome they are signed in to is one way in. The rule to ask is the agent's, in its instructions, so this says it is told to.
   if (servesLogins) {
