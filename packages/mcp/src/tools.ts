@@ -865,10 +865,11 @@ function withResultsHint(name: 'get_batch' | 'wait_batch' | 'get_crawl' | 'wait_
 
 /**
  * What to add when a result path runs through a hidden folder (a part starting with a dot, as the default `.w2l/api`
- * task root): a file browser does not list it, so the person reaches the files by the path alone. Nothing otherwise.
+ * task root) on macOS or Linux, whose file browsers do not list it, so the person reaches the files by the path alone.
+ * Nothing otherwise, a Windows path among them: Explorer hides by attribute, not by name, and lists `.w2l`.
  */
 function hiddenNote(path: string): string {
-  return /(^|[\\/])\.[^\\/.]/.test(path) ? ' (it is inside a hidden folder a file browser does not list, so they open it by that path)' : ''
+  return /^\/(?:[^/]*\/)*\.[^/.]/.test(path) ? ' (it is inside a hidden folder a file browser does not list, so they open it by that path)' : ''
 }
 
 /** How long a link lives, in the unit that reads well: hours from one hour, minutes below. */

@@ -582,6 +582,11 @@ describe('MCP tools', () => {
       expect(hint?.startsWith(start)).toBe(true)
       expect(hint).toContain('(it is inside a hidden folder a file browser does not list, so they open it by that path)')
     }
+    // Windows Explorer lists .w2l (it hides by attribute, not by name), so a Windows path gets no such note.
+    const windows = 'C:\\Users\\me\\project\\.w2l\\api\\batch-1'
+    const windowsServer = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async () => json({ taskId: 'batch-1', status: 'completed', completed: 2, requested: 2, remaining: 0, resultFiles: { jsonl: `${windows}\\results.jsonl`, csv: `${windows}\\results.csv`, markdown: `${windows}\\markdown` } })) as typeof fetch })
+    const [windowsHint] = (await callTool(windowsServer, 'wait_batch', { id: 'batch-1' }) as { agentHints: string[] }).agentHints
+    expect(windowsHint).toContain(`give the person that folder's path, and hand`)
     const hosted = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async () => json({ taskId: 'batch-1', status: 'failed', failureReason: 'credits_exhausted', completed: 1, requested: 2, remaining: 1, export: { url: 'https://storage.example/batch-1', expiresInSeconds: 86_400 } })) as typeof fetch })
     const failed = await callTool(hosted, 'get_batch', { id: 'batch-1' }) as { agentHints: string[] }
     expect(failed.agentHints).toEqual(['every page read so far downloads at export.url: one gzip JSONL file, a page a line, as get_batch_items lists them; the link is good for 24 hours, and get_batch gives a fresh one; get_batch_items reads a few at a time'])

@@ -35,7 +35,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
-- **A finished crawl or batch on your computer tells the agent to give you the folder its Markdown files are in.** The files sit under the hidden `.w2l/api/<task id>/markdown/`, which a file browser does not list, and the hint named that folder last, after the JSONL and CSV. It now names the Markdown folder first, asks the agent to give you its path, and says when the folder is hidden that you open it by that path. The files stay where they were: that folder is readable by you alone and kept out of git, because it can hold pages read with your login.
+- **A finished crawl or batch on your computer tells the agent to give you the folder its Markdown files are in.** The files sit under `.w2l/api/<task id>/markdown/`, a folder Finder and Linux file browsers do not list, and the hint named it last, after the JSONL and CSV. It now names the Markdown folder first, asks the agent to give you its path, and on macOS and Linux says the folder is hidden, so you open it by that path. The files stay where they were: the folder is kept out of git, and on macOS and Linux readable by you alone, because it can hold pages read with your login.
 
 ## 0.8.10 — 2026-11-08
 
