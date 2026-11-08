@@ -33,7 +33,7 @@ type Answer = { answer: '' | 'allowed' | 'revoked'; active: boolean } | 'closed'
  * the first `shownFails` times the page has just moved on to another document, and the next `shownMoved` times was read on
  * another address.
  */
-function fakeChrome(answers: Answer[], page: { href?: string; html: string; documentStatus?: number; refuseTabs?: boolean; shown?: string; shownFails?: number; shownMoved?: number; hidden?: boolean; touched?: boolean }) {
+function fakeChrome(answers: Answer[], page: { href?: string; html: string; htmls?: Record<string, string>; documentStatus?: number; refuseTabs?: boolean; shown?: string; shownFails?: number; shownMoved?: number; hidden?: boolean; touched?: boolean }) {
   const listeners = new Map<string, (params: Record<string, unknown>) => void>()
   const written: string[] = []
   const created: string[] = []
@@ -110,9 +110,9 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; docu
           if ((page.shownFails ?? 0) > shownTries++) throw new ChromeLoginError('Chrome refused the request: Inspected target navigated or closed')
           // The page as it shows, on the page's own address; `shownMoved` times another page, as one that moved on.
           if ((page.shownMoved ?? 0) > shownMoves++) return { result: { value: JSON.stringify({ href: 'https://site.test/moved', shown: PAGE.replace('Tide ledger', 'Another page') }) } }
-          return { result: { value: JSON.stringify({ href: hrefOf(String(sessionId).replace(/^s:/, '')), shown: page.shown ?? page.html }) } }
+          return { result: { value: JSON.stringify({ href: hrefOf(String(sessionId).replace(/^s:/, '')), shown: page.shown ?? page.htmls?.[hrefOf(String(sessionId).replace(/^s:/, ''))] ?? page.html }) } }
         }
-        return { result: { value: JSON.stringify({ href: hrefOf(String(sessionId).replace(/^s:/, '')), ready: 'complete', status: 200, html: page.html, secret: false, field: null, hidden: page.hidden === true }) } }
+        return { result: { value: JSON.stringify({ href: hrefOf(String(sessionId).replace(/^s:/, '')), ready: 'complete', status: 200, html: page.htmls?.[hrefOf(String(sessionId).replace(/^s:/, ''))] ?? page.html, secret: false, field: null, hidden: page.hidden === true }) } }
       }
       throw new Error(`unexpected ${method}`)
     },
@@ -134,7 +134,7 @@ describe('the my-browser lane', () => {
   })
 
   /** `logins`: the server keeps saved logins (W2L_SESSIONS_FILE), and remembers the sites allowed beside them. */
-  async function setup(chrome: ReturnType<typeof fakeChrome> | null, options: { hosted?: boolean; loginWaitMs?: number; hiddenWaitMs?: number; logins?: boolean } = {}) {
+  async function setup(chrome: ReturnType<typeof fakeChrome> | null, options: { hosted?: boolean; loginWaitMs?: number; hiddenWaitMs?: number; signInSettleMs?: number; logins?: boolean } = {}) {
     root = await mkdtemp(join(tmpdir(), 'w2l-my-browser-'))
     const userDataDir = join(root, 'chrome')
     await mkdir(userDataDir, { recursive: true })
@@ -143,7 +143,7 @@ describe('the my-browser lane', () => {
       taskRoot: join(root, 'tasks'),
       ...(options.logins === true ? { sessionsFile: join(root, 'logins', 'sessions.json') } : {}),
       ...(options.hosted === true ? { hosted: true } : {}),
-      ...(chrome === null ? {} : { userChrome: { userDataDir, connect: chrome.connect, ...(options.loginWaitMs === undefined ? {} : { loginWaitMs: options.loginWaitMs }), ...(options.hiddenWaitMs === undefined ? {} : { hiddenWaitMs: options.hiddenWaitMs }) } }),
+      ...(chrome === null ? {} : { userChrome: { userDataDir, connect: chrome.connect, ...(options.loginWaitMs === undefined ? {} : { loginWaitMs: options.loginWaitMs }), ...(options.hiddenWaitMs === undefined ? {} : { hiddenWaitMs: options.hiddenWaitMs }), ...(options.signInSettleMs === undefined ? {} : { signInSettleMs: options.signInSettleMs }) } }),
     })
     return createApp(engine)
   }
@@ -196,6 +196,17 @@ describe('the my-browser lane', () => {
     expect(behindChrome.activated).toEqual(['tab1'])
     expect(behindChrome.backgrounded).toEqual(['tab2'])
     expect(await scrape(behindApp, { url: 'https://site.test/a', backgroundTabs: true })).toMatchObject({ status: 400, body: { code: 'unsupported_parameter', details: { parameters: ['backgroundTabs'] } } })
+  })
+
+  it('gives a page that holds content back behind a sign-in time for the site to sign the person back in, then reads it with the line', async () => {
+    const PROMPT = PAGE.replace('</article>', '<p><strong>Log in for contact details</strong></p></article>')
+    const app = await setup(fakeChrome([{ answer: '', active: false }, { answer: 'allowed', active: true }], { html: PROMPT }), { signInSettleMs: 200 })
+    const { body } = await scrape(app, { url: 'https://site.test/a', lane: 'my-browser', debug: true })
+    expect(body).toMatchObject({ status: 'success', lane: 'my_browser' })
+    expect(body.warnings.map((w: { code: string }) => w.code)).toContain('sign_in_prompt')
+    const wait = body.trace.find((e: { event: string }) => e.event === 'user_browser_read').detail.signInWait
+    expect(wait).toMatchObject({ cleared: false, returned: false })
+    expect(wait.waitedMs).toBeGreaterThanOrEqual(200)
   })
 
   it('waits in the person\'s Chrome for the region the request\'s contract needs, and records it (ADR 0007)', async () => {
@@ -445,12 +456,12 @@ describe('the my-browser lane in a batch', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  async function setup(chrome: ReturnType<typeof fakeChrome> | null, options: { hosted?: boolean; hiddenWaitMs?: number; logins?: boolean } = {}) {
+  async function setup(chrome: ReturnType<typeof fakeChrome> | null, options: { hosted?: boolean; hiddenWaitMs?: number; signInSettleMs?: number; logins?: boolean } = {}) {
     root = await mkdtemp(join(tmpdir(), 'w2l-my-browser-batch-'))
     const userDataDir = join(root, 'chrome')
     await mkdir(userDataDir, { recursive: true })
     await writeFile(join(userDataDir, 'DevToolsActivePort'), '9222\n/devtools/browser/x\n')
-    engine = createApiEngine({ taskRoot: join(root, 'tasks'), ...(options.logins === true ? { sessionsFile: join(root, 'logins', 'sessions.json') } : {}), ...(options.hosted === true ? { hosted: true } : {}), ...(chrome === null ? {} : { userChrome: { userDataDir, connect: chrome.connect, ...(options.hiddenWaitMs === undefined ? {} : { hiddenWaitMs: options.hiddenWaitMs }) } }) })
+    engine = createApiEngine({ taskRoot: join(root, 'tasks'), ...(options.logins === true ? { sessionsFile: join(root, 'logins', 'sessions.json') } : {}), ...(options.hosted === true ? { hosted: true } : {}), ...(chrome === null ? {} : { userChrome: { userDataDir, connect: chrome.connect, ...(options.hiddenWaitMs === undefined ? {} : { hiddenWaitMs: options.hiddenWaitMs }), ...(options.signInSettleMs === undefined ? {} : { signInSettleMs: options.signInSettleMs }) } }) })
     return createApp(engine)
   }
   const post = async (app: ReturnType<typeof createApp>, body: Record<string, unknown>) => {
@@ -523,6 +534,26 @@ describe('the my-browser lane in a batch', () => {
     // Only the page that asks to allow the sites comes to the front; every page's tab opens behind the person's.
     expect(chrome.activated).toEqual(['tab1'])
     expect(chrome.backgrounded).toEqual(['tab2', 'tab3', 'tab4'])
+  }, 30_000)
+
+  it('gives a page read without the person\'s login time for the site to sign them back in, once in a batch: the pages after it are read at once until one comes with the login', async () => {
+    const PROMPT = PAGE.replace('</article>', '<p><strong>Log in for contact details</strong></p></article>')
+    // Page c comes with the login again: the page after it, d, is given the wait once more.
+    const chrome = fakeChrome([{ answer: '', active: false }, { answer: 'allowed', active: true }], { html: PROMPT, htmls: { 'https://site.test/c': PAGE } })
+    const app = await setup(chrome, { signInSettleMs: 200 })
+    const urls = ['https://site.test/a', 'https://site.test/b', 'https://site.test/c', 'https://site.test/d']
+    // Not read again for the line (retry.softBlocks 0): each page once, in order.
+    const started = await post(app, { urls, lane: 'my-browser', retry: { softBlocks: 0 } })
+    const { items } = await settled(app, started.body.id ?? started.body.taskId)
+    const waits = urls.map((url) => {
+      expect(items[url]).toMatchObject({ status: 'success', lane: 'my_browser' })
+      expect((items[url]!.warnings ?? []).some((w: { code: string }) => w.code === 'sign_in_prompt')).toBe(url !== 'https://site.test/c')
+      return items[url]!.trace.find((e: { event: string }) => e.event === 'user_browser_read').detail.signInWait
+    })
+    expect(waits[0]).toMatchObject({ cleared: false, returned: false })
+    expect(waits[0].waitedMs).toBeGreaterThanOrEqual(200)
+    expect(waits.slice(1, 3)).toEqual([undefined, undefined])
+    expect(waits[3]).toMatchObject({ cleared: false })
   }, 30_000)
 
   it('says it waits for the person while they have not allowed the sites, and no longer once they have', async () => {

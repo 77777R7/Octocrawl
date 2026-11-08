@@ -122,6 +122,75 @@ describe('the person\'s Chrome', () => {
     expect(signed.html).toBe(PAGE)
   })
 
+  describe('a page that holds content back behind a sign-in (www.english.ids-cologne.de, 2026-11-07)', () => {
+    const A = 'https://site.test/exhibitor/acme/'
+    const PROMPT = `<html><body><article><h1>Acme Dental</h1><p>Hauptstrasse 1, 50667 Cologne</p><p><strong>Log in for contact details</strong></p>${'<p>Acme makes dental instruments for clinics across Europe. </p>'.repeat(3)}</article></body></html>`
+    const SIGNED = PROMPT.replace('<p><strong>Log in for contact details</strong></p>', '<p>Phone +49 221 0000, info@acme.test</p>')
+    const quietly = { pollMs: 1, waitMs: 10_000, unattended: true }
+
+    it('is read at once without a wait for the site, as before', async () => {
+      const read = await (await openUserChrome({ userDataDir, connect: fakeChrome([at(A, PROMPT, { text: 100 })]).connect })).read(A, quietly)
+      expect(read.html).toBe(PROMPT)
+      expect(read.signInWait).toBeUndefined()
+    })
+
+    it('is given time for the site to fill in what it held back, and read once it has', async () => {
+      // The page's script signs the person back in and fills the contacts in, the tab staying on the page.
+      const chrome = fakeChrome([...Array(6).fill(at(A, PROMPT, { text: 100 })), at(A, SIGNED, { text: 120 })])
+      const read = await (await openUserChrome({ userDataDir, connect: chrome.connect })).read(A, { ...quietly, signInSettleMs: 5_000 })
+      expect(read.html).toBe(SIGNED)
+      expect(read.signInWait).toMatchObject({ cleared: true, returned: false })
+      expect(chrome.calls.filter((call) => call === 'Page.navigate@s1')).toHaveLength(1)
+    })
+
+    it('is taken back to once the site\'s single sign-on came to rest on another host, and read signed in', async () => {
+      // As on 2026-11-07: the page led the tab to the sign-on host, which ended on the account page, not back on the page.
+      const states: State[] = [...Array(3).fill(at(A, PROMPT, { text: 100 })), ...Array(3).fill(at('https://sso.other.test/sso?token=1', '<html><body></body></html>', { ready: 'loading' })), at('https://my.other.test/my-site', '<html><body><h1>Account settings</h1></body></html>')]
+      let navigations = 0
+      const chrome = fakeChrome(states, () => { if (++navigations === 2) states.push(at(A, SIGNED, { text: 120 })); return {} })
+      const read = await (await openUserChrome({ userDataDir, connect: chrome.connect })).read(A, { ...quietly, signInSettleMs: 600 })
+      expect(navigations).toBe(2)
+      expect(read.finalUrl).toBe(A)
+      expect(read.html).toBe(SIGNED)
+      expect(read.signInWait).toMatchObject({ cleared: true, returned: true })
+    })
+
+    it('is read with the line once the site did not sign the person in within the wait: a page that does not move is given the shorter wait', async () => {
+      const startedAt = Date.now()
+      const read = await (await openUserChrome({ userDataDir, connect: fakeChrome([at(A, PROMPT, { text: 100 })]).connect })).read(A, { ...quietly, signInSettleMs: 300 })
+      expect(read.html).toBe(PROMPT)
+      expect(read.signInWait).toMatchObject({ cleared: false, returned: false })
+      expect(read.signInWait!.waitedMs).toBeGreaterThanOrEqual(300)
+      expect(Date.now() - startedAt).toBeLessThan(5_000)
+      // And as its tab last showed it when it moved off the site and stayed off, taken back once: the page is never lost to the wait.
+      const away: State[] = [...Array(3).fill(at(A, PROMPT, { text: 100 })), at('https://sso.other.test/sso', '<html><body></body></html>', { ready: 'loading' })]
+      const left = await (await openUserChrome({ userDataDir, connect: fakeChrome(away).connect })).read(A, { ...quietly, signInSettleMs: 300 })
+      expect(left.html).toBe(PROMPT)
+      expect(left.finalUrl).toBe(A)
+      expect(left.signInWait).toMatchObject({ cleared: false, returned: true })
+    })
+
+    it('is read as held, not lost, when the person acts in the tab until the wait ends, or the sign-on keeps leading elsewhere on the site', async () => {
+      // They clicked in the page as it held the line: the read waits for them, then gives the page as held, not a timeout.
+      const clicked = fakeChrome([...Array(3).fill(at(A, PROMPT, { text: 100 })), at(A, PROMPT, { text: 100, active: true })])
+      const held = await (await openUserChrome({ userDataDir, connect: clicked.connect })).read(A, { pollMs: 1, waitMs: 500, unattended: true, signInSettleMs: 100 })
+      expect(held.html).toBe(PROMPT)
+      expect(held.signInWait).toMatchObject({ cleared: false })
+      // A sign-on on the site that ends on its account page each time the tab is taken back: not a redirect limit.
+      const account = fakeChrome([...Array(3).fill(at(A, PROMPT, { text: 100 })), at('https://site.test/account', PAGE)])
+      const kept = await (await openUserChrome({ userDataDir, connect: account.connect })).read(A, { ...quietly, signInSettleMs: 5_000 })
+      expect(kept.html).toBe(PROMPT)
+      expect(kept.finalUrl).toBe(A)
+      expect(kept.signInWait).toMatchObject({ cleared: false })
+    })
+
+    it('is not held on a read that waits for the person (a handoff)', async () => {
+      const read = await (await openUserChrome({ userDataDir, connect: fakeChrome([at(A, PROMPT, { text: 100, active: true })]).connect })).read(A, { pollMs: 1, waitMs: 10_000, signInSettleMs: 5_000 })
+      expect(read.html).toBe(PROMPT)
+      expect(read.signInWait).toBeUndefined()
+    })
+  })
+
   it('reads a page that is through once it has settled: its text the same length on three reads and no loading indicator (ADR 0007)', async () => {
     // x.com's timeline filling in: through from the first read, its text growing for four reads.
     const growing = [100, 200, 300, 400, 400, 400].map((text, i) => at('https://site.test/a', `${PAGE}<!--${i}-->`, { active: true, text }))
