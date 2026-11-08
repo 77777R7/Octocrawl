@@ -48,6 +48,12 @@ describe('flags', () => {
     }
   })
 
+  it('takes --login-walls-of <id> on a batch in place of URLs (login UX A4)', () => {
+    const id = '00000000-0000-4000-8000-000000000000'
+    expect(parseCommandLine('batch', ['--login-walls-of', id, '--mode', 'authed']).body).toEqual({ loginWallsOf: id, mode: 'authed' })
+    expect(usage('batch')).toContain('--login-walls-of')
+  })
+
   it('takes --lane my-browser on a scrape', () => {
     expect(parseCommandLine('scrape', ['https://example.com/', '--lane', 'my-browser']).body).toEqual({ lane: 'my-browser' })
     expect(usage('scrape')).toContain('--lane my-browser')
@@ -240,6 +246,9 @@ describe('octocrawl against a local site', () => {
     expect((await cli(['scrape', 'bücher.de/a'])).err).toBe('octocrawl scrape: "bücher.de/a" has no scheme; did you mean https://bücher.de/a?')
     expect((await cli(['batch', 'https://example.com/', 'not a url'])).err).toBe('octocrawl batch: "not a url" is not a URL: a URL starts with http:// or https://')
     expect((await cli(['batch', 'https://example.com/', 'not a url', '--ignore-invalid-urls', '--max-concurrency', '1'])).code).toBe(0)
+    // A batch of another's pages at a login wall takes no URL of its own, and names a batch of this task root.
+    expect(await cli(['batch', '--login-walls-of', '00000000-0000-4000-8000-000000000000', '--mode', 'authed'])).toMatchObject({ code: 2, err: expect.stringContaining('no batch 00000000-0000-4000-8000-000000000000') })
+    expect((await cli(['batch', '--mode', 'authed'])).err).toContain('takes URLs as arguments or --urls-file <file>')
     // Every message names the command the person types.
     expect((await cli(['bogus'])).err).toMatch(/^octocrawl: unknown command bogus/)
     // A one-off command listens nowhere: a listen address for the API server in the environment is not its concern.

@@ -191,6 +191,56 @@ describe('saved logins in the API engine', () => {
     })
   })
 
+  describe('a new batch of a finished batch\'s pages at a login wall (login UX A4)', () => {
+    const walled = (url: string): FetchResult => ({ ...page(url, 'browser_local', ''), status: 'blocked', blockReason: 'login_wall', markdown: null })
+    const open = 'https://open.example.org/page'
+    const settle = async (id: string) => {
+      let status = await engine!.getBatch(id)
+      for (let i = 0; i < 200 && !['completed', 'failed', 'cancelled'].includes(status?.status ?? ''); i++) { await new Promise((resolve) => setTimeout(resolve, 20)); status = await engine!.getBatch(id) }
+      return status!
+    }
+    // A public rung that stops at the login wall of www.example.com, and the saved login's rung, which reads past it.
+    const start = async (options: { gate?: Promise<void> } = {}) => {
+      root = await mkdtemp(join(tmpdir(), 'w2l-logins-'))
+      const sessionsFile = join(root, 'sessions.json')
+      await new FileSessionStore(sessionsFile).save({ domain: 'example.com', attestedBy: 'test', attestedAt: '2026-10-03T00:00:00.000Z', vendor: 'browser_local_authed', cookies: [{ name: 'sid', value: 'secret', domain: '.example.com', path: '/' }] })
+      const read: string[] = []
+      engine = createApiEngine({ taskRoot: join(root, 'tasks'), sessionsFile, userChrome: {}, channelsFor: (mode) => [
+        { id: 'browser_local', identity: identityBundleFrom(modeIdentity(mode)), fetch: async (url) => { await options.gate; return url === open ? page(url, 'browser_local', 'A public page with enough words to count as content for this test.') : walled(url) } },
+        ...(mode === 'authed' ? [{ id: 'authed_session' as const, identity: identityForRoute('authed', { session: true }), fetch: async (url: string) => { read.push(url); return page(url, 'browser_local_authed', 'Your orders: 3') } }] : []),
+      ] })
+      return { read }
+    }
+    const walls = ['https://www.example.com/a', 'https://www.example.com/b']
+
+    it('reads those pages alone again, with the options it is given, and the finished batch\'s hint names it', async () => {
+      const { read } = await start()
+      const first = await engine!.startBatch({ urls: [walls[0]!, open, walls[1]!] } as Parameters<ApiEngine['startBatch']>[0])
+      const status = await settle(first.taskId)
+      expect(status.agentHints?.[0]).toContain(`loginWallsOf ${first.taskId}`)
+      const again = await engine!.startBatch({ urls: [], loginWallsOf: first.taskId, mode: 'authed' } as Parameters<ApiEngine['startBatch']>[0])
+      expect(again.taskId).not.toBe(first.taskId)
+      expect(await settle(again.taskId)).toMatchObject({ status: 'completed', requested: 2, succeeded: 2 })
+      expect(read).toEqual(walls)
+      const items = (await engine!.getBatchItems(again.taskId))!.items
+      expect(items.map((item) => [item.url, item.status])).toEqual([[walls[0], 'success'], [walls[1], 'success']])
+    })
+
+    it('refuses a batch still running, one with no page at a login wall, and an id it does not know, saying which', async () => {
+      let release!: () => void
+      await start({ gate: new Promise<void>((resolve) => { release = resolve }) })
+      const running = await engine!.startBatch({ urls: [walls[0]!] } as Parameters<ApiEngine['startBatch']>[0])
+      const again = (id: string) => engine!.startBatch({ urls: [], loginWallsOf: id, mode: 'authed' } as Parameters<ApiEngine['startBatch']>[0])
+      await expect(again(running.taskId)).rejects.toThrow(`batch ${running.taskId} is still running`)
+      release()
+      await settle(running.taskId)
+      const clean = await engine!.startBatch({ urls: [open] } as Parameters<ApiEngine['startBatch']>[0])
+      await settle(clean.taskId)
+      await expect(again(clean.taskId)).rejects.toThrow(`batch ${clean.taskId} has no page that stopped at a login wall`)
+      await expect(again('00000000-0000-4000-8000-000000000000')).rejects.toThrow('no batch 00000000-0000-4000-8000-000000000000')
+    })
+  })
+
   it('other modes never load a saved login', async () => {
     const { seen } = await setup()
     const res = await engine!.scrape({ url: URL_ })

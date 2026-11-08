@@ -337,10 +337,9 @@ const HOSTED_ACTIVE_CRAWLS_DESCRIPTION = 'List this account\'s crawls that are q
 /** get_scrape as hosted serves it: a record is swept HOSTED_RECORD_TTL_MS after its scrape, and answered without its telemetry (withoutTelemetry). */
 const HOSTED_GET_SCRAPE_DESCRIPTION = `Read one scrape call's record by its scrapeId (metadata.scrapeId on the response): the request, the verdict, metadata, warnings and hints; no page body. Kept ${HOSTED_RECORD_TTL_MS / 60_000} minutes.`
 
-/** A start tool's local description less what hosted does not serve: appendToId, actions, and an unstated retention (HOSTED_JOB_NOTE states it). */
+/** A start tool's local description less what hosted does not serve: actions, and an unstated retention (HOSTED_JOB_NOTE states it). */
 function hostedStartDescription(description: string): string {
   return description
-    .replace(' appendToId adds the urls to an existing batch;', '')
     .replace(', actions and the rest', ' and the rest')
     .replace(/ How long the server keeps (them|the results) is not stated\./, '')
 }
@@ -356,6 +355,8 @@ function hostedJobTool(tool: (typeof TOOLS)[number], browser: boolean) {
     // REST takes a webhook (H2 W1); a tool does not offer one yet, since its secret would land in the agent's transcript.
     for (const key of Object.keys(schema.properties)) if (!allowed.has(key) || key === 'webhook' || (!browser && key === 'waitFor')) delete schema.properties[key]
     if (tool.name === 'crawl' && schema.properties.maxPages) schema.properties.maxPages = { ...schema.properties.maxPages, maximum: JOB_MAX_CRAWL_PAGES }
+    // Locally a batch may take its URLs from another's pages at a login wall (loginWallsOf) instead; hosted reads as nobody, so it takes urls alone.
+    if (tool.name === 'batch_scrape') schema.required = ['urls']
     // A slice reads JOB_WORKER_COUNT pages at once; the start lowers a larger maxConcurrency to it (hostedJobRoutes.ts). Locally the
     // schema has no ceiling, since a server lowers it to its own worker count (docs/launch/2026-11-05-batch-concurrency-plan.md D4).
     if (schema.properties.maxConcurrency) schema.properties.maxConcurrency = { ...schema.properties.maxConcurrency, maximum: JOB_WORKER_COUNT }
