@@ -33,9 +33,9 @@
  * address is Chrome's, not what the page's script says.
  */
 
-import { extractTf } from '@w2l/extract-tf'
+import { extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 import { classifyGate, type GateVerdict } from '@w2l/http-core'
-import { isLoginPath, LOADING_PROBE, REGION_WAIT_MAX_MS, RegionTracker, sessionCoversHost, STEADY_WAIT_MAX_MS, type RegionSpec, type SteadyOutcome, type UserBrowserRead } from '@w2l/bench'
+import { contentHeldBack, isLoginPath, LOADING_PROBE, REGION_WAIT_MAX_MS, RegionTracker, sessionCoversHost, STEADY_WAIT_MAX_MS, type RegionSpec, type SteadyOutcome, type UserBrowserRead } from '@w2l/bench'
 import { chromeEndpoint, chromeUserDataDir, ChromeLoginError, connectCdp, type CdpConnection } from './chromeLogin.js'
 import { scopePage } from './scopePage.js'
 
@@ -50,6 +50,8 @@ export interface UserChromeOptions {
   hiddenWaitMs?: number
   /** Replaces a read's loginWaitMs (a test shortens it). */
   loginWaitMs?: number
+  /** Replaces a read's signInSettleMs (a test shortens it). */
+  signInSettleMs?: number
 }
 
 export interface UserChromeReadOptions {
@@ -63,6 +65,15 @@ export interface UserChromeReadOptions {
    * the read waits on to `waitMs`. Default: no such limit.
    */
   loginWaitMs?: number
+  /**
+   * How long a page that is ready to read but holds content back behind a sign-in ("Log in for contact details", the
+   * line a `sign_in_prompt` warning names) gives the site to sign the person back in by itself, as a site with a single
+   * sign-on does a few seconds after the page came: its script fills the content in, or leads the tab through the
+   * sign-on host, which may end elsewhere (the account page), and W2L takes the tab back to the page once. A page whose
+   * tab does not move is given SIGN_IN_QUIET_MS of it; one whose tab moved, all of it. Then the page is read as it is,
+   * the line and all. Only a read without the person (`unattended`). Default 0: read at once.
+   */
+  signInSettleMs?: number
   /** Told once, when the page shows a check the person has to pass. */
   onWaiting?: (url: string, check: string) => void
   /** Told once, when the page shows no check and W2L waits for the person to click on it to have it read. */
@@ -136,6 +147,18 @@ export const HIDDEN_WAIT_MS = 30_000
 
 /** How long a sign-in nobody acts on holds a scrape in the person's Chrome: a read of it is the whole of what its caller is waiting for, and the caller can tell them. Long enough to get to the tab and start. */
 export const LOGIN_WAIT_MS = 90_000
+/**
+ * How long the my-browser lane gives a site to sign the person back in by itself (signInSettleMs). www.english.ids-cologne.de
+ * did so on 2026-11-07 with its login lapsed: its exhibitor page came saying "Log in for contact details", within 6 s its script
+ * led the tab to my.koelnmesse.io's single sign-on, which signed the person in again with their Google account and ended
+ * on the account page about 40 s after the page came, in a tab behind the person's; opened again, the page filled the
+ * contacts in by itself within 11 s.
+ */
+export const SIGN_IN_SETTLE_MS = 60_000
+/** How long, of signInSettleMs, a page whose tab does not move is given to fill in what it held back. */
+export const SIGN_IN_QUIET_MS = 15_000
+/** How long the tab rests on one page off the site, during signInSettleMs, before W2L takes it back to the page: the sign-on has ended there. */
+const SIGN_IN_REST_MS = 5_000
 /** Times W2L takes the tab back to the page asked for when the person's way through ended elsewhere on the site (a home page after a sign-in). */
 const RETURNS = 2
 /** A document answered with one of these is a check, whatever its body. */
@@ -279,6 +302,7 @@ export async function openUserChrome(options: UserChromeOptions = {}, signal?: A
       ...readOptions,
       ...(options.hiddenWaitMs === undefined || readOptions.hiddenWaitMs !== undefined ? {} : { hiddenWaitMs: options.hiddenWaitMs }),
       ...(options.loginWaitMs === undefined || readOptions.loginWaitMs === undefined ? {} : { loginWaitMs: options.loginWaitMs }),
+      ...(options.signInSettleMs === undefined || readOptions.signInSettleMs === undefined ? {} : { signInSettleMs: options.signInSettleMs }),
     }),
     readList: (url, readOptions) => readList(connection, browser, url, readOptions),
     allow: (scope, allowOptions = {}) => allowSites(connection, scope, allowOptions),
@@ -595,6 +619,13 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
     let last: { state: PageState; response: DocumentResponse | null } | null = null
     // Since when the tab has been on a sign-in page nobody has acted on, with loginWaitMs.
     let loginSince: number | null = null
+    // A page held for the site to sign the person back in (signInSettleMs): its last read, when the hold began and when
+    // its time last started (again after a return), the document and address it was held on and the person's act then,
+    // whether the tab has moved since and been taken back, and the page off the site it rests on and since when.
+    const signInSettleMs = options.unattended === true ? options.signInSettleMs ?? 0 : 0
+    let signIn: { read: UserBrowserRead; first: number; since: number; documents: number; href: string; act: string | null; moved: boolean; returned: boolean; restAt: string; restSince: number } | null = null
+    // The page as last held, with the line: what the read gives once the site did not sign the person back in.
+    const heldRead = (held: NonNullable<typeof signIn>): UserBrowserRead => ({ ...held.read, wallMs: Date.now() - started, signInWait: { waitedMs: Date.now() - held.first, cleared: false, returned: held.returned } })
     // With shownOnly, since when a page ready to read has waited for its tab to come in sight, and how long it waited once it did.
     let hiddenWaitSince: number | null = null
     let hiddenWaited: number | undefined
@@ -666,6 +697,36 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
           throw new HandoffNotThrough(`${url} asked for a sign-in in your Chrome and nobody acted on it for ${Math.round(options.loginWaitMs / 1000)} s: its tab stays open there`, 'login_wall')
         }
       } else loginSince = null
+      // A page held for the site to sign the person back in: taken back to once the tab came to rest off the site, where
+      // the sign-on ended (an account page), once; read as last held when its time is up, the line and all. A person
+      // acting in the tab meanwhile is signing in themselves: the read waits for them as for any other.
+      if (signIn !== null) {
+        const now = Date.now()
+        signIn.moved ||= heard.documents !== signIn.documents || state.href !== signIn.href
+        const quietMs = Math.min(SIGN_IN_QUIET_MS, signInSettleMs)
+        const limit = signIn.returned || !signIn.moved ? quietMs : signInSettleMs
+        const acting = heard.act !== null && signIn.act === null
+        const off = !sameSite(state.href, host)
+        const back = (): void => {
+          signIn!.returned = true
+          signIn!.since = Date.now()
+          returns++
+          documentsAtReturn = heard.documents
+          clear = 0
+          open(true)
+        }
+        if (now - started + pollMs >= waitMs || (!acting && now - signIn.since >= limit)) {
+          if ((off || pageOf(state.href) !== pageOf(signIn.href)) && !signIn.returned && !acting && now - started + pollMs < waitMs) { back(); continue }
+          kept = true
+          return { read: heldRead(signIn), tab: { targetId, sessionId, stops } }
+        }
+        if (off && !signIn.returned && !acting && state.ready === 'complete' && state.loading !== true && !state.secret && state.href === signIn.restAt) {
+          if (now - signIn.restSince >= Math.min(SIGN_IN_REST_MS, quietMs)) { back(); continue }
+        } else {
+          signIn.restAt = off ? state.href : ''
+          signIn.restSince = now
+        }
+      }
       const typing = state.field !== null && field !== undefined && state.field !== field
       field = state.field
       // The page asked for: the URL, or where it leads when W2L opens it; after a return, once its document has come.
@@ -687,6 +748,8 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
       // Through, but elsewhere on the site (a sign-in that ends on the home page): the tab goes back to the page asked for.
       if (!asked) {
         if (returns >= RETURNS) {
+          // A page held for the site to sign the person back in is read as it was held, not lost to where the sign-on led.
+          if (signIn !== null) { kept = true; return { read: heldRead(signIn), tab: { targetId, sessionId, stops } } }
           // "You got through" only when there was a check and the person acted in the tab; a check that cleared by itself is not theirs.
           const where = sawGate !== null && heard.act !== null ? `after you got through, the tab stayed on ${pageOf(state.href)}` : `each time Octocrawl took the tab back to it, the site led it on to ${pageOf(state.href)}`
           throw new HandoffNotThrough(`${url} was not read: ${where}, not the page asked for`, sawGate, 'elsewhere')
@@ -782,8 +845,7 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
           }
         }
       }
-      kept = true
-      return { read: {
+      const read: UserBrowserRead = {
         requestedUrl: url,
         finalUrl: state.href,
         status,
@@ -801,8 +863,25 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
         ...(hiddenWaitMs === undefined ? {} : { hiddenWaitMs }),
         ...(shownWhileHidden === undefined ? {} : { shownWhileHidden }),
         ...(options.background === true ? { background: true } : {}),
-      }, tab: { targetId, sessionId, stops } }
+      }
+      // Ready, but holding content back behind a sign-in: the site may sign the person back in by itself (signInSettleMs).
+      if (signInSettleMs > 0) {
+        const line = heldBack(html, state.href, options) ?? (shownWhileHidden === undefined ? null : heldBack(shownWhileHidden, state.href, options))
+        if (line !== null) {
+          const now = Date.now()
+          if (signIn === null) signIn = { read, first: now, since: now, documents: heard.documents, href: state.href, act: heard.act, moved: false, returned: false, restAt: '', restSince: now }
+          else signIn.read = read
+          // Filled in by its script, the page settles again before it is read.
+          settleSince = null
+          loadingSeen = false
+          continue
+        }
+      }
+      kept = true
+      return { read: signIn === null ? read : { ...read, signInWait: { waitedMs: Date.now() - signIn.first, cleared: true, returned: signIn.returned } }, tab: { targetId, sessionId, stops } }
     }
+    // A page held for the site to sign the person back in is read as it was held when the wait ends, wherever the tab is.
+    if (signIn !== null) { kept = true; return { read: heldRead(signIn), tab: { targetId, sessionId, stops } } }
     // The check still holding the page when the wait ended: what the read is blocked by, which an earlier response
     // alone may not name (a document answered 403 is `http_403` until the page shows whose check it is).
     const holding = last === null ? null : stillGated(last, options)
@@ -863,6 +942,12 @@ function onLoginPath(href: string, asked: string): boolean {
   } catch {
     return false
   }
+}
+
+/** The line of a page ready to read that holds content back behind a sign-in (contentHeldBack), in its main content as the read finds it, or null. */
+function heldBack(html: string, href: string, options: UserChromeReadOptions): string | null {
+  const extracted = extractTf.extract(html, { url: href, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags, blockAds: options.blockAds })
+  return contentHeldBack(htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl }))
 }
 
 /** A page's path and query, without a trailing slash or the fragment: the page an address names, on whichever host of the site. */
