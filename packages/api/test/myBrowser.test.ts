@@ -32,9 +32,10 @@ type Answer = { answer: '' | 'allowed' | 'revoked'; active: boolean } | 'closed'
  * refuses to open the page's tab; `shown`: the page as it shows, without what it hides (the whole `html` without it), which
  * the first `shownFails` times the page has just moved on to another document, and the next `shownMoved` times was read on
  * another address; `quitAt`: Chrome quits as the page tab of that number (from 1) goes to its page, and takes no
- * connection until `comeBack()`.
+ * connection until `comeBack()`; `tabsFirst`: as it quits, Chrome closes every tab 1 s before the connection, as Chrome
+ * does on Cmd-Q.
  */
-function fakeChrome(answers: Answer[], page: { href?: string; html: string; htmls?: Record<string, string>; documentStatus?: number; refuseTabs?: boolean; shown?: string; shownFails?: number; shownMoved?: number; hidden?: boolean; touched?: boolean; quitAt?: number }) {
+function fakeChrome(answers: Answer[], page: { href?: string; html: string; htmls?: Record<string, string>; documentStatus?: number; refuseTabs?: boolean; shown?: string; shownFails?: number; shownMoved?: number; hidden?: boolean; touched?: boolean; quitAt?: number; tabsFirst?: boolean }) {
   const listeners = new Map<string, (params: Record<string, unknown>) => void>()
   const written: string[] = []
   const created: string[] = []
@@ -65,12 +66,15 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; html
   // Chrome is not running (it quit): no connection is taken.
   let down = false
   let pageNavigations = 0
+  // Every tab closed, the connection not yet (Chrome quitting, tabs first).
+  let tabsGone = false
   const connect = async (): Promise<CdpConnection> => {
     if (down) throw new ChromeLoginError('Chrome did not accept the connection (Allow not clicked, or remote debugging is off)')
-    connectionClosed = false; connects++; return {
+    connectionClosed = false; tabsGone = false; connects++; return {
     async send(method, params, sessionId) {
       const p = (params ?? {}) as Record<string, unknown>
       if (connectionClosed) { afterClose.push(method); throw new ChromeLoginError('Chrome closed the connection') }
+      if (tabsGone && (sessionId !== undefined || method === 'Target.getTargetInfo')) throw new ChromeLoginError('Target closed: Chrome detached the tab\'s session (the tab was closed)')
       sent++
       if (method === 'Browser.getVersion') return { product: 'Chrome/144.0.7000.0' }
       if (method === 'Target.createTarget' && page.refuseTabs === true && targets >= 1) throw new ChromeLoginError('Chrome refused the request: Failed to open a new tab')
@@ -78,7 +82,13 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; html
       if (method === 'Target.createTarget') { const id = `tab${++targets}`; kinds.set(id, 'page'); created.push(id); live.add(id); if (p.background === true) backgrounded.push(id); return { targetId: id } }
       if (method === 'Target.attachToTarget') return { sessionId: `s:${String(p.targetId)}` }
       if (method === 'Page.navigate') {
-        if (page.quitAt === ++pageNavigations) { connectionClosed = true; down = true; throw new ChromeLoginError('Chrome closed the connection') }
+        if (page.quitAt === ++pageNavigations) {
+          down = true
+          if (page.tabsFirst !== true) { connectionClosed = true; throw new ChromeLoginError('Chrome closed the connection') }
+          tabsGone = true
+          setTimeout(() => { connectionClosed = true }, 1_000)
+          throw new ChromeLoginError('Target closed: Chrome detached the tab\'s session (the tab was closed)')
+        }
         const target = String(sessionId).replace(/^s:/, '')
         if (!navigated.has(target) && live.has(target)) mostOpen = Math.max(mostOpen, ++open)
         navigated.set(target, String(p.url))
@@ -87,7 +97,7 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; html
       }
       if (method === 'Target.closeTarget') { if (navigated.has(String(p.targetId)) && live.has(String(p.targetId))) open--; live.delete(String(p.targetId)); return {} }
       if (method === 'Target.activateTarget') { activated.push(String(p.targetId)); return {} }
-      if (method === 'Network.enable' || method === 'Page.enable') return {}
+      if (method === 'Network.enable' || method === 'Page.enable' || method === 'Runtime.enable' || method === 'Runtime.addBinding') return {}
       if (method === 'Page.createIsolatedWorld') return { executionContextId: 7 }
       if (method === 'Runtime.evaluate' && String(p.expression).includes('document.write')) kinds.set(String(sessionId).replace(/^s:/, ''), 'scope')
       const kind = kinds.get(String(sessionId ?? p.targetId).replace(/^s:/, ''))
@@ -619,6 +629,20 @@ describe('the my-browser lane in a batch', () => {
     expect(chrome.connects()).toBe(2)
     expect(chrome.written).toHaveLength(1)
     expect(items['https://site.test/b']!.evidenceRecord.access.allowance).toMatchObject({ basis: 'remembered' })
+  }, 30_000)
+
+  it('reads on as well when Chrome closes its tabs a moment before the connection as it quits', async () => {
+    const chrome = fakeChrome([{ answer: '', active: false }, { answer: 'allowed', active: true }], { html: PAGE, quitAt: 2, tabsFirst: true })
+    const app = await setup(chrome, { logins: true })
+    const urls = ['https://site.test/a', 'https://site.test/b', 'https://site.test/c']
+    const started = await post(app, { urls, lane: 'my-browser' })
+    const id = String(started.body.id ?? started.body.taskId)
+    await quitAndComeBack(app, chrome, id)
+    const { report, items } = await settled(app, id)
+    expect(report).toMatchObject({ status: 'completed', completed: 3 })
+    for (const url of urls) expect(items[url]).toMatchObject({ status: 'success', lane: 'my_browser' })
+    expect(chrome.connects()).toBe(2)
+    expect(chrome.written).toHaveLength(1)
   }, 30_000)
 
   it('asks again for the sites it could not remember when Chrome comes back after it quit', async () => {

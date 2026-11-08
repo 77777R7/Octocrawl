@@ -136,7 +136,7 @@ import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitF
 import type { BrowserEngineName, BrowserIdentityChoice, BrowserKeeper, CaptchaSolving, ChannelAdmission, ChannelsFiltered, InstalledChromeTestSeams, PricedExit } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
 import { agentHintsFor, withJsonHints, batchExtractionHints, batchFailureHints, batchLoginWallHint, failureGroupOf, httpLaneAskedForBrowser, mapAgentHints, MAX_AGENT_HINTS, pinnedFastModeHints, withFailure, type BatchFailures, type FailureFacts, type FastModePin, type HintOffers } from './hints.js'
-import { CHROME_RETURN_WAIT_MS, chromeReturned, ChromeQuit, HandoffNotThrough, LOGIN_WAIT_MS, openUserChrome, SIGN_IN_SETTLE_MS, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
+import { CHROME_RETURN_WAIT_MS, chromeReturned, ChromeQuit, HandoffNotThrough, QUIT_SETTLE_MS, LOGIN_WAIT_MS, openUserChrome, SIGN_IN_SETTLE_MS, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
 import { ENABLE_HINT, importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
 import { sharedChrome } from './sharedChrome.js'
 import { forgetSites, listRememberedSites, rememberedSitesFile, rememberSites, watchRevoked } from './rememberedSites.js'
@@ -1749,6 +1749,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // Chrome closed the connection, and nothing the person did stopped the run first: Revoke or closing Octocrawl's page
     // (in Chrome, before it quit), or `octocrawl login revoke`.
     const chromeLost = (connection: Connected) => connection.chrome.gone() && !(connection.allowed.signal.aborted && !(connection.allowed.signal.reason instanceof ChromeQuit))
+    // A page cut off as its tab went: Chrome quitting closes its tabs a moment before the connection, so the connection is given that moment.
+    const quitWhileRead = async (connection: Connected) => chromeLost(connection) || (await connection.chrome.goneWithin(QUIT_SETTLE_MS) && chromeLost(connection))
     // Waits for Chrome to come back, then connects again: the connection the pages after read on, or why not.
     const reconnect = async (lost: Connected): Promise<Opened> => {
       await lost.allowed.close()
@@ -1792,9 +1794,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         // The task's cancel, or this engine shutting down, ends the read; the page's own timeout does not: the person's time is theirs.
         let read: FetchResult
         try { read = await readAllowed(connection.chrome, connection.allowed, url, fetchOpts, undefined, {}, AbortSignal.any([signal, ...(context?.signal === undefined ? [] : [context.signal])]), started, hiddenWaitedOut ? 0 : undefined, undefined, backgroundTabs, signedOut ? undefined : SIGN_IN_SETTLE_MS) }
-        catch (error) { if (chromeLost(connection)) continue; throw error }
+        catch (error) { if (await quitWhileRead(connection)) continue; throw error }
         // Chrome quit while the page was read: it is read again once Chrome is back, not answered as cut off.
-        if (!CONTENTFUL_STATUS.has(read.status) && chromeLost(connection)) continue
+        if (!CONTENTFUL_STATUS.has(read.status) && (chromeLost(connection) || ((read.status === 'cancelled' || read.failureReason === 'connection_error') && await quitWhileRead(connection)))) continue
         if (read.warnings?.some((warning) => warning.code === 'page_read_hidden') === true) hiddenWaitedOut = true
         if (CONTENTFUL_STATUS.has(read.status)) signedOut = readSignedOut(read)
         return { result: read, links: read.links ?? [] }
