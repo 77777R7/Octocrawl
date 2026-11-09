@@ -434,6 +434,12 @@ a:hover{color:#fff}
 .receipt-copy:hover{border-color:var(--orange);color:#c4441c}
 .receipt-final{margin:-6px 0 10px;overflow:hidden;color:#6d6553;font-size:12px;text-overflow:ellipsis;white-space:nowrap}
 .pg-next{margin-top:6px;color:#ffcf6b}
+.pg-help{margin:0 0 14px;padding:12px 14px;border:1px solid rgba(255,207,107,.45);border-radius:10px}
+.pg-help .pg-help-title{margin:0;font-weight:700}
+.pg-help .pg-help-text{margin:4px 0 0;font-size:13.5px;line-height:1.5;opacity:.85}
+.pg-help-actions{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:10px}
+.pg-help-actions .pg-link{margin-left:0;font-size:12.5px;text-decoration:none}
+.pg-help-actions .pg-link:hover{text-decoration:underline}
 .receipt dd.unknown{color:#8d846f;font-style:italic}
 .receipt dd.wrap{white-space:normal;overflow-wrap:anywhere}
 @media (prefers-reduced-motion:no-preference){
