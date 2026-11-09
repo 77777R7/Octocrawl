@@ -141,6 +141,9 @@ describe('the person\'s Chrome', () => {
       expect(read.html).toBe(SIGNED)
       expect(read.signInWait).toMatchObject({ cleared: true, returned: false })
       expect(chrome.calls.filter((call) => call === 'Page.navigate@s1')).toHaveLength(1)
+      // Seen at the page alone, never taken back: the read names no way to it.
+      expect(read.hops).toBeUndefined()
+      expect(read.returns).toBeUndefined()
     })
 
     it('is taken back to once the site\'s single sign-on came to rest on another host, and read signed in', async () => {
@@ -153,6 +156,24 @@ describe('the person\'s Chrome', () => {
       expect(read.finalUrl).toBe(A)
       expect(read.html).toBe(SIGNED)
       expect(read.signInWait).toMatchObject({ cleared: true, returned: true })
+      // The way it went, other sites by their host alone (a sign-on's path and query carry its token): where the tab was
+      // led, and the one time it was taken back.
+      expect(read.hops).toEqual([A, 'https://sso.other.test', 'https://my.other.test', A])
+      expect(read.returns).toBe(1)
+    })
+
+    it('says where the tab was led while it waited out of sight, though the page was signed in by the time it was read', async () => {
+      // As on 2026-11-08: a tab out of sight waited 30 s for the person, the sign-on came and went meanwhile, and the read
+      // could not tell whether the site had signed the person back in.
+      const hidden = { text: 100, hidden: true }
+      // A sign-on on the site itself with its session in the path (`;jsessionid=`): named without it.
+      const states: State[] = [at(A, PROMPT, hidden), at(A, PROMPT, hidden), at('https://sso.other.test/auth/abc123?token=1', '<html><body></body></html>', { ready: 'loading', hidden: true }), at('https://site.test/login;jsessionid=ABC123?x=1', '<html><body></body></html>', { ready: 'loading', hidden: true }), at(A, SIGNED, { text: 120, hidden: true }), at(A, SIGNED, { text: 120, hidden: true }), at(A, SIGNED, { text: 120 })]
+      const read = await (await openUserChrome({ userDataDir, connect: fakeChrome(states).connect })).read(A, { ...quietly, shownOnly: true, hiddenWaitMs: 5_000, signInSettleMs: 5_000 })
+      expect(read.html).toContain('info@acme.test')
+      expect(read.signInWait).toBeUndefined()
+      expect(read.hops).toEqual([A, 'https://sso.other.test', 'https://site.test/login', A])
+      expect(JSON.stringify(read.hops)).not.toMatch(/abc123|ABC123|token/)
+      expect(read.returns).toBeUndefined()
     })
 
     it('is read with the line once the site did not sign the person in within the wait: a page that does not move is given the shorter wait', async () => {
