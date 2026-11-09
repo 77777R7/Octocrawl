@@ -144,6 +144,16 @@ describe('agent hints', () => {
       expect(batchLoginWallHint(urls('a.test'), {}, { savedLogins: true, scriptAction: true })).toContain('send the batch without its executeJavascript action, which mode authed refuses, and ask the person first')
     })
 
+    it('names the batch for a new one of those pages alone (loginWallsOf), on each route', () => {
+      const hint = batchLoginWallHint(urls('a.test'), { id: 'b-1' }, { personChrome: true, savedLogins: true })
+      expect(hint).toContain('a new batch with loginWallsOf b-1 with lane my-browser in mode standard')
+      expect(hint).toContain('a new batch with loginWallsOf b-1 in mode authed, after import_login a.test')
+      expect(batchLoginWallHint(urls('a.test'), { id: 'b-1', webhook: true }, { savedLogins: true })).toContain('a new batch with loginWallsOf b-1, without a webhook, in mode authed')
+      expect(batchLoginWallHint(urls('a.test', 'a.test'), { id: 'b-1', lane: 'my-browser' }, { personChrome: true })).toBe('2 pages of a.test asked for a login in the person\'s own Chrome too: ask them to sign in there, then read those pages again (a new batch with loginWallsOf b-1 and lane my-browser)')
+      // Hosted runs no such batch: it reads as nobody.
+      expect(batchLoginWallHint(urls('a.test'), { id: 'b-1' }, { hosted: true })).not.toContain('loginWallsOf')
+    })
+
     it('on a server with neither route, and on a hosted one, names none as its own', () => {
       expect(batchLoginWallHint(urls('a.test'), {}, {})).toBe('1 page of a.test asked for a login; this server reads no saved login and no Chrome of the person\'s; on their own computer Octocrawl reads it as them, after asking them (npx octocrawl serve, then lane my-browser, or octocrawl login import a.test and mode authed)')
       const hosted = batchLoginWallHint(urls('a.test'), {}, { hosted: true })

@@ -25,6 +25,7 @@ import {
   throwIfExecutionStopped,
   classifyFetchFailure,
   evaluateGovernance,
+  isLoginPath,
   LADDER_CONTINUES_FAILURE_CLASS,
   type CrawlPolicy,
   type RoutingFailureClass,
@@ -2002,9 +2003,8 @@ function safeHost(url: string): string {
   }
 }
 
-/** A path segment that is a login endpoint (`/login`, `/users/sign_in`, `/ap/signin`, `/login.php`, `/authwall`), not a slug that mentions one. */
-const LOGIN_SEGMENT = /^(?:log[-_]?in|sign[-_]?in|sign[-_]?on|authwall|servicelogin)(?:\.(?:php|aspx?|html?|jsp))?$/i
-export const isLoginPath = (pathname: string): boolean => pathname.split('/').some((segment) => LOGIN_SEGMENT.test(segment))
+/** The gate's own reading of a login path, which the API's my-browser lane takes from here. */
+export { isLoginPath }
 
 /**
  * A page's own request to sign in, as a line begins: to see it, to go on, or

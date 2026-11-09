@@ -14,7 +14,8 @@
  * In that mode only *decisive* challenge evidence counts: vendor headers,
  * Cloudflare managed-challenge plumbing, or the interstitial copy pair.
  * Captcha widgets, login forms, and weak bot phrases stay ignored so a real
- * article that embeds a widget is not blocked. Non-contentful responses still
+ * article that embeds a widget is not blocked; a short page that is itself a
+ * sign-in page at a login path (signInPage) is the exception. Non-contentful responses still
  * use the full classifier.
  *
  * Honesty rules, mirroring the page-type router's signal discipline:
@@ -190,6 +191,9 @@ const LOGIN_INTENT_PHRASES: readonly string[] = [
 const PASSWORD_INPUT = /<input[^>]+type\s*=\s*["']?password/i
 const TITLE_OR_H1 = /<(?:title|h1)\b[^>]*>([\s\S]{0,200}?)<\/(?:title|h1)>/gi
 const BARE_LOGIN_HEADING = /^\s*(?:sign|log)\s*-?\s*in\b/i
+/** A path segment that is a login endpoint (`/login`, `/users/sign_in`, `/ap/signin`, `/login.php`, `/authwall`), not a slug that mentions one. */
+const LOGIN_SEGMENT = /^(?:log[-_]?in|sign[-_]?in|sign[-_]?on|authwall|servicelogin)(?:\.(?:php|aspx?|html?|jsp))?$/i
+export const isLoginPath = (pathname: string): boolean => pathname.split('/').some((segment) => LOGIN_SEGMENT.test(segment))
 
 const GEO_MARKERS: readonly (readonly [marker: string, signal: string])[] = [
   ['not available in your country', 'geo_not_in_country'],
@@ -353,7 +357,7 @@ function headingTexts(body: string): string[] {
  *
  * On a contentful 200, only decisive challenge evidence may override success.
  * Weak markers, widgets, and login forms stay null so an article that mentions
- * captcha or embeds a widget is not blocked.
+ * captcha or embeds a widget is not blocked; a short sign-in page at a login path is named.
  */
 export function classifyGate(res: GateResponse): GateVerdict | null {
   // No response at all means a transport error, not a gate. Nothing to read.
@@ -487,7 +491,7 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
   // sit behind a page's worth of scripts (ROADMAP PA item 4). Decisive on a page read as content; on one that was not, a
   // captcha or a login form on it names the gate first, since a person can get through those.
   const wall = res.status >= 200 && res.status < 300 ? shortWallPage(res.body) : null
-  if (contentful) return wall
+  if (contentful) return wall ?? (res.status >= 200 && res.status < 300 ? signInPage(res.body, res.finalUrl) : null)
 
   // --- interactive captcha widget ----------------------------------------
   // Reached only when no Cloudflare managed-challenge marker fired, so a
@@ -691,6 +695,27 @@ function shortWallPage(body: string): GateVerdict | null {
   const weak = matched(shown, WALL_WEAK_MARKERS)
   if (weak.length >= 2 && matched(named, WALL_WEAK_MARKERS).length > 0) return bot([...weak, 'short_page'])
   return null
+}
+
+/** PASSWORD_INPUT read over a whole page: a tag's attributes end at its next `<` or `>`, so each character is read once. */
+const PASSWORD_FIELD = /<input\b[^<>]*?\btype\s*=\s*["']?password/i
+
+/**
+ * A sign-in page read as content, or null: a short page (WALL_PAGE_MAX_TEXT) at a login path (isLoginPath), which a
+ * sign-in title or h1 names (BARE_LOGIN_HEADING) and which carries a password field. GitHub's /notifications and
+ * /settings pages signed out redirected to its sign-in page on 2026-11-09, whose sentence of copy the extractor read as a
+ * main body, and each came back success. All four together: a page elsewhere is read for its content, whatever its
+ * headings and fields say (an article with a hidden sign-in modal, an account's "Login & security" page with its
+ * password fields, a docs page on "Login with SSO" with a demo form), and so is a longer page at a login path.
+ */
+function signInPage(body: string, finalUrl: string | undefined): GateVerdict | null {
+  if (finalUrl === undefined || body.length > INTERACTION_MAX_HTML) return null
+  let path: string
+  try { path = new URL(finalUrl).pathname } catch { return null }
+  if (!isLoginPath(path) || !PASSWORD_FIELD.test(body)) return null
+  const page = pageText(body)
+  if (page === null || !page.primaryHeadings.some((heading) => BARE_LOGIN_HEADING.test(heading))) return null
+  return { reason: 'login_wall', signals: ['login_url', 'input_password', 'heading_sign_in', 'short_page'] }
 }
 
 /**

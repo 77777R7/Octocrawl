@@ -154,7 +154,7 @@ const SAMPLES: Record<string, unknown> = {
   integration: 'parity-check', ignoreInvalidURLs: true, retry: { softBlocks: 1 },
   handoff: true, lane: 'my-browser', access: 'enhanced', skipTlsVerification: true, maxAge: 60_000, minAge: 1, storeInCache: true, lockdown: true,
   actions: [{ type: 'wait', milliseconds: 1 }], robotsOverride: { reason: 'parity check' }, robotsOverrides: [{ url: 'https://example.com/a', reason: 'parity check' }],
-  ignoreRobotsTxt: true, useCached: true, appendToId: 'batch-1', webhook: 'https://example.com/hook',
+  ignoreRobotsTxt: true, useCached: true, appendToId: 'batch-1', loginWallsOf: 'batch-1', webhook: 'https://example.com/hook',
 }
 /** batch_scrape takes only false for these locally (a batch follows no link). */
 const BATCH_SAMPLES: Record<string, unknown> = { allowExternalLinks: false, includeSubdomains: false }

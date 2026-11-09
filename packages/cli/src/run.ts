@@ -201,8 +201,9 @@ async function runCommand(engine: ApiEngine, command: Command, urls: string[], b
       return finish(engine, 'crawl', taskId, cli, io)
     }
     case 'batch': {
-      if (urls.length === 0) throw new UsageError('takes URLs as arguments or --urls-file <file> (octocrawl batch --help)')
-      const accepted = await engine.startBatch(parseBatchStartRequest({ ...body, urls, origin: ORIGIN }))
+      // --login-walls-of <id> takes its URLs from that batch of this task root (login UX A4): none of its own.
+      if (urls.length === 0 && body.loginWallsOf === undefined) throw new UsageError('takes URLs as arguments or --urls-file <file> (octocrawl batch --help)')
+      const accepted = await engine.startBatch(parseBatchStartRequest({ ...body, ...(urls.length === 0 ? {} : { urls }), origin: ORIGIN }))
       io.stderr(`octocrawl batch: task ${accepted.taskId}${accepted.invalidURLs?.length ? `, ${accepted.invalidURLs.length} invalid URLs skipped` : ''}`)
       if (body.lane === 'my-browser' || body.access === 'my-browser') io.stderr('octocrawl batch: in your Chrome, click Allow if Chrome asks, then Allow reading these sites in the page Octocrawl opens for the sites of the batch you have not allowed before (none opens when you allowed them all; octocrawl login revoke <site> to forget one); close that page or click Revoke to stop')
       return finish(engine, 'batch', accepted.taskId, cli, io)

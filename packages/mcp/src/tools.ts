@@ -470,7 +470,7 @@ const DEFINITIONS = [
   },
   {
     name: 'batch_scrape',
-    description: 'Run 1-1000 known URLs as one persistent job. Returns { taskId } at once; wait_batch waits for it, get_batch_items pages the results and get_batch_errors lists the failures and robots refusals. Each URL takes scrape\'s page options (formats, onlyMainContent, includeTags, waitFor, timeout, verify, actions and the rest; their descriptions are on scrape). appendToId adds the urls to an existing batch; idempotencyKey makes a retry safe. How long the server keeps the results is not stated.',
+    description: 'Run 1-1000 known URLs as one persistent job. Returns { taskId } at once; wait_batch waits for it, get_batch_items pages the results and get_batch_errors lists the failures and robots refusals. Each URL takes scrape\'s page options (formats, onlyMainContent, includeTags, waitFor, timeout, verify, actions and the rest; their descriptions are on scrape). How long the server keeps the results is not stated.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -494,10 +494,11 @@ const DEFINITIONS = [
         includeSubdomains: { type: 'boolean', const: false, description: 'false only.' },
         idempotencyKey: IDEMPOTENCY_KEY_PROPERTY,
         appendToId: { type: 'string', minLength: 1, maxLength: 200, description: 'Add urls to this existing batch instead; a completed batch runs again for them.' },
+        loginWallsOf: { type: 'string', description: 'Instead of urls: this finished batch\'s login-wall pages, read as the person.' },
         webhook: WEBHOOK_PROPERTY,
         ...INTEGRATION_PROPERTY,
       },
-      required: ['urls'], additionalProperties: false,
+      additionalProperties: false,
     },
   },
   ...(['get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch'] as const).map(name => ({
@@ -512,7 +513,7 @@ const DEFINITIONS = [
   },
   {
     name: 'hand_off_batch',
-    description: 'Hand a finished batch\'s items that a check stopped to the person in their own Chrome, one tab at a time; waits for the person, up to 10 minutes a page by default. A check is a captcha, a challenge or a login wall (get_batch\'s waitingForPerson); once the person is through, Octocrawl reads the page and replaces the stopped result. Octocrawl passes no check itself. Local server only; Chrome needs remote debugging on and the person clicks Allow once. Tell them first: it waits up to waitMs per page (default 600000) and reads a page only after they click or type in its tab. Returns { id, handedOff, through, notThrough, items }.',
+    description: 'Hand a finished batch\'s items that a check stopped to the person in their own Chrome, one tab at a time; waits for the person, up to 10 minutes a page by default. A check is a captcha, a challenge or a login wall (get_batch\'s waitingForPerson); once the person is through, Octocrawl reads the page and replaces the stopped result. Octocrawl passes no check itself. Local server only; Chrome needs remote debugging on and the person clicks Allow once. Tell them first: it reads a page only after they click or type in its tab (waitMs, default 600000). Returns { id, handedOff, through, notThrough, items }.',
     inputSchema: { type: 'object', properties: { id: { type: 'string' }, waitMs: { type: 'integer', minimum: 10000, maximum: 1800000 } }, required: ['id'], additionalProperties: false },
   },
   {
@@ -793,7 +794,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: T
     const req = parseBatchStartRequest(withoutOrigin(args))
     // With ignoreInvalidURLs the server's list is authoritative: the entries go as the caller sent them, and the API reports the ones it skipped.
     const urls = req.ignoreInvalidURLs === true ? (args as { urls: readonly string[] }).urls : req.urls
-    return client.batchScrape(urls, { ...(req.actions === undefined ? {} : { actions: req.actions }), mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...cacheOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }), ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }), ...(req.retry === undefined ? {} : { retry: req.retry }), ...(req.ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs: req.ignoreInvalidURLs }), ...(req.allowExternalLinks === undefined ? {} : { allowExternalLinks: req.allowExternalLinks }), ...(req.includeSubdomains === undefined ? {} : { includeSubdomains: req.includeSubdomains }), ...(req.idempotencyKey === undefined ? {} : { idempotencyKey: req.idempotencyKey }), ...(req.maxCredits === undefined ? {} : { maxCredits: req.maxCredits }), ...(req.appendToId === undefined ? {} : { appendToId: req.appendToId }), ...(req.webhook === undefined ? {} : { webhook: req.webhook }), ...(req.lane === undefined ? {} : { lane: req.lane }), ...(req.access === undefined ? {} : { access: req.access }), ...(req.verify === undefined ? {} : { verify: req.verify }), ...integrationOf(req) }, request)
+    return client.batchScrape(urls, { ...(req.actions === undefined ? {} : { actions: req.actions }), mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...cacheOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }), ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }), ...(req.retry === undefined ? {} : { retry: req.retry }), ...(req.ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs: req.ignoreInvalidURLs }), ...(req.allowExternalLinks === undefined ? {} : { allowExternalLinks: req.allowExternalLinks }), ...(req.includeSubdomains === undefined ? {} : { includeSubdomains: req.includeSubdomains }), ...(req.idempotencyKey === undefined ? {} : { idempotencyKey: req.idempotencyKey }), ...(req.maxCredits === undefined ? {} : { maxCredits: req.maxCredits }), ...(req.appendToId === undefined ? {} : { appendToId: req.appendToId }), ...(req.loginWallsOf === undefined ? {} : { loginWallsOf: req.loginWallsOf }), ...(req.webhook === undefined ? {} : { webhook: req.webhook }), ...(req.lane === undefined ? {} : { lane: req.lane }), ...(req.access === undefined ? {} : { access: req.access }), ...(req.verify === undefined ? {} : { verify: req.verify }), ...integrationOf(req) }, request)
   }
   if (name === 'get_batch_errors') {
     const rec = readRecord(args)
@@ -851,13 +852,25 @@ function withResultsHint(name: 'get_batch' | 'wait_batch' | 'get_crawl' | 'wait_
   const { resultFiles, export: download, agentHints } = status as { resultFiles?: { jsonl?: unknown; csv?: unknown; markdown?: unknown }; export?: { url?: unknown; expiresInSeconds?: unknown }; agentHints?: unknown }
   const pages = name.endsWith('crawl') ? 'get_crawl_pages' : 'get_batch_items'
   const read = name.endsWith('crawl') ? 'get_crawl' : 'get_batch'
+  const both = `${resultFiles?.jsonl} (a page a line, as ${pages} lists them) and ${resultFiles?.csv} (a row a page, its evidence columns)`
   const hint = typeof resultFiles?.jsonl === 'string' && typeof resultFiles.csv === 'string'
-    ? `every page is on this computer: ${resultFiles.jsonl} (a page a line, as ${pages} lists them) and ${resultFiles.csv} (a row a page, its evidence columns)${typeof resultFiles.markdown === 'string' ? `, with each page's Markdown as a file of its own in ${resultFiles.markdown} (the CSV's markdown_file names it); hand those files on rather than splitting the JSONL` : ''}; ${pages} reads a few at a time`
+    ? typeof resultFiles.markdown === 'string'
+      ? `each page's Markdown is a file of its own in ${resultFiles.markdown} (the CSV's markdown_file names it): give the person that folder's path${hiddenNote(resultFiles.markdown)}, and hand those files on rather than splitting the JSONL; every page is also in ${both}; ${pages} reads a few at a time`
+      : `every page is on this computer: ${both}: give the person these paths${hiddenNote(resultFiles.jsonl)}; ${pages} reads a few at a time`
     : typeof download?.url === 'string' && typeof download.expiresInSeconds === 'number'
       ? `every page read so far downloads at export.url: one gzip JSONL file, a page a line, as ${pages} lists them; the link is good for ${linkLife(download.expiresInSeconds)}, and ${read} gives a fresh one; ${pages} reads a few at a time`
       : null
   if (hint === null) return status
   return { ...status, agentHints: [...(Array.isArray(agentHints) ? agentHints : []), hint] }
+}
+
+/**
+ * What to add when a result path runs through a hidden folder (a part starting with a dot, as the default `.w2l/api`
+ * task root) on macOS or Linux, whose file browsers do not list it, so the person reaches the files by the path alone.
+ * Nothing otherwise, a Windows path among them: Explorer hides by attribute, not by name, and lists `.w2l`.
+ */
+function hiddenNote(path: string): string {
+  return /^\/(?:[^/]*\/)*\.[^/.]/.test(path) ? ' (it is inside a hidden folder a file browser does not list, so they open it by that path)' : ''
 }
 
 /** How long a link lives, in the unit that reads well: hours from one hour, minutes below. */

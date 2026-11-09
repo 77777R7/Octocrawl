@@ -248,6 +248,7 @@ export const OPTION_PARITY: { [N in OptionTool]: Record<OptionOf<N>, OptionEntry
     includeSubdomains: { status: 'planned', item: null, note: 'Locally only false is taken, since a batch follows no link; hosted refuses the field by name.', sent: 'refused' },
     idempotencyKey: supported,
     appendToId: { status: 'planned', item: null, note: 'A hosted batch\'s URLs are fixed when it starts.', sent: 'refused' },
+    loginWallsOf: { status: 'different_on_purpose', note: 'Reads a batch\'s pages at a login wall again as the person, in their own Chrome or with their saved login: hosted holds no logins and never drives their Chrome (ADR 0005).', sent: 'refused' },
     webhook: { status: 'planned', item: 'monitors_delivery', note: WEBHOOK, sent: 'rest_only' },
     integration: supported,
   },
