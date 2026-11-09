@@ -99,8 +99,8 @@
 
 ### 第二步：ChatGPT 已在引用的工具页
 
-- [ ] **T1 工具页加定义句和"在 agent 里做同一件事"。** `/tools/link-extractor/`、`/tools/website-to-text/`、`/tools/url-to-markdown/`、`/tools/`：首屏一句可引用的定义（这个工具做什么，由 Octocrawl 提供）；结果下方一步桥接：`claude mcp add` 一行、REST 一行、"不用 key 也能试"的额度说明。11-03 至 11-09 工具页的下一步区块 29 次浏览（18 个访客），到 `/docs/connect-mcp/` 只有 1 次点击。完成：四页上线；M1 能看到桥接的点击。
-- [ ] **T2 首页、`/scrape/`、`/tools/*` 的 Markdown 孪生页。** 由生成页面的同一份源文件生成，不手写，免得和 HTML 不一致；列进 `llms.txt` 和 `llms-full.txt`（`apps/public-web/scripts/build-docs.mjs:394-406`）。
+- [x] **T1 工具页加定义句和"在 agent 里做同一件事"。** 2026-11-10 做完，PR #915（未合并、未部署）。原计划： `/tools/link-extractor/`、`/tools/website-to-text/`、`/tools/url-to-markdown/`、`/tools/`：首屏一句可引用的定义（这个工具做什么，由 Octocrawl 提供）；结果下方一步桥接：`claude mcp add` 一行、REST 一行、"不用 key 也能试"的额度说明。11-03 至 11-09 工具页的下一步区块 29 次浏览（18 个访客），到 `/docs/connect-mcp/` 只有 1 次点击。完成：四页上线；M1 能看到桥接的点击。
+- [x] **T2 首页、`/scrape/`、`/tools/*` 的 Markdown 孪生页。** 2026-11-10 做完，PR #915（未合并、未部署）。原计划： 由生成页面的同一份源文件生成，不手写，免得和 HTML 不一致；列进 `llms.txt` 和 `llms-full.txt`（`apps/public-web/scripts/build-docs.mjs:394-406`）。
 - [ ] **T3 改完再测。** T1、T2 上线后至少隔一个完整采集周期，用 M6 的同一组题和设置再测一次，对照 M1、M2 的数字。每题 3 次的样本区间很宽（协议 §3），前后差别只当线索，记录里写出区间，不据此宣布效果。
 
 ### 第三步：站内说对
