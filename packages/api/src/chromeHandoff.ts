@@ -204,6 +204,9 @@ export const SIGN_IN_QUIET_MS = 15_000
 const SIGN_IN_REST_MS = 5_000
 /** Times W2L takes the tab back to the page asked for when the person's way through ended elsewhere on the site (a home page after a sign-in). */
 const RETURNS = 2
+
+/** The addresses a read's `hops` names at most: the first ones the tab was seen at. */
+const MAX_HOPS = 20
 /** A document answered with one of these is a check, whatever its body. */
 const CHECK_STATUSES: ReadonlySet<number> = new Set([401, 403, 407, 429, 503])
 /** How long one read of the tab waits for Chrome: a Chrome that stopped answering this long is gone. */
@@ -696,7 +699,11 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
     const signInSettleMs = options.unattended === true ? options.signInSettleMs ?? 0 : 0
     let signIn: { read: UserBrowserRead; first: number; since: number; documents: number; href: string; act: string | null; moved: boolean; returned: boolean; restAt: string; restSince: number } | null = null
     // The page as last held, with the line: what the read gives once the site did not sign the person back in.
-    const heldRead = (held: NonNullable<typeof signIn>): UserBrowserRead => ({ ...held.read, wallMs: Date.now() - started, signInWait: { waitedMs: Date.now() - held.first, cleared: false, returned: held.returned } })
+    const heldRead = (held: NonNullable<typeof signIn>): UserBrowserRead => ({ ...held.read, wallMs: Date.now() - started, ...travel(), signInWait: { waitedMs: Date.now() - held.first, cleared: false, returned: held.returned } })
+    // Where the tab was seen on its polls, in order (a sign-on host it passed through), and the times it was taken back:
+    // what the read says of the way to the page.
+    const hops: string[] = []
+    const travel = (): Pick<UserBrowserRead, 'hops' | 'returns'> => ({ ...(hops.length > 1 ? { hops: [...hops] } : {}), ...(returns > 0 ? { returns } : {}) })
     // With shownOnly, since when a page ready to read has waited for its tab to come in sight, and how long it waited once it did.
     let hiddenWaitSince: number | null = null
     let hiddenWaited: number | undefined
@@ -716,6 +723,8 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
         state = JSON.parse(answer.result.value) as PageState
         seen = { href: state.href, documents: heard.documents }
         if (typeof info.targetInfo?.url === 'string') state.href = info.targetInfo.url
+        const hop = hopOf(state.href, host)
+        if (hop !== null && hop !== hops.at(-1) && hops.length < MAX_HOPS) hops.push(hop)
         // The person's activation of this document, which a click or a key press gives it (a click in a captcha's frame included) and its script cannot.
         if (heard.act === null) {
           if (world === null || world.documents !== heard.documents || world.href !== state.href) {
@@ -934,6 +943,7 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
         ...(hiddenWaitMs === undefined ? {} : { hiddenWaitMs }),
         ...(shownWhileHidden === undefined ? {} : { shownWhileHidden }),
         ...(options.background === true ? { background: true } : {}),
+        ...travel(),
       }
       // Ready, but holding content back behind a sign-in: the site may sign the person back in by itself (signInSettleMs).
       if (signInSettleMs > 0) {
@@ -1069,6 +1079,21 @@ function hostAndPort(href: string): string {
     return new URL(href).host
   } catch {
     return 'another page'
+  }
+}
+
+/**
+ * An address the tab was seen at, as a read's `hops` names it: on the site of the page asked for (`host`), scheme, host
+ * and path, without path parameters (`;jsessionid=`), query or fragment; on another site (a sign-on), scheme and host
+ * alone, since its paths and queries may carry tokens and the person's details. Null for a page not on the web (about:blank).
+ */
+function hopOf(href: string, host: string): string | null {
+  try {
+    const parsed = new URL(href)
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null
+    return sameSite(href, host) ? `${parsed.protocol}//${parsed.host}${parsed.pathname.replace(/;[^/]*/g, '')}` : `${parsed.protocol}//${parsed.host}`
+  } catch {
+    return null
   }
 }
 

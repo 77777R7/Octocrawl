@@ -924,6 +924,8 @@ it('holds a browser-lane lease past the longest call Cloud Run lets run, and dep
   expect(BROWSER_LEASE_MS).toBeGreaterThan(HOSTED_REQUEST_TIMEOUT_MS)
   // The longest MCP calls end inside the request timeout, and 60 s inside the 240 s claude.ai gives a tool call.
   for (const ms of [HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS, HOSTED_MCP_WAIT_MS]) expect(ms).toBeLessThanOrEqual(Math.min(HOSTED_REQUEST_TIMEOUT_MS, 240_000 - 60_000))
+  // A wait also ends under the 60 s Claude Code gives an HTTP MCP request before its first byte, which a hosted answer sends whole.
+  expect(HOSTED_MCP_WAIT_MS).toBeLessThan(60_000)
   // Every deploy command of the API in the runbook sets Cloud Run's request timeout to the one the code assumes.
   const docs = await readFile(new URL('../../../docs/hosted-api.md', import.meta.url), 'utf8')
   const deploys = docs.match(/gcloud run deploy octocrawl-api (?:[^\n]*\\\n)*[^\n]*/g) ?? []

@@ -217,8 +217,9 @@ const BATCH_HINT_HOSTS = 3
  * and one question to the person in place of one a page. `urls` are those pages, a URL a page. The routes are the ones
  * this server has for this batch, as `loginWallHint`'s are; `handoff` is true when `hand_off_batch` would take these
  * pages. A new batch leaves a webhook out: pages read as the person are not sent elsewhere, so both routes refuse one.
+ * `batch.id`: the batch's, which a new batch names to read those pages alone again (`loginWallsOf`, login UX A4).
  */
-export function batchLoginWallHint(urls: readonly string[], batch: { mode?: string; lane?: string; webhook?: boolean }, offers: HintOffers & { handoff?: boolean }): string {
+export function batchLoginWallHint(urls: readonly string[], batch: { id?: string; mode?: string; lane?: string; webhook?: boolean }, offers: HintOffers & { handoff?: boolean }): string {
   const hosts = [...new Set(urls.map((url) => { try { return new URL(url).hostname } catch { return url } }))]
   const named = hosts.slice(0, BATCH_HINT_HOSTS).join(', ')
   const list = hosts.length > BATCH_HINT_HOSTS ? `${named} and ${hosts.length - BATCH_HINT_HOSTS} more` : named
@@ -227,8 +228,9 @@ export function batchLoginWallHint(urls: readonly string[], batch: { mode?: stri
   const them = one ? 'it' : 'them'
   const site = hosts.length === 1 ? hosts[0]! : '<host>'
   if (offers.hosted === true) return `${pages} asked for a login; hosted Octocrawl holds no logins and never takes theirs; ask the person first, naming ${hosts.length === 1 ? 'the site' : 'each site'}: on their computer Octocrawl reads ${them} as them (npx octocrawl serve, then octocrawl login import ${site}, where the login stays, then the batch in mode authed)`
-  if (batch.lane === 'my-browser') return `${pages} asked for a login in the person's own Chrome too: ask them to sign in there, then read ${one ? 'that page' : 'those pages'} again`
-  const fresh = `a new batch of those URLs${batch.webhook === true ? ' without its webhook' : ''}`
+  const again = batch.id === undefined ? '' : ` (a new batch with loginWallsOf ${batch.id} and lane my-browser)`
+  if (batch.lane === 'my-browser') return `${pages} asked for a login in the person's own Chrome too: ask them to sign in there, then read ${one ? 'that page' : 'those pages'} again${again}`
+  const fresh = batch.id === undefined ? `a new batch of those URLs${batch.webhook === true ? ' without its webhook' : ''}` : `a new batch with loginWallsOf ${batch.id}${batch.webhook === true ? ', without a webhook,' : ''}`
   const routes = [
     ...(offers.handoff === true ? ['hand_off_batch (POST /v1/batches/:id/handoff; they get through in their Chrome, one tab at a time)'] : []),
     ...(offers.personChrome === true ? [`${fresh} with lane my-browser in mode standard`] : []),

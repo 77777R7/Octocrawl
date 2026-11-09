@@ -100,6 +100,15 @@ describe('a page read in the person\'s browser', () => {
     expect(unsettled.warnings?.map((warning) => warning.code)).toEqual(['page_still_loading', 'page_still_changing'])
   })
 
+  it('records where the tab was led on the way to the page and the times it was taken back', () => {
+    const hops = ['https://site.test/a', 'https://sso.other.test/sso', 'https://site.test/a']
+    const led = pageFromUserBrowser(read(PAGE, { hops, returns: 1 }), null, {})
+    expect(led.trace.find((event) => event.event === 'user_browser_read')?.detail).toMatchObject({ hops, returns: 1 })
+    const stayed = pageFromUserBrowser(read(PAGE), null, {}).trace.find((event) => event.event === 'user_browser_read')?.detail
+    expect(stayed).not.toHaveProperty('hops')
+    expect(stayed).not.toHaveProperty('returns')
+  })
+
   it('records what the wait for the task\'s region saw (ADR 0007)', () => {
     const region = { ready: true, empty: false, waitedMs: 1_500, reads: 4, judged: 4, loading: false, steady: true, contractSha256: 'c'.repeat(64), checks: [{ index: 0, type: 'markdownIncludes' as const, passed: true }] }
     const result = pageFromUserBrowser(read(PAGE, { region }), null, {})

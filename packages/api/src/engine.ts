@@ -1291,6 +1291,28 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }
   }
 
+  /**
+   * The pages of finished batch `id` that stopped at a login wall, in the batch's order, for a new batch to read again as
+   * the person (`loginWallsOf`, login UX A4). Refused, saying why, for an id this server did not run as a batch, a batch
+   * still running (its walls are not all known), and one with no such page.
+   */
+  async function loginWallUrls(id: string): Promise<string[]> {
+    const unknown = () => new RequestError(`no batch ${id}: loginWallsOf names a batch this server ran`)
+    if (!UUID.test(id) || !existsSync(join(taskRoot, id, 'checkpoint.sqlite'))) throw unknown()
+    const store = SqliteTaskStore.openReadOnly(join(taskRoot, id))
+    try {
+      const task = await store.getTask(id)
+      if (task?.batch === undefined) throw unknown()
+      if (!isTerminalStatus(task.status)) throw new RequestError(`batch ${id} is still running: the pages that stop at a login wall are known when it ends (wait_batch)`)
+      const walled = new Set((await stepsOf(store, id, 'errors')).filter((step) => step.result?.blockReason === 'login_wall').map((step) => step.url))
+      // In the batch's order; a page recorded under another spelling of its URL comes after.
+      const order = new Map(task.batch.urls.map((url, index) => [url, index] as const))
+      const urls = [...walled].sort((a, b) => (order.get(a) ?? Infinity) - (order.get(b) ?? Infinity))
+      if (urls.length === 0) throw new RequestError(`batch ${id} has no page that stopped at a login wall`)
+      return urls
+    } finally { await store.close() }
+  }
+
   /** A batch's status: the latest attempt's report with the batch's totals, the cap in force, the skipped entries and its webhook's standing. */
   async function loadBatch(taskId: string): Promise<BatchStatusResponse | null> {
     // A job id names a directory under the task root: anything but an id this server issues names none.
@@ -1345,7 +1367,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ...(task.batch.invalidURLs === undefined ? {} : { invalidURLs: task.batch.invalidURLs }),
         ...(waitingForPerson === undefined ? {} : { waitingForPerson }),
         ...(behindLogin.length === 0 && failureLines.length === 0 && extractionLines.length === 0 ? {} : { agentHints: [
-          ...(behindLogin.length === 0 ? [] : [batchLoginWallHint(behindLogin.map((step) => step.url), { mode: task.mode, webhook: webhookOf(task) !== undefined, ...(task.batch.lane === undefined ? {} : { lane: task.batch.lane }) }, { ...taskHintOffers(task, behindLogin[0]!.url), handoff: waitingForPerson !== undefined && behindLogin.some((step) => handoffNeededIn(task, step)) })]),
+          ...(behindLogin.length === 0 ? [] : [batchLoginWallHint(behindLogin.map((step) => step.url), { id: taskId, mode: task.mode, webhook: webhookOf(task) !== undefined, ...(task.batch.lane === undefined ? {} : { lane: task.batch.lane }) }, { ...taskHintOffers(task, behindLogin[0]!.url), handoff: waitingForPerson !== undefined && behindLogin.some((step) => handoffNeededIn(task, step)) })]),
           ...failureLines,
           ...extractionLines,
         ] }),
@@ -2590,6 +2612,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
 
     async startBatch(req) {
       if (batchStartInProgress) throw new RequestError('another batch submission is in progress')
+      // A batch of another's pages at a login wall (login UX A4) is checked, and started, with those pages as its URLs.
+      if (req.loginWallsOf !== undefined) req = { ...req, urls: await loginWallUrls(req.loginWallsOf) }
       const { webhookConfig, canonical } = batchStartChecks(req)
       batchStartInProgress = true
       try {
