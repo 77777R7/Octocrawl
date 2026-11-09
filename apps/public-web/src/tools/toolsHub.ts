@@ -32,6 +32,10 @@ function toolCard(tool: (typeof TOOLS)[number]): string {
   return tool.live ? `<li class="hub-card"><a class="hub-link" href="${toolPath(tool)}">${body}</a></li>` : `<li class="hub-card is-next" aria-label="${tool.name}, coming next">${body}</li>`
 }
 
+/** The hub's heading and lead, shown at its top and opening its Markdown copy (markdownTwin.ts). */
+export const HUB_HEADING = 'Free web data tools, <em>no sign-up.</em>'
+export const HUB_LEAD = 'Paste a public page and take what you need from it, in your browser. Five a day, and when a page can’t be read, you get the reason.'
+
 export function hubPageMarkup(): string {
   return `
   <div class="page-shell tools-hub">
@@ -41,8 +45,8 @@ ${siteHeaderMarkup()}      <main aria-labelledby="hub-title">
         <div class="band">
           <div class="frame hub-copy">
             <p class="hub-kicker"><span class="kicker-square" aria-hidden="true"></span>Free tools</p>
-            <h1 id="hub-title">Free web data tools, <em>no sign-up.</em></h1>
-            <p class="hub-lead">Paste a public page and take what you need from it, in your browser. Five a day, and when a page can’t be read, you get the reason.</p>
+            <h1 id="hub-title">${HUB_HEADING}</h1>
+            <p class="hub-lead">${HUB_LEAD}</p>
           </div>
         </div>
       </main>

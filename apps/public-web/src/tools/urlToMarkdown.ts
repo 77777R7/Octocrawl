@@ -30,6 +30,10 @@ export const URL_TO_MARKDOWN: ToolPage = {
     description: 'Paste a public page and get clean Markdown for an AI&nbsp;agent, a RAG pipeline or your notes. Free, no sign-up. When a page can’t be read, you get the reason.',
     tool: { crumb: 'URL to Markdown' },
   },
+  definition: {
+    question: 'What is Octocrawl’s URL to Markdown converter?',
+    answer: 'A free tool from Octocrawl that turns a public web page into clean Markdown: it keeps the page’s headings, lists, tables and links, and leaves out menus, scripts and styling, so a model reads the content in fewer tokens than the raw HTML. Use it here in your browser without signing up, five pages a day, or give the same conversion to your AI agent or script.',
+  },
   afterHero: conversionExample('markdown'),
   steps: { title: 'From a link to clean Markdown.', cards: [
     ['01', 'Paste a public URL', 'Any page anyone can open without signing in: an article, documentation, a product page, a PDF. Five a day, no account.'],

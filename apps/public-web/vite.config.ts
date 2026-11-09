@@ -6,6 +6,7 @@ import { toolPageJsonLd, toolPageMarkup } from './src/tools/toolPage'
 import { hubJsonLd, hubPageMarkup } from './src/tools/toolsHub'
 import { scrapeJsonLd, scrapePageMarkup } from './src/product/scrapePage'
 import { versionAssetReferences, versionPublicAssets } from './scripts/publicAssetVersions.mjs'
+import { markdownTwins } from './src/markdownTwin'
 
 const publicDir = fileURLToPath(new URL('./public', import.meta.url))
 const srcDir = fileURLToPath(new URL('./src/', import.meta.url))
@@ -17,6 +18,9 @@ export default defineConfig({
     transformIndexHtml(html, context) {
       const slot = '<div id="app"></div>'
       if (!html.includes(slot)) throw new Error('index.html must contain an empty #app element')
+      // Each page names its Markdown copy (markdownTwin.ts), as the docs pages and articles do.
+      const page = context.path.replace(/index\.html$/, '')
+      html = html.replace('</head>', `  <link rel="alternate" type="text/markdown" href="${page}index.md" />\n  </head>`)
       // The free tools' hub (tools/index.html) carries its own markup and its structured data.
       if (context.path === '/tools/index.html' || context.path === '/tools/') {
         return versionPublicAssets(html.replace('</head>', `  ${hubJsonLd()}\n  </head>`).replace(slot, `<div id="app">${hubPageMarkup()}</div>`), publicDir)
@@ -31,6 +35,10 @@ export default defineConfig({
       // The FAQ's structured data goes in the head, from the same list the FAQ section shows.
       const withFaq = html.replace('</head>', `  ${faqJsonLd()}\n  </head>`)
       return versionPublicAssets(withFaq.replace(slot, `<div id="app">${pageMarkup()}</div>`), publicDir)
+    },
+    // The Markdown copy of each page, beside it (index.md); build-docs.mjs lists them in llms.txt.
+    generateBundle() {
+      for (const [fileName, source] of markdownTwins()) this.emitFile({ type: 'asset', fileName, source })
     },
   }, {
     // The stylesheet's and the scripts' references to the versioned public files (the hero artwork among them) carry
