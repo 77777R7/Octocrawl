@@ -64,7 +64,7 @@ describe('toEvidenceRecord', () => {
       identity: { userAgent: ua, mode: 'research', contact: 'Jane Doe jane@example.org', device: null, requestHeaders: [] },
       pageActions: null,
       // The run's third-party cost is unknown here (null in usage), so it stays unknown.
-      access: { route: 'http', executor: 'undici', executorVersion: null, profile: null, externalCostUsd: null, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null, kind: null }, session: null, sessionApplied: null, paidCalls: null, grant: null },
+      access: { route: 'http', executor: 'undici', executorVersion: null, profile: null, externalCostUsd: null, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null, kind: null }, session: null, sessionApplied: null, allowance: null, paidCalls: null, grant: null },
       verification: { status: 'not_requested', verifier: null, contractSha256: null, reason: null, failed: [], undecided: [] },
       readiness: { state: 'ready', basis: [] },
       document: null,
@@ -76,20 +76,20 @@ describe('toEvidenceRecord', () => {
     const ran = (lane: string): TraceEvent => lane === 'provider' ? { at: 0, lane: 'provider', event: 'provider_selected', detail: { provider: 'browserbase' } } : { at: 0, lane: lane as TraceEvent['lane'], event: lane === 'http' ? 'identity_sent' : 'identity_declared', detail: {} }
     const access = (over: Partial<FetchResult>, trace: TraceEvent[] = []) => toEvidenceRecord(result(over, [ran(over.lane ?? 'http'), ...trace]), { mode: 'standard' }, {}, { sourceCommit: null }).access
     const zero = { usage: { ...result().usage, externalCostUsd: 0 } }
-    expect(access(zero)).toEqual({ route: 'http', executor: 'undici', executorVersion: null, profile: null, externalCostUsd: 0, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null, kind: null }, session: null, sessionApplied: null, paidCalls: null, grant: null })
+    expect(access(zero)).toEqual({ route: 'http', executor: 'undici', executorVersion: null, profile: null, externalCostUsd: 0, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null, kind: null }, session: null, sessionApplied: null, allowance: null, paidCalls: null, grant: null })
     expect(access(zero, [{ at: 0, lane: 'http', event: 'transport', detail: { library: 'impit', version: '0.14.5', profile: 'chrome142' } }]))
-      .toEqual({ route: 'http_compat', executor: 'impit', executorVersion: '0.14.5', profile: 'chrome142', externalCostUsd: 0, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null, kind: null }, session: null, sessionApplied: null, paidCalls: null, grant: null })
-    expect(access({ ...zero, lane: 'browser_local' })).toEqual({ route: 'browser', executor: 'playwright', executorVersion: null, profile: null, externalCostUsd: 0, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null, kind: null }, session: null, sessionApplied: null, paidCalls: null, grant: null })
+      .toEqual({ route: 'http_compat', executor: 'impit', executorVersion: '0.14.5', profile: 'chrome142', externalCostUsd: 0, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null, kind: null }, session: null, sessionApplied: null, allowance: null, paidCalls: null, grant: null })
+    expect(access({ ...zero, lane: 'browser_local' })).toEqual({ route: 'browser', executor: 'playwright', executorVersion: null, profile: null, externalCostUsd: 0, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null, kind: null }, session: null, sessionApplied: null, allowance: null, paidCalls: null, grant: null })
     expect(access({ ...zero, lane: 'browser_local' }, [{ at: 0, lane: 'browser_local', event: 'browser_engine', detail: { engine: 'patchright', version: '1.63.0' } }]))
-      .toEqual({ route: 'enhanced_browser', executor: 'patchright', executorVersion: '1.63.0', profile: null, externalCostUsd: 0, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null, kind: null }, session: null, sessionApplied: null, paidCalls: null, grant: null })
+      .toEqual({ route: 'enhanced_browser', executor: 'patchright', executorVersion: '1.63.0', profile: null, externalCostUsd: 0, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null, kind: null }, session: null, sessionApplied: null, allowance: null, paidCalls: null, grant: null })
     // installed_chrome (ADR 0005): the machine's Google Chrome, its version and the launch's detection flag set.
     expect(access({ ...zero, lane: 'browser_local' }, [{ at: 0, lane: 'browser_local', event: 'browser_engine', detail: { engine: 'installed_chrome', version: '141.0.7390.66', flags: 'nodriver-0.50.6-no-allow-origins' } }]))
-      .toEqual({ route: 'installed_chrome', executor: 'chrome', executorVersion: '141.0.7390.66', profile: 'nodriver-0.50.6-no-allow-origins', externalCostUsd: 0, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null, kind: null }, session: null, sessionApplied: null, paidCalls: null, grant: null })
+      .toEqual({ route: 'installed_chrome', executor: 'chrome', executorVersion: '141.0.7390.66', profile: 'nodriver-0.50.6-no-allow-origins', externalCostUsd: 0, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null, kind: null }, session: null, sessionApplied: null, allowance: null, paidCalls: null, grant: null })
     // hosted_chrome (ADR 0005, revision of 2026-10-27): the pinned Chrome on Octocrawl's server, its launch's identifier,
     // and the kind of exit it left from as the lane stated it.
     const hosted = { at: 0, lane: 'browser_local', event: 'browser_engine', detail: { engine: 'hosted_chrome', version: '142.0.7444.59', flags: 'nodriver-0.50.6-no-allow-origins+webrtc-proxied-udp-only' } } as TraceEvent
     expect(access({ ...zero, lane: 'browser_local' }, [hosted, { at: 0, lane: 'browser_local', event: 'egress_kind', detail: { kind: 'google' } }]))
-      .toEqual({ route: 'hosted_chrome', executor: 'chrome', executorVersion: '142.0.7444.59', profile: 'nodriver-0.50.6-no-allow-origins+webrtc-proxied-udp-only', externalCostUsd: 0, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null, kind: 'google' }, session: null, sessionApplied: null, paidCalls: null, grant: null })
+      .toEqual({ route: 'hosted_chrome', executor: 'chrome', executorVersion: '142.0.7444.59', profile: 'nodriver-0.50.6-no-allow-origins+webrtc-proxied-udp-only', externalCostUsd: 0, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null, kind: 'google' }, session: null, sessionApplied: null, allowance: null, paidCalls: null, grant: null })
     // A kind the record does not know, or none at all, is unknown: null, never guessed.
     expect(access({ ...zero, lane: 'browser_local' }, [hosted, { at: 0, lane: 'browser_local', event: 'egress_kind', detail: { kind: 'mobile' } }])?.egress?.kind).toBeNull()
     expect(access({ ...zero, lane: 'browser_local' }, [hosted])?.egress?.kind).toBeNull()
@@ -97,21 +97,31 @@ describe('toEvidenceRecord', () => {
       .toMatchObject({ route: 'user_browser', executor: 'Google Chrome', completion: 'handed_to_person' })
     // The my-browser lane: the person's Chrome on a site they allowed; handed to them when the page showed a check.
     expect(access({ ...zero, lane: 'my_browser' }, [{ at: 9, lane: 'my_browser', event: 'user_browser_read', detail: { browser: 'Google Chrome', sawGate: null, act: null } }]))
-      .toEqual({ route: 'user_browser', executor: 'Google Chrome', executorVersion: null, profile: null, externalCostUsd: 0, completion: 'user_browser', egress: null, session: null, sessionApplied: null, paidCalls: null, grant: null })
+      .toEqual({ route: 'user_browser', executor: 'Google Chrome', executorVersion: null, profile: null, externalCostUsd: 0, completion: 'user_browser', egress: null, session: null, sessionApplied: null, allowance: null, paidCalls: null, grant: null })
     expect(access({ ...zero, lane: 'my_browser' }, [{ at: 9, lane: 'my_browser', event: 'user_browser_read', detail: { browser: 'Google Chrome', sawGate: 'captcha', act: 'user_activation' } }]))
       .toMatchObject({ route: 'user_browser', completion: 'handed_to_person' })
     // A check that cleared without a step of the person's (no act): the page was still read in their Chrome alone.
     expect(access({ ...zero, lane: 'my_browser' }, [{ at: 9, lane: 'my_browser', event: 'user_browser_read', detail: { browser: 'Google Chrome', sawGate: 'cloudflare_challenge', act: null } }]))
       .toMatchObject({ route: 'user_browser', completion: 'user_browser' })
+    // How the person allowed the site (login UX A1), as the lane said it: clicked for this read, or remembered.
+    const readOn = (basis: string, allowedAt: unknown) => access({ ...zero, lane: 'my_browser' }, [
+      { at: 9, lane: 'my_browser', event: 'user_browser_read', detail: { browser: 'Google Chrome', sawGate: null, act: null } },
+      { at: 9, lane: 'my_browser', event: 'site_allowed', detail: { host: 'site.test', basis, allowedAt } },
+    ])
+    expect(readOn('remembered', '2026-11-08T01:02:03.000Z')?.allowance).toEqual({ basis: 'remembered', allowedAt: '2026-11-08T01:02:03.000Z' })
+    expect(readOn('clicked', '2026-11-08T01:02:03.000Z')?.allowance).toEqual({ basis: 'clicked', allowedAt: '2026-11-08T01:02:03.000Z' })
+    // A basis or a date the lane did not give is not guessed.
+    expect(readOn('assumed', '2026-11-08T01:02:03.000Z')?.allowance).toBeNull()
+    expect(readOn('remembered', null)?.allowance).toBeNull()
     // A page not read counts no completion, whichever lane tried it.
     expect(access({ ...zero, status: 'blocked', blockReason: 'captcha' })).toMatchObject({ route: 'http', completion: null })
     // A provider states its vendor; a run whose provider stated no price has an unknown cost.
     expect(access({ lane: 'provider' }, [{ at: 0, lane: 'provider', event: 'provider_selected', detail: { provider: 'browserbase' } }]))
-      .toEqual({ route: 'vendor', executor: 'browserbase', executorVersion: null, profile: null, externalCostUsd: null, completion: 'unattended', egress: null, session: null, sessionApplied: null, paidCalls: null, grant: null })
+      .toEqual({ route: 'vendor', executor: 'browserbase', executorVersion: null, profile: null, externalCostUsd: null, completion: 'unattended', egress: null, session: null, sessionApplied: null, allowance: null, paidCalls: null, grant: null })
     expect(access({ ...zero, lane: 'provider' }, [])).toMatchObject({ route: 'vendor', executor: 'browserbase' })
     // The saved-login rung is the browser lane with a session attached.
     expect(access({ ...zero, lane: 'browser_local' }, [{ at: 1, lane: 'browser_local', event: 'session_attached', detail: { domain: 'source.example' } }]))
-      .toEqual({ route: 'authed_browser', executor: 'playwright', executorVersion: null, profile: null, externalCostUsd: 0, completion: 'authorized_session', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null, kind: null }, session: null, sessionApplied: { cookies: null, localStorageOrigins: 0 }, paidCalls: null, grant: null })
+      .toEqual({ route: 'authed_browser', executor: 'playwright', executorVersion: null, profile: null, externalCostUsd: 0, completion: 'authorized_session', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null, kind: null }, session: null, sessionApplied: { cookies: null, localStorageOrigins: 0 }, allowance: null, paidCalls: null, grant: null })
   })
 
   it('says what a saved login put into the browser, counts alone, on either saved-login lane, and nothing without one', () => {
@@ -165,19 +175,19 @@ describe('toEvidenceRecord', () => {
     const movedAgain = { ...moved, detail: { from: '127.0.0.1:7890', to: '127.0.0.1:7891', reason: 'unreachable', switches: 2 } } as TraceEvent
     expect(access('http', [{ ...pool, detail: { ...pool.detail, proxy: '127.0.0.1:7891' } }, moved, movedAgain]).egress).toEqual({ proxy: '127.0.0.1:7891', source: 'pool', switchedFrom: '127.0.0.1:7890', exit: null, kind: null })
     // No proxy event on W2L's own lane, and a page answer: the request went direct, with no session.
-    expect(access('http', [])).toMatchObject({ egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null, kind: null }, session: null, sessionApplied: null, paidCalls: null, grant: null })
+    expect(access('http', [])).toMatchObject({ egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null, kind: null }, session: null, sessionApplied: null, allowance: null, paidCalls: null, grant: null })
     // Another lane's events do not answer for this one.
     expect(access('http', [{ ...pool, lane: 'browser_local' }]).egress).toEqual({ proxy: null, source: 'direct', switchedFrom: null, exit: null, kind: null })
     // A lane that stopped before any page request (robots, an address check) says nothing about the egress: unknown, not direct.
     const stopped = (lane: FetchResult['lane'], trace: TraceEvent[]) => toEvidenceRecord(result({ lane, status: 'failed', failureReason: 'policy_denied', evidence: { ...result().evidence, httpStatus: null } }, [ran('http'), ...trace]), { mode: 'standard' }, {}, { sourceCommit: null }).access
-    expect(stopped('http', [])).toMatchObject({ route: 'http', egress: null, session: null, sessionApplied: null, paidCalls: null, grant: null })
+    expect(stopped('http', [])).toMatchObject({ route: 'http', egress: null, session: null, sessionApplied: null, allowance: null, paidCalls: null, grant: null })
   })
 
   it('names no route or client for a result no lane produced, and a cache hit\'s cost as the stored fetch\'s', () => {
     const record = (r: FetchResult) => toEvidenceRecord(r, { mode: 'standard' }, {}, { sourceCommit: null }).access
     // The ladder's own answer for a rung the deadline cut, that threw or whose identity was refused: no lane identity in its trace.
     expect(record(result({ status: 'failed', failureReason: 'timeout', usage: { ...result().usage, externalCostUsd: 0 } }, [])))
-      .toEqual({ route: null, executor: null, executorVersion: null, profile: null, externalCostUsd: 0, completion: null, egress: null, session: null, sessionApplied: null, paidCalls: null, grant: null })
+      .toEqual({ route: null, executor: null, executorVersion: null, profile: null, externalCostUsd: 0, completion: null, egress: null, session: null, sessionApplied: null, allowance: null, paidCalls: null, grant: null })
     expect(record(result({ status: 'failed', failureReason: 'identity_compromised' }, [{ at: 0, lane: 'http', event: 'identity_unobserved', detail: {} }])).route).toBeNull()
     // A cache hit: this call paid nothing (usage 0), the record states what the stored fetch cost, unknown included.
     const hit = (stored: number | null) => result({ lane: 'provider', usage: { ...result().usage, externalCostUsd: 0 } }, [

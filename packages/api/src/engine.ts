@@ -138,6 +138,7 @@ import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egres
 import { agentHintsFor, withJsonHints, batchExtractionHints, batchFailureHints, batchLoginWallHint, failureGroupOf, httpLaneAskedForBrowser, mapAgentHints, MAX_AGENT_HINTS, pinnedFastModeHints, withFailure, type BatchFailures, type FailureFacts, type FastModePin, type HintOffers } from './hints.js'
 import { HandoffNotThrough, LOGIN_WAIT_MS, openUserChrome, SIGN_IN_SETTLE_MS, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
 import { importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
+import { forgetSites, listRememberedSites, rememberedSitesFile, rememberSites, watchRevoked } from './rememberedSites.js'
 import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
 import { JobWebhooks, webhookOf } from './jobWebhooks.js'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
@@ -254,8 +255,12 @@ export interface HandoffHooks {
   onConfirm?: (url: string) => void
   /** The tab W2L opened has stayed out of sight: the person is to switch to it. */
   onHidden?: (url: string) => void
-  /** The my-browser lane asks the person, in a page it opened in their Chrome, to allow these sites. */
-  onAllow?: (hosts: readonly string[]) => void
+  /**
+   * The my-browser lane asks the person, in a page it opened in their Chrome, to allow the sites `asked` (none when every
+   * site was allowed before), and reads `remembered` without asking (login UX A1); `remember`: the sites they allow now are
+   * remembered too.
+   */
+  onAllow?: (asked: readonly string[], remembered: readonly string[], remember: boolean) => void
   /** A list's check is behind the person: Octocrawl reads each page they page on to in that tab; `pages` read so far, the kept ones included. */
   onContinue?: (url: string, pages: number) => void
   signal?: AbortSignal
@@ -750,6 +755,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const handoffClosing = new AbortController()
   const handoffRuns = new Set<Promise<unknown>>()
   const savedLogins: SessionStore | null = options.hosted === true || (options.sessionsFile ?? null) === null ? null : readOnlySessions(new FileSessionStore(options.sessionsFile!))
+  /** The sites the person allowed on the my-browser lane, remembered beside the saved logins (login UX A1); none without them. */
+  const allowedSitesFile: string | null = savedLogins === null ? null : rememberedSitesFile(options.sessionsFile!)
   /** The saved logins a run of `mode` may use: mode `authed` alone. */
   const sessionsFor = (mode: 'standard' | 'research' | 'authed'): SessionStore | null => mode === 'authed' ? savedLogins : null
   const headed = options.headed === true
@@ -1607,9 +1614,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     try {
       // The host, with a port that is not the scheme's default: another port of it is another site to allow.
       const hosts = [new URL(req.url).host]
-      hooks.onAllow?.(hosts)
-      let allowed: AllowedSites
-      try { allowed = await chrome.allow({ hosts, task: `scrape ${req.url}` }, { signal, log: approvalLog('scrape', null) }) }
+      let allowed: Allowed
+      try { allowed = await allowHosts(chrome, hosts, `scrape ${req.url}`, signal, approvalLog('scrape', null), hooks.onAllow) }
       catch (error) { throw new HandoffUnavailableError(error instanceof Error ? error.message : String(error)) }
       try {
         // A sign-in nobody is at holds the caller only briefly, so it can tell them; a wait it asked for is its own.
@@ -1628,7 +1634,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * the check it still showed (`blocked`), Chrome refusing a command (`connection_error`), the site leading the tab
    * elsewhere each time it was taken back to the page (`redirect_limit`), or the wait over (`timeout`).
    */
-  async function readAllowed(chrome: UserChrome, allowed: AllowedSites, url: string, fetchOpts: FetchOptions, waitMs: number | undefined, hooks: HandoffHooks, signal: AbortSignal, started: number, hiddenWaitMs?: number, loginWaitMs?: number, background = false, signInSettleMs?: number): Promise<FetchResult> {
+  async function readAllowed(chrome: UserChrome, allowed: Allowed, url: string, fetchOpts: FetchOptions, waitMs: number | undefined, hooks: HandoffHooks, signal: AbortSignal, started: number, hiddenWaitMs?: number, loginWaitMs?: number, background = false, signInSettleMs?: number): Promise<FetchResult> {
     try {
       const read = await chrome.read(url, {
         unattended: true,
@@ -1651,11 +1657,14 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         // The region the task needs (ADR 0007): waited for in the person's tab once the page has settled.
         ...(regionSpecOf(fetchOpts) === undefined ? {} : { region: regionSpecOf(fetchOpts) }),
       })
-      return pageFromUserBrowser(read, null, fetchOpts)
+      const page = pageFromUserBrowser(read, null, fetchOpts)
+      // How the site was allowed (login UX A1): clicked for this read, or remembered from an earlier click.
+      const grant = allowed.grants.get(new URL(url).host)
+      return grant === undefined ? page : { ...page, trace: [...page.trace, { at: page.trace.at(-1)?.at ?? 0, lane: page.lane, event: 'site_allowed', detail: { host: new URL(url).host, basis: grant.basis, allowedAt: grant.allowedAt } }] }
     } catch (error) {
       if (!(error instanceof HandoffNotThrough)) throw error
       const wallMs = Date.now() - started
-      if (allowed.signal.aborted) return unreadInUserBrowser(url, { status: 'cancelled' }, `you revoked the sites in Chrome before ${url} was read`, wallMs)
+      if (allowed.signal.aborted) return unreadInUserBrowser(url, { status: 'cancelled' }, `${revokedBy(allowed.signal)} before ${url} was read`, wallMs)
       if (error.kind === 'cancelled' || error.kind === 'gone') return unreadInUserBrowser(url, { status: 'cancelled' }, error.message, wallMs)
       // Chrome refused a command (a tab it would not open, a page it would not answer for): not a wait that ran out.
       if (error.kind === 'chrome') return unreadInUserBrowser(url, { status: 'failed', failureReason: 'connection_error' }, error.message, wallMs)
@@ -1673,6 +1682,46 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     console.error(JSON.stringify({ component: 'api', event: 'my_browser_approval', kind, ...(taskId === null ? {} : { taskId }), step, ...detail }))
 
   /**
+   * The person's leave to read `hosts` in their Chrome: the sites they allowed before, remembered (login UX A1), with no
+   * page; the others asked for on Octocrawl's page, and remembered once they click Allow. The signal aborts when they
+   * revoke any of them: Revoke or closing that page, or `octocrawl login revoke` for a remembered one. Revoke on the
+   * page forgets the sites it asked for. Without saved logins (no file to keep them in) every site is asked for, as
+   * before A1.
+   */
+  async function allowHosts(chrome: UserChrome, hosts: readonly string[], task: string, signal: AbortSignal, log: ApprovalLog, onAllow?: HandoffHooks['onAllow']): Promise<Allowed> {
+    const file = allowedSitesFile
+    const remembered = new Map(file === null ? [] : (await listRememberedSites(file)).map((site) => [site.host, site.allowedAt] as const))
+    const grants = new Map<string, SiteGrant>()
+    for (const host of hosts) { const at = remembered.get(host); if (at !== undefined) grants.set(host, { basis: 'remembered', allowedAt: at }) }
+    const asked = hosts.filter((host) => !grants.has(host))
+    onAllow?.(asked, [...grants.keys()], file !== null)
+    let clicked: AllowedSites | null = null
+    // The hosts the file holds for this read, watched for a revoke from another process.
+    let kept = [...grants.keys()]
+    if (asked.length > 0) {
+      clicked = await chrome.allow({ hosts: asked, task, ...(file === null ? {} : { remember: true }) }, { signal, log })
+      const allowedAt = new Date().toISOString()
+      for (const host of asked) grants.set(host, { basis: 'clicked', allowedAt })
+      if (file !== null) {
+        const page = clicked
+        // Revoke on the page forgets what it allowed; closing the page only ends this run. Listened for before the save,
+        // so a Revoke during it is not missed: the forget is queued after the save.
+        page.signal.addEventListener('abort', () => { if (page.revoked?.() === true) void forgetSites(file, asked).catch(() => undefined) }, { once: true })
+        try { await rememberSites(file, asked, allowedAt); kept = [...hosts] }
+        catch (error) { console.error(JSON.stringify({ component: 'api', event: 'allowed_sites_not_saved', error: error instanceof Error ? error.message : String(error) })) }
+      }
+    } else log('remembered', { hosts: hosts.length })
+    const watch = file === null || kept.length === 0 ? null : watchRevoked(file, kept)
+    const signals = [...(clicked === null ? [] : [clicked.signal]), ...(watch === null ? [] : [watch.signal])]
+    return {
+      hosts: [...hosts],
+      grants,
+      signal: signals.length === 0 ? new AbortController().signal : AbortSignal.any(signals),
+      close: async () => { watch?.stop(); await clicked?.close() },
+    }
+  }
+
+  /**
    * A batch's pages on the my-browser lane, one at a time: one Chrome connection for the run, the person asked once,
    * in the page Octocrawl opens there, to allow every site of the batch (host and port). A page on a site not among
    * them is not read; nor is any after they revoked the sites, or when Chrome was not reached or the sites not
@@ -1680,7 +1729,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    */
   function myBrowserBatchReader(urls: readonly string[], taskId: string, fetchOpts: FetchOptions, backgroundTabs: boolean): { scrape(url: string, context?: ExecutionContext): Promise<ScrapeOutcome>; close(): Promise<void> } {
     const hosts = [...new Set(urls.map((url) => new URL(url).host))]
-    type Opened = { chrome: UserChrome; allowed: AllowedSites } | { refused: string; status: 'cancelled' | 'connection_error' }
+    type Opened = { chrome: UserChrome; allowed: Allowed } | { refused: string; status: 'cancelled' | 'connection_error' }
     let opened: Promise<Opened> | null = null
     // Closing the reader (the task cancelled, paused or out of time, or the engine shutting down) ends the wait for the
     // person and every read; close() waits for the read in flight, so its tab is closed before the connection is.
@@ -1700,7 +1749,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       catch (error) { return { refused: error instanceof Error ? error.message : String(error), status: 'connection_error' } }
       // The batch says it waits for the person while it does (waitingForApproval).
       approvalsWaiting.add(taskId)
-      try { return { chrome, allowed: await chrome.allow({ hosts, task: `batch ${taskId}: ${urls.length} page${urls.length === 1 ? '' : 's'}` }, { signal, log: approvalLog('batch', taskId) }) } }
+      try { return { chrome, allowed: await allowHosts(chrome, hosts, `batch ${taskId}: ${urls.length} page${urls.length === 1 ? '' : 's'}`, signal, approvalLog('batch', taskId)) } }
       catch (error) { chrome.close(); return { refused: error instanceof Error ? error.message : String(error), status: 'cancelled' } }
       finally { approvalsWaiting.delete(taskId) }
     })()
@@ -1711,7 +1760,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         const started = Date.now()
         const connection = await open()
         if ('refused' in connection) return unread(url, connection.status, connection.refused, started)
-        if (connection.allowed.signal.aborted) return unread(url, 'cancelled', `you revoked the sites in Chrome before ${url} was read`, started)
+        if (connection.allowed.signal.aborted) return unread(url, 'cancelled', `${revokedBy(connection.allowed.signal)} before ${url} was read`, started)
         if (!connection.allowed.hosts.includes(new URL(url).host)) return unread(url, 'cancelled', `${new URL(url).host} is not among the sites you allowed for this run of the batch`, started)
         if (signal.aborted || context?.signal?.aborted === true) return unread(url, 'cancelled', `the batch stopped before ${url} was read`, started)
         // The task's cancel, or this engine shutting down, ends the read; the page's own timeout does not: the person's time is theirs.
@@ -3579,6 +3628,20 @@ async function markCrawlFailed(store: SqliteTaskStore, taskId: string): Promise<
       await store.putAttempt({ ...latest, status: 'failed', endedAt: now })
     }
   } catch {}
+}
+
+/** How the person allowed a site on the my-browser lane (login UX A1): clicked Allow for this read, or remembered from an earlier click, and when. */
+interface SiteGrant {
+  basis: 'clicked' | 'remembered'
+  allowedAt: string
+}
+
+/** The person's leave to read sites in their Chrome, with how each was allowed. */
+type Allowed = AllowedSites & { readonly grants: ReadonlyMap<string, SiteGrant> }
+
+/** What revoked the sites, as the person did it: the reason the signal aborted with, else Revoke or closing the page in Chrome. */
+function revokedBy(signal: AbortSignal): string {
+  return signal.reason instanceof Error && signal.reason.message.startsWith('you revoked') ? signal.reason.message : 'you revoked the sites in Chrome'
 }
 
 /**

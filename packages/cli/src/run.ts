@@ -205,7 +205,7 @@ async function runCommand(engine: ApiEngine, command: Command, urls: string[], b
       if (urls.length === 0 && body.loginWallsOf === undefined) throw new UsageError('takes URLs as arguments or --urls-file <file> (octocrawl batch --help)')
       const accepted = await engine.startBatch(parseBatchStartRequest({ ...body, ...(urls.length === 0 ? {} : { urls }), origin: ORIGIN }))
       io.stderr(`octocrawl batch: task ${accepted.taskId}${accepted.invalidURLs?.length ? `, ${accepted.invalidURLs.length} invalid URLs skipped` : ''}`)
-      if (body.lane === 'my-browser' || body.access === 'my-browser') io.stderr('octocrawl batch: in your Chrome, click Allow, then Allow reading these sites in the page Octocrawl opened (it lists every site of the batch); close that page or click Revoke to stop')
+      if (body.lane === 'my-browser' || body.access === 'my-browser') io.stderr('octocrawl batch: in your Chrome, click Allow if Chrome asks, then Allow reading these sites in the page Octocrawl opens for the sites of the batch you have not allowed before (none opens when you allowed them all; octocrawl login revoke <site> to forget one); close that page or click Revoke to stop')
       return finish(engine, 'batch', accepted.taskId, cli, io)
     }
   }
@@ -264,7 +264,9 @@ function handoffPrompts(command: 'scrape' | 'batch', io: CliIo): HandoffHooks {
     onConfirm: (url) => io.stderr(`octocrawl ${command}: ${url} shows no check in your Chrome: click on the page if it is the one to read (Octocrawl reads it only once you act in its tab)`),
     onHidden: (url) => io.stderr(`octocrawl ${command}: the Chrome tab Octocrawl opened for ${url} is not in front: switch to it (clicks in another tab or window are not seen)`),
     onContinue: (url, pages) => io.stderr(`octocrawl ${command}: through: page on in that tab by clicking Next, Octocrawl reads each page as it shows (${pages} read so far); it stops when Next is gone, or after 60 s without a new page`),
-    onAllow: (hosts) => io.stderr(`octocrawl ${command}: in your Chrome, click Allow, then Allow reading these sites in the page Octocrawl opened (${hosts.join(', ')}); close that page or click Revoke to stop. While remote debugging is on, sites see navigator.webdriver true: turn it off at chrome://inspect/#remote-debugging when you are done`),
+    onAllow: (asked, remembered, remember) => io.stderr(`octocrawl ${command}: in your Chrome, click Allow if Chrome asks, ${asked.length === 0
+      ? `then nothing more: you allowed ${remembered.join(', ')} before (octocrawl login revoke <site> to stop)`
+      : `then Allow reading these sites in the page Octocrawl opened (${asked.join(', ')})${remember ? '; Octocrawl remembers them and does not ask again (octocrawl login revoke <site> to forget one)' : ''}; close that page or click Revoke to stop`}. While remote debugging is on, sites see navigator.webdriver true: turn it off at chrome://inspect/#remote-debugging when you are done`),
     ...(io.signal === undefined ? {} : { signal: io.signal }),
   }
 }

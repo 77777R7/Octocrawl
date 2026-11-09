@@ -40,6 +40,17 @@ describe('the page that asks the person to allow sites', () => {
     expect(html).toContain('asks you to sign in, or shows a check, waits for you')
   })
 
+  it('says the sites are remembered, and how to revoke them, only when they are', () => {
+    const remembered = scopePage({ hosts: ['site.test'], task: 'scrape https://site.test/a', remember: true })
+    expect(remembered).toContain('Octocrawl remembers them and reads them again without asking until you revoke them')
+    expect(remembered).toContain('<code>octocrawl login revoke &lt;site&gt;</code>')
+    expect(remembered).toContain('Allowed and remembered. Click Revoke to forget these sites')
+    expect(remembered).not.toContain('only while this page stays open')
+    const once = page(['site.test'])
+    expect(once).toContain('only while this page stays open')
+    expect(once).not.toContain('remembers')
+  })
+
   it('stands still for reduced motion', () => {
     expect(page(['site.test'])).toContain('if (!still) window.requestAnimationFrame(frame)')
   })

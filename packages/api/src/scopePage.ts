@@ -168,12 +168,14 @@ export function scopePage(scope: SiteScope): string {
 <h1 class="row">Octocrawl asks to read pages in this Chrome</h1>
 <p class="task row"><code>${escape(scope.task)}</code></p>
 <div class="access row"><p class="kicker">${scope.hosts.length} ${scope.hosts.length === 1 ? 'site' : 'sites'} it may read</p><ul class="sites">${sites}</ul></div>
-<p class="note row">It reads as you, where you are signed in, only on these sites and only while this page stays open. A page that asks you to sign in, or shows a check, waits for you.</p>
+<p class="note row">${scope.remember === true
+  ? 'It reads as you, where you are signed in, only on these sites. Octocrawl remembers them and reads them again without asking until you revoke them: Revoke here, or <code>octocrawl login revoke &lt;site&gt;</code>. Closing this page stops this run. A page that asks you to sign in, or shows a check, waits for you.'
+  : 'It reads as you, where you are signed in, only on these sites and only while this page stays open. A page that asks you to sign in, or shows a check, waits for you.'}</p>
 <div class="actions row"><button id="allow">Allow reading these sites</button><button id="revoke">Revoke</button></div><p id="state" role="status"></p>
 </main>
 <script>
 const root = document.documentElement, state = document.getElementById('state')
-document.getElementById('allow').onclick = () => { if (root.dataset.octocrawl !== 'revoked') { root.dataset.octocrawl = 'allowed'; state.textContent = 'Allowed. Close this page or click Revoke to stop.' } }
+document.getElementById('allow').onclick = () => { if (root.dataset.octocrawl !== 'revoked') { root.dataset.octocrawl = 'allowed'; state.textContent = ${JSON.stringify(scope.remember === true ? 'Allowed and remembered. Click Revoke to forget these sites; closing this page stops this run.' : 'Allowed. Close this page or click Revoke to stop.')} } }
 document.getElementById('revoke').onclick = () => { root.dataset.octocrawl = 'revoked'; state.textContent = 'Revoked. Octocrawl reads nothing more here.' }
 </script>
 <script>${MOTION}</script></body></html>`
