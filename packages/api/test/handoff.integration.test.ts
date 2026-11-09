@@ -237,6 +237,30 @@ describe('one connection to the person\'s Chrome for a server\'s life (login UX 
   }, 90_000)
 })
 
+describe('the person revoking the sites in Octocrawl\'s page', () => {
+  it('is heard the moment they click Revoke, so a Revoke just before the page goes (Chrome quitting) is not lost', async () => {
+    const reader = await openUserChrome({ userDataDir: join(root, 'chrome') })
+    const pending = reader.allow({ hosts: ['revoke.test'], task: 'scrape https://revoke.test/' }, { pollMs: 50 })
+    let page: Page | undefined
+    for (let i = 0; i < 100 && page === undefined; i++) {
+      for (const candidate of chrome.pages()) if (await candidate.locator('#allow').count().catch(() => 0) > 0) page = candidate
+      if (page === undefined) await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    await page!.click('#allow')
+    const allowed = await pending
+    try {
+      // Revoke, and the page gone before the next look at it (every 500 ms): only the page's own call says it was Revoke.
+      await page!.click('#revoke')
+      await page!.close()
+      await expect.poll(() => allowed.signal.aborted, { timeout: 5_000 }).toBe(true)
+      expect(allowed.revoked?.()).toBe(true)
+    } finally {
+      await allowed.close()
+      reader.close()
+    }
+  }, 30_000)
+})
+
 describe('reading a page in the person\'s own Chrome in a tab opened behind theirs', () => {
   it('background: Chrome opens the tab behind the current one, the page with no check is read whole at once, and a check brings the tab to the front for the person', async () => {
     // Playwright's Chromium reports every tab visible (document.visibilityState), so what is checked here is that Chrome

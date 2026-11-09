@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import Ajv2020 from 'ajv/dist/2020.js'
 import { ChromeLoginError, type CdpConnection } from '../src/chromeLogin.js'
-import { HandoffNotThrough, openUserChrome } from '../src/chromeHandoff.js'
+import { ChromeQuit, chromeReturned, HandoffNotThrough, openUserChrome } from '../src/chromeHandoff.js'
 import { createApp } from '../src/app.js'
 import { createApiEngine, type ApiEngine } from '../src/engine.js'
 import { parseScrapeRequest } from '@w2l/contracts'
@@ -31,9 +31,12 @@ type Answer = { answer: '' | 'allowed' | 'revoked'; active: boolean } | 'closed'
  * `documentStatus`: the page's document answers with this status (heard as Chrome's response event); `refuseTabs`: Chrome
  * refuses to open the page's tab; `shown`: the page as it shows, without what it hides (the whole `html` without it), which
  * the first `shownFails` times the page has just moved on to another document, and the next `shownMoved` times was read on
- * another address.
+ * another address; `quitAt`: Chrome quits as the page tab of that number (from 1) goes to its page, and takes no
+ * connection until `comeBack()`; `tabsFirst`: as it quits, Chrome closes every tab 1 s before the connection, as Chrome
+ * does on Cmd-Q; `refusedOnReturn`: once back, Chrome refuses that many connections, each after `refusedAfterMs` (at
+ * once by default), as a Chrome just started does, or as Chrome does when the person declines its Allow.
  */
-function fakeChrome(answers: Answer[], page: { href?: string; html: string; htmls?: Record<string, string>; documentStatus?: number; refuseTabs?: boolean; shown?: string; shownFails?: number; shownMoved?: number; hidden?: boolean; touched?: boolean }) {
+function fakeChrome(answers: Answer[], page: { href?: string; html: string; htmls?: Record<string, string>; documentStatus?: number; refuseTabs?: boolean; shown?: string; shownFails?: number; shownMoved?: number; hidden?: boolean; touched?: boolean; quitAt?: number; tabsFirst?: boolean; refusedOnReturn?: number; refusedAfterMs?: number }) {
   const listeners = new Map<string, (params: Record<string, unknown>) => void>()
   const written: string[] = []
   const created: string[] = []
@@ -61,10 +64,27 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; html
   // `sent`: commands sent so far.
   let connects = 0
   let sent = 0
-  const connect = async (): Promise<CdpConnection> => { connectionClosed = false; connects++; return {
+  // Chrome is not running (it quit): no connection is taken.
+  let down = false
+  let pageNavigations = 0
+  // Every tab closed, the connection not yet (Chrome quitting, tabs first).
+  let tabsGone = false
+  // Connections asked for, taken or not; and those Chrome still refuses since it came back.
+  let attempts = 0
+  let refusing = 0
+  const connect = async (): Promise<CdpConnection> => {
+    attempts++
+    if (down) throw new ChromeLoginError('Chrome did not accept the connection (Allow not clicked, or remote debugging is off)')
+    if (refusing > 0) {
+      refusing--
+      await new Promise((resolve) => setTimeout(resolve, page.refusedAfterMs ?? 0))
+      throw new ChromeLoginError('Chrome did not accept the connection (Allow not clicked, or remote debugging is off)')
+    }
+    connectionClosed = false; tabsGone = false; connects++; return {
     async send(method, params, sessionId) {
       const p = (params ?? {}) as Record<string, unknown>
       if (connectionClosed) { afterClose.push(method); throw new ChromeLoginError('Chrome closed the connection') }
+      if (tabsGone && (sessionId !== undefined || method === 'Target.getTargetInfo')) throw new ChromeLoginError('Target closed: Chrome detached the tab\'s session (the tab was closed)')
       sent++
       if (method === 'Browser.getVersion') return { product: 'Chrome/144.0.7000.0' }
       if (method === 'Target.createTarget' && page.refuseTabs === true && targets >= 1) throw new ChromeLoginError('Chrome refused the request: Failed to open a new tab')
@@ -72,6 +92,13 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; html
       if (method === 'Target.createTarget') { const id = `tab${++targets}`; kinds.set(id, 'page'); created.push(id); live.add(id); if (p.background === true) backgrounded.push(id); return { targetId: id } }
       if (method === 'Target.attachToTarget') return { sessionId: `s:${String(p.targetId)}` }
       if (method === 'Page.navigate') {
+        if (page.quitAt === ++pageNavigations) {
+          down = true
+          if (page.tabsFirst !== true) { connectionClosed = true; throw new ChromeLoginError('Chrome closed the connection') }
+          tabsGone = true
+          setTimeout(() => { connectionClosed = true }, 1_000)
+          throw new ChromeLoginError('Target closed: Chrome detached the tab\'s session (the tab was closed)')
+        }
         const target = String(sessionId).replace(/^s:/, '')
         if (!navigated.has(target) && live.has(target)) mostOpen = Math.max(mostOpen, ++open)
         navigated.set(target, String(p.url))
@@ -80,7 +107,7 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; html
       }
       if (method === 'Target.closeTarget') { if (navigated.has(String(p.targetId)) && live.has(String(p.targetId))) open--; live.delete(String(p.targetId)); return {} }
       if (method === 'Target.activateTarget') { activated.push(String(p.targetId)); return {} }
-      if (method === 'Network.enable' || method === 'Page.enable') return {}
+      if (method === 'Network.enable' || method === 'Page.enable' || method === 'Runtime.enable' || method === 'Runtime.addBinding') return {}
       if (method === 'Page.createIsolatedWorld') return { executionContextId: 7 }
       if (method === 'Runtime.evaluate' && String(p.expression).includes('document.write')) kinds.set(String(sessionId).replace(/^s:/, ''), 'scope')
       const kind = kinds.get(String(sessionId ?? p.targetId).replace(/^s:/, ''))
@@ -121,7 +148,7 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; html
     close() { connectionClosed = true },
   } }
   // quit(): Chrome closes the connection (it quit, or remote debugging was turned off).
-  return { connect, written, created, activated, backgrounded, navigated, mostOpen: () => mostOpen, live, afterClose, closed: () => connectionClosed, regionReads: () => regionReads, connects: () => connects, sent: () => sent, quit: () => { connectionClosed = true } }
+  return { connect, written, created, activated, backgrounded, navigated, mostOpen: () => mostOpen, live, afterClose, closed: () => connectionClosed, regionReads: () => regionReads, connects: () => connects, sent: () => sent, quit: () => { connectionClosed = true }, down: () => down, comeBack: () => { down = false; refusing = page.refusedOnReturn ?? 0 }, attempts: () => attempts }
 }
 
 describe('the my-browser lane', () => {
@@ -456,12 +483,13 @@ describe('the my-browser lane in a batch', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  async function setup(chrome: ReturnType<typeof fakeChrome> | null, options: { hosted?: boolean; hiddenWaitMs?: number; signInSettleMs?: number; logins?: boolean } = {}) {
+  /** `returnWaitMs`: how long a batch waits for a Chrome that quit to come back; Chrome takes a connection again once the fake's comeBack() was called. */
+  async function setup(chrome: ReturnType<typeof fakeChrome> | null, options: { hosted?: boolean; hiddenWaitMs?: number; signInSettleMs?: number; logins?: boolean; returnWaitMs?: number } = {}) {
     root = await mkdtemp(join(tmpdir(), 'w2l-my-browser-batch-'))
     const userDataDir = join(root, 'chrome')
     await mkdir(userDataDir, { recursive: true })
     await writeFile(join(userDataDir, 'DevToolsActivePort'), '9222\n/devtools/browser/x\n')
-    engine = createApiEngine({ taskRoot: join(root, 'tasks'), ...(options.logins === true ? { sessionsFile: join(root, 'logins', 'sessions.json') } : {}), ...(options.hosted === true ? { hosted: true } : {}), ...(chrome === null ? {} : { userChrome: { userDataDir, connect: chrome.connect, ...(options.hiddenWaitMs === undefined ? {} : { hiddenWaitMs: options.hiddenWaitMs }), ...(options.signInSettleMs === undefined ? {} : { signInSettleMs: options.signInSettleMs }) } }) })
+    engine = createApiEngine({ taskRoot: join(root, 'tasks'), ...(options.logins === true ? { sessionsFile: join(root, 'logins', 'sessions.json') } : {}), ...(options.hosted === true ? { hosted: true } : {}), ...(chrome === null ? {} : { userChrome: { userDataDir, connect: chrome.connect, ...(options.hiddenWaitMs === undefined ? {} : { hiddenWaitMs: options.hiddenWaitMs }), ...(options.signInSettleMs === undefined ? {} : { signInSettleMs: options.signInSettleMs }), reachable: async () => !chrome.down(), ...(options.returnWaitMs === undefined ? {} : { returnWaitMs: options.returnWaitMs }) } }) })
     return createApp(engine)
   }
   const post = async (app: ReturnType<typeof createApp>, body: Record<string, unknown>) => {
@@ -588,6 +616,116 @@ describe('the my-browser lane in a batch', () => {
     expect(chrome.written).toHaveLength(1)
   }, 30_000)
 
+  /** Waits until the fake Chrome has quit and the batch says it waits for the person, then brings Chrome back. */
+  async function quitAndComeBack(app: ReturnType<typeof createApp>, chrome: ReturnType<typeof fakeChrome>, id: string) {
+    while (!chrome.down()) await new Promise((resolve) => setTimeout(resolve, 10))
+    while ((await (await app.request(`/v1/batches/${id}`)).json() as { waitingForApproval?: boolean }).waitingForApproval !== true) await new Promise((resolve) => setTimeout(resolve, 10))
+    chrome.comeBack()
+  }
+
+  it('reads on when Chrome comes back after it quit mid-batch: the page it was reading again, the sites remembered not asked for again', async () => {
+    // Chrome quits as the second page loads.
+    const chrome = fakeChrome([{ answer: 'allowed', active: true }], { html: PAGE, quitAt: 2 })
+    const app = await setup(chrome, { logins: true })
+    const urls = ['https://site.test/a', 'https://site.test/b', 'https://other.test/c']
+    const started = await post(app, { urls, lane: 'my-browser' })
+    const id = String(started.body.id ?? started.body.taskId)
+    await quitAndComeBack(app, chrome, id)
+    const { report, items } = await settled(app, id)
+    expect(report).toMatchObject({ status: 'completed', completed: 3 })
+    expect(report.waitingForApproval).toBeUndefined()
+    for (const url of urls) expect(items[url]).toMatchObject({ status: 'success', lane: 'my_browser' })
+    // Chrome asked its Allow again for the new connection; Octocrawl's page did not ask again: both sites were remembered.
+    expect(chrome.connects()).toBe(2)
+    expect(chrome.written).toHaveLength(1)
+    expect(items['https://site.test/b']!.evidenceRecord.access.allowance).toMatchObject({ basis: 'remembered' })
+  }, 30_000)
+
+  it('reads on as well when Chrome closes its tabs a moment before the connection as it quits', async () => {
+    const chrome = fakeChrome([{ answer: '', active: false }, { answer: 'allowed', active: true }], { html: PAGE, quitAt: 2, tabsFirst: true })
+    const app = await setup(chrome, { logins: true })
+    const urls = ['https://site.test/a', 'https://site.test/b', 'https://site.test/c']
+    const started = await post(app, { urls, lane: 'my-browser' })
+    const id = String(started.body.id ?? started.body.taskId)
+    await quitAndComeBack(app, chrome, id)
+    const { report, items } = await settled(app, id)
+    expect(report).toMatchObject({ status: 'completed', completed: 3 })
+    for (const url of urls) expect(items[url]).toMatchObject({ status: 'success', lane: 'my_browser' })
+    expect(chrome.connects()).toBe(2)
+    expect(chrome.written).toHaveLength(1)
+  }, 30_000)
+
+  it('connects again when Chrome refuses the first connections at once as it starts, seen with a real Chrome', async () => {
+    const chrome = fakeChrome([{ answer: 'allowed', active: true }], { html: PAGE, quitAt: 2, refusedOnReturn: 2 })
+    const app = await setup(chrome, { logins: true })
+    const urls = ['https://site.test/a', 'https://site.test/b', 'https://site.test/c']
+    const started = await post(app, { urls, lane: 'my-browser' })
+    const id = String(started.body.id ?? started.body.taskId)
+    await quitAndComeBack(app, chrome, id)
+    const { report, items } = await settled(app, id)
+    expect(report).toMatchObject({ status: 'completed', completed: 3 })
+    for (const url of urls) expect(items[url]).toMatchObject({ status: 'success', lane: 'my_browser' })
+    expect(chrome.connects()).toBe(2)
+  }, 30_000)
+
+  it('does not connect again when Chrome refused a connection after a while: the person declined its Allow', async () => {
+    const chrome = fakeChrome([{ answer: 'allowed', active: true }], { html: PAGE, quitAt: 2, refusedOnReturn: 5, refusedAfterMs: 2_500 })
+    const app = await setup(chrome, { logins: true })
+    const urls = ['https://site.test/a', 'https://site.test/b', 'https://site.test/c']
+    const started = await post(app, { urls, lane: 'my-browser' })
+    const id = String(started.body.id ?? started.body.taskId)
+    await quitAndComeBack(app, chrome, id)
+    const before = chrome.attempts()
+    const { report, items } = await settled(app, id)
+    expect(report).toMatchObject({ status: 'completed', completed: 3, succeeded: 1 })
+    expect(items['https://site.test/c']).toMatchObject({ status: 'failed', failureReason: 'connection_error' })
+    // One connection asked for once Chrome was back, and no more: each would ask the person again.
+    expect(chrome.attempts() - before).toBe(1)
+  }, 30_000)
+
+  it('asks again for the sites it could not remember when Chrome comes back after it quit', async () => {
+    // No saved logins: nothing is remembered, so the sites are asked for again on the new connection.
+    const chrome = fakeChrome([{ answer: 'allowed', active: true }], { html: PAGE, quitAt: 2 })
+    const app = await setup(chrome)
+    const urls = ['https://site.test/a', 'https://site.test/b']
+    const started = await post(app, { urls, lane: 'my-browser' })
+    const id = String(started.body.id ?? started.body.taskId)
+    await quitAndComeBack(app, chrome, id)
+    const { report, items } = await settled(app, id)
+    expect(report).toMatchObject({ status: 'completed', completed: 2 })
+    for (const url of urls) expect(items[url]).toMatchObject({ status: 'success', lane: 'my_browser' })
+    expect(chrome.connects()).toBe(2)
+    expect(chrome.written).toHaveLength(2)
+  }, 30_000)
+
+  it('ends the pages left cancelled, saying so, when Chrome does not come back in time after it quit', async () => {
+    const chrome = fakeChrome([{ answer: 'allowed', active: true }], { html: PAGE, quitAt: 2 })
+    const app = await setup(chrome, { logins: true, returnWaitMs: 300 })
+    const urls = ['https://site.test/a', 'https://site.test/b', 'https://site.test/c']
+    const started = await post(app, { urls, lane: 'my-browser' })
+    const { items } = await settled(app, started.body.id ?? started.body.taskId)
+    expect(items['https://site.test/a']).toMatchObject({ status: 'success' })
+    for (const url of urls.slice(1)) {
+      expect(items[url]).toMatchObject({ status: 'cancelled', lane: 'my_browser' })
+      expect(items[url]!.warnings).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'my_browser_not_read', message: expect.stringContaining('Chrome did not come back') })]))
+    }
+    expect(chrome.connects()).toBe(1)
+  }, 30_000)
+
+  it('stops waiting for Chrome to come back when the batch is cancelled', async () => {
+    const chrome = fakeChrome([{ answer: 'allowed', active: true }], { html: PAGE, quitAt: 2 })
+    const app = await setup(chrome, { logins: true })
+    const started = await post(app, { urls: ['https://site.test/a', 'https://site.test/b'], lane: 'my-browser' })
+    const id = String(started.body.id ?? started.body.taskId)
+    while ((await (await app.request(`/v1/batches/${id}`)).json() as { waitingForApproval?: boolean }).waitingForApproval !== true) await new Promise((resolve) => setTimeout(resolve, 10))
+    const cancelledAt = Date.now()
+    await app.request(`/v1/batches/${id}/cancel`, { method: 'POST' })
+    const { report } = await settled(app, id)
+    expect(report).toMatchObject({ status: 'cancelled' })
+    expect(Date.now() - cancelledAt).toBeLessThan(5_000)
+    expect(chrome.connects()).toBe(1)
+  }, 30_000)
+
   it('reads none of its pages when the person does not allow the sites, and says why on each', async () => {
     const chrome = fakeChrome([{ answer: 'revoked', active: true }], { html: PAGE })
     const app = await setup(chrome)
@@ -709,6 +847,25 @@ describe('the person\'s Chrome, asked to allow sites', () => {
     expect(steps.map(([step]) => step)).toEqual(['shown', 'ready', 'answer', 'refused'])
     expect(steps[1]![1]).toEqual({ buttons: true })
     expect(steps[3]![1]).toMatchObject({ reason: 'timeout', answer: 'allowed', active: false })
+  }, 20_000)
+
+  it('tells Chrome quitting from the person revoking: the page gone with the connection is not a revoke', async () => {
+    userDataDir = await mkdtemp(join(tmpdir(), 'w2l-my-browser-chrome-'))
+    await writeFile(join(userDataDir, 'DevToolsActivePort'), '9222\n/devtools/browser/x\n')
+    const chrome = fakeChrome([{ answer: 'allowed', active: true }], { href: 'https://site.test/a', html: PAGE })
+    const reader = await openUserChrome({ userDataDir, connect: chrome.connect })
+    const allowed = await reader.allow({ hosts: ['site.test'], task: 't' }, { pollMs: 1 })
+    expect(reader.gone()).toBe(false)
+    chrome.quit()
+    for (let i = 0; i < 100 && !allowed.signal.aborted; i++) await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(reader.gone()).toBe(true)
+    expect(allowed.signal.reason).toBeInstanceOf(ChromeQuit)
+    expect(allowed.revoked?.()).toBe(false)
+    await allowed.close()
+    // Back means listening at its address again, asked without a connection: no Allow of Chrome's.
+    expect(await chromeReturned({ userDataDir, reachable: async () => false })).toBe(false)
+    expect(await chromeReturned({ userDataDir, reachable: async (endpoint) => endpoint === 'ws://127.0.0.1:9222/devtools/browser/x' })).toBe(true)
+    expect(await chromeReturned({ userDataDir: join(userDataDir, 'none'), reachable: async () => true })).toBe(false)
   }, 20_000)
 
   it('reads without the person only on the host they allowed, exactly: not a subdomain or a parent it leads to', async () => {

@@ -36,8 +36,8 @@
 import { extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 import { classifyGate, type GateVerdict } from '@w2l/http-core'
 import { contentHeldBack, isLoginPath, LOADING_PROBE, REGION_WAIT_MAX_MS, RegionTracker, sessionCoversHost, STEADY_WAIT_MAX_MS, type RegionSpec, type SteadyOutcome, type UserBrowserRead } from '@w2l/bench'
-import { chromeEndpoint, chromeUserDataDir, ChromeLoginError, connectCdp, type CdpConnection } from './chromeLogin.js'
-import { scopePage } from './scopePage.js'
+import { chromeEndpoint, chromeReachable, chromeUserDataDir, ChromeLoginError, connectCdp, type CdpConnection } from './chromeLogin.js'
+import { REVOKE_BINDING, scopePage } from './scopePage.js'
 
 export interface UserChromeOptions {
   /** Chrome's user data directory; default the stable channel's for this OS. */
@@ -52,6 +52,49 @@ export interface UserChromeOptions {
   loginWaitMs?: number
   /** Replaces a read's signInSettleMs (a test shortens it). */
   signInSettleMs?: number
+  /** How long a batch waits for a Chrome that quit mid-run to come back (login UX A3). Default CHROME_RETURN_WAIT_MS. */
+  returnWaitMs?: number
+  /** Whether Chrome listens at the endpoint, without asking its Allow; a test passes its own. Default a TCP probe. */
+  reachable?: (endpoint: string) => Promise<boolean>
+}
+
+/** How long a batch on the my-browser lane waits for the person's Chrome to come back after it quit: 10 minutes. */
+export const CHROME_RETURN_WAIT_MS = 600_000
+
+/**
+ * Why a page asking to allow sites stopped answering: Chrome closed the connection (it quit, or remote debugging was
+ * turned off), not the person closing that page or clicking Revoke.
+ */
+export class ChromeQuit extends Error {
+  constructor() { super('Chrome quit or closed the connection') }
+}
+
+/**
+ * How long a page gone without the connection closing is given for the connection to close too: Chrome quitting closes
+ * its tabs a moment before the connection, and a tab gone then is Chrome quitting, not the person closing it.
+ */
+export const QUIT_SETTLE_MS = 2_000
+
+/**
+ * A connection refused within this long after it was asked for was refused by Chrome itself, not by the person: a Chrome
+ * just started refuses one at once for a moment (2026-11-08, Chrome 156). Declining Chrome's Allow takes longer.
+ */
+export const REFUSED_AT_ONCE_MS = 1_000
+
+/** Whether the connection closes within `ms` (closed already included). */
+async function closedWithin(connection: CdpConnection, ms: number): Promise<boolean> {
+  for (const until = Date.now() + ms; ;) {
+    if (connection.isClosed?.() === true) return true
+    if (Date.now() >= until) return false
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+}
+
+/** Whether the person's Chrome is back after it quit: its DevToolsActivePort names an address it listens at. Asks nothing. */
+export async function chromeReturned(options: UserChromeOptions = {}): Promise<boolean> {
+  let endpoint: string
+  try { endpoint = await chromeEndpoint(options.userDataDir ?? chromeUserDataDir()) } catch { return false }
+  return (options.reachable ?? chromeReachable)(endpoint)
 }
 
 export interface UserChromeReadOptions {
@@ -192,7 +235,7 @@ export interface AllowedSites {
 }
 
 /** One step of asking the person to allow sites, for the server's log: never a page's content, only the page's own state. */
-export type ApprovalLog = (step: 'shown' | 'ready' | 'answer' | 'allowed' | 'refused' | 'remembered', detail: Record<string, unknown>) => void
+export type ApprovalLog = (step: 'shown' | 'ready' | 'answer' | 'allowed' | 'refused' | 'remembered' | 'chrome_lost' | 'chrome_back' | 'chrome_refused', detail: Record<string, unknown>) => void
 
 /** The sites and the task the person is asked to allow. */
 export interface SiteScope {
@@ -216,6 +259,10 @@ export interface UserChrome {
    * a wait that ends unanswered can be told from a click that was not recognised.
    */
   allow(scope: SiteScope, options?: { waitMs?: number; pollMs?: number; signal?: AbortSignal; log?: ApprovalLog }): Promise<AllowedSites>
+  /** Whether Chrome closed the connection (it quit, or remote debugging was turned off). */
+  gone(): boolean
+  /** Whether Chrome closes the connection within `ms`: a tab just gone may be Chrome quitting (QUIT_SETTLE_MS). */
+  goneWithin(ms: number): Promise<boolean>
   close(): void
 }
 
@@ -313,6 +360,8 @@ export async function openUserChrome(options: UserChromeOptions = {}, signal?: A
     }),
     readList: (url, readOptions) => readList(connection, browser, url, readOptions),
     allow: (scope, allowOptions = {}) => allowSites(connection, scope, allowOptions),
+    gone: () => connection.isClosed?.() === true,
+    goneWithin: (ms) => closedWithin(connection, ms),
     close: () => connection.close(),
   }
 }
@@ -348,8 +397,22 @@ async function allowSites(connection: CdpConnection, scope: SiteScope, options: 
       return null
     }
   }
+  // Revoke is heard the moment the person clicks it (the page calls REVOKE_BINDING), not only at the next look: a Revoke
+  // clicked just before Chrome quits is not lost. A script could call it too, which only stops reading.
+  const revoked = new AbortController()
+  let clickedRevoke = false
+  let stopBinding: (() => void) | undefined
   try {
     const { sessionId } = await connection.send('Target.attachToTarget', { targetId, flatten: true }) as { sessionId: string }
+    if (connection.on !== undefined) {
+      stopBinding = connection.on('Runtime.bindingCalled', sessionId, (params) => {
+        if (params.name !== REVOKE_BINDING) return
+        clickedRevoke = true
+        revoked.abort(new Error('you revoked the sites in Chrome'))
+      })
+      await connection.send('Runtime.enable', {}, sessionId)
+      await connection.send('Runtime.addBinding', { name: REVOKE_BINDING }, sessionId)
+    }
     await connection.send('Target.activateTarget', { targetId }).catch(() => undefined)
     await connection.send('Runtime.evaluate', { expression: `document.open(); document.write(${JSON.stringify(scopePage(scope))}); document.close()` }, sessionId)
     const world = (await connection.send('Page.createIsolatedWorld', { frameId: targetId, worldName: WORLD }, sessionId) as { executionContextId: number }).executionContextId
@@ -376,20 +439,22 @@ async function allowSites(connection: CdpConnection, scope: SiteScope, options: 
       if (seen.answer === 'allowed' && seen.active) { log('allowed', { afterMs: Date.now() - started }); break }
     }
     // Allowed: the page is watched until it is closed or revoked.
-    const revoked = new AbortController()
-    let clickedRevoke = false
     let watching = true
     void (async () => {
       while (watching && !revoked.signal.aborted) {
         await new Promise((resolve) => setTimeout(resolve, Math.max(pollMs, 500)))
         if (!watching) return
         const seen = await answerOf(sessionId, world)
-        if (seen?.answer === 'revoked') clickedRevoke = true
-        if (seen === null || seen.answer === 'revoked') revoked.abort(new Error('you revoked the sites in Chrome'))
+        if (seen?.answer === 'revoked') { clickedRevoke = true; revoked.abort(new Error('you revoked the sites in Chrome')) }
+        if (seen !== null || revoked.signal.aborted) continue
+        // The page gone with the connection, or just before it: Chrome quit, which is not the person revoking the sites.
+        const quit = await closedWithin(connection, QUIT_SETTLE_MS)
+        if (watching) revoked.abort(quit && !clickedRevoke ? new ChromeQuit() : new Error('you revoked the sites in Chrome'))
       }
     })()
-    return { hosts: [...scope.hosts], signal: revoked.signal, revoked: () => clickedRevoke, close: async () => { watching = false; await closeTab() } }
+    return { hosts: [...scope.hosts], signal: revoked.signal, revoked: () => clickedRevoke, close: async () => { watching = false; stopBinding?.(); await closeTab() } }
   } catch (error) {
+    stopBinding?.()
     await closeTab()
     if (error instanceof HandoffNotThrough) throw error
     throw refused(`Octocrawl could not ask you in Chrome: ${error instanceof Error ? error.message : String(error)}`, 'chrome')

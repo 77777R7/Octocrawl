@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createServer, type AddressInfo } from 'node:net'
+import { getEventListeners } from 'node:events'
 import { FileSessionStore } from '@w2l/bench'
 import { normalizeAccessConfig } from '@w2l/http-core'
-import { ChromeLoginError, chromeEndpoint, chromeUserDataDir, cookiesForDomain, importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin, type CdpConnection } from '../src/chromeLogin.js'
+import { ChromeLoginError, chromeEndpoint, chromeReachable, connectCdp, chromeUserDataDir, cookiesForDomain, importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin, type CdpConnection } from '../src/chromeLogin.js'
 
 const COOKIES = [
   { name: '__Host-sid', value: 'cookie-value-1', domain: 'www.example.com', path: '/', expires: -1, httpOnly: true, secure: true, session: true, sameSite: 'Lax' as const },
@@ -235,5 +237,35 @@ describe('octocrawl login import from the user\'s Chrome', () => {
     expect(chromeUserDataDir('darwin', {}, '/Users/a')).toBe(join('/Users/a', 'Library', 'Application Support', 'Google', 'Chrome'))
     expect(chromeUserDataDir('linux', {}, '/home/a')).toBe(join('/home/a', '.config', 'google-chrome'))
     expect(chromeUserDataDir('win32', { LOCALAPPDATA: 'C:\\Users\\a\\AppData\\Local' }, 'C:\\Users\\a')).toBe(join('C:\\Users\\a\\AppData\\Local', 'Google', 'Chrome', 'User Data'))
+  })
+})
+
+describe('whether Chrome listens at its debugging address', () => {
+  it('answers from a TCP connection alone: listening, then closed', async () => {
+    let requests = 0
+    const server = createServer((socket) => { socket.on('data', () => { requests++ }) })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const endpoint = `ws://127.0.0.1:${(server.address() as AddressInfo).port}/devtools/browser/x`
+    expect(await chromeReachable(endpoint)).toBe(true)
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+    expect(await chromeReachable(endpoint)).toBe(false)
+    // Nothing was sent: no request Chrome would ask its Allow for.
+    expect(requests).toBe(0)
+  })
+})
+
+describe('a connection Chrome refuses', () => {
+  it('leaves nothing on the signal it was asked with, however many times it is asked again', async () => {
+    // Refuses every WebSocket upgrade, as a Chrome just started does.
+    const server = createServer((socket) => { socket.once('data', () => socket.end('HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\n\r\n')) })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const endpoint = `ws://127.0.0.1:${(server.address() as AddressInfo).port}/devtools/browser/x`
+    const signal = new AbortController().signal
+    try {
+      for (let i = 0; i < 5; i++) await expect(connectCdp(endpoint, 5_000, signal)).rejects.toThrow('Chrome did not accept the connection')
+      expect(getEventListeners(signal, 'abort')).toHaveLength(0)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
   })
 })
