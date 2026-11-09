@@ -511,7 +511,7 @@ GitHub Innovation Graph 的数是"位于该经济体的开发者账号"，含不
 - 第三轮：EDPB 指南里"网络搜索工具"出现在第 54 段，不是第 14、15 段；ModelScope 的默认排序依据置顶权重，不是调用量；日本 ITreview 上的 ¥33,000 一次性价格没有页面支持；Context7 的私有来源页面没有列 Notion 或 GitBook，但公共 API 另有网站、`llms.txt` 与 Notion 的接口。
 
 **11.3 需要 Howard 自己做才能确认。**
-1. **访谈**，见画像文档末尾的 8 个问题。每层至少 3 个人，先 T3 与 T4。
+1. **访谈**，见画像文档末尾的 9 个问题。每层至少 3 个人，先 T3 与 T4。
 2. **从中国大陆测一次可达性**：用一台大陆的 VPS 或国内拨测服务，请求 `https://octocrawl.dev`、`https://mcp.octocrawl.dev/health`、`https://api.octocrawl.dev/health`，记录结果与时间。调研无法代做。
 3. **跑一次对照**：挑 200 个常用 npm 包，记录各自的文档站是否在 Context7、是否有 `llms.txt`、Octocrawl 与 Firecrawl 读到的 Markdown 差别。这是"文档楔子"的规模和胜率的唯一直接测量。
 4. **用 Firecrawl 付费账号测一次**：让它读一个会返回 HTTP 200 验证码页的 URL，看是否扣积分。
