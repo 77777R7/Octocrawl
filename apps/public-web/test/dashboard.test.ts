@@ -486,6 +486,27 @@ describe('the Playground says what a result is', () => {
     expect(failed.$('play-status').className).toBe('status bad')
     expect(failed.$('play-next').textContent).toBe('Next: no lane answered within the request\'s deadline; raise timeout (up to 300000 ms over REST, 180000 ms from an MCP tool)')
   })
+
+  it('says in plain words why a page was not read and offers a page that reads; a page that was read gets none', async () => {
+    const help = ($: Page['$']) => ({ hidden: $('play-help').hidden, title: $('play-help').querySelector('.pg-help-title')?.textContent, actions: [...$('play-help').querySelectorAll('.pg-link')].map(a => a.textContent) })
+    const notRead = (extra: Record<string, unknown>, ev: Record<string, unknown> = {}) => ({ requestedUrl: 'https://docs.example/a', markdown: null, agentHints: [], ...extra, evidenceRecord: { ...record, robotsDecision: { decision: 'allowed', robotsUrl: 'https://docs.example/robots.txt', unreachable: null }, httpStatus: null, ...ev } })
+    const blocked = await run(notRead({ status: 'blocked', blockReason: 'cloudflare_challenge' }, { status: 'blocked', reason: 'cloudflare_challenge', httpStatus: 403 }))
+    expect(help(blocked.$)).toEqual({ hidden: false, title: 'The site stopped the read with a bot check', actions: ['Try a page that reads', 'Read it on your computer →', 'Ask us about this page'] })
+    expect(blocked.$('play-help').querySelector('a[href="/docs/connect-mcp/#run-it-on-your-computer"]')).not.toBeNull()
+    expect(help((await run(notRead({ status: 'failed', failureReason: 'timeout' }, { status: 'failed', reason: 'timeout' }))).$).title).toBe('The page took too long to answer')
+    expect(help((await run(notRead({ status: 'failed', failureReason: 'http_error' }, { status: 'failed', reason: 'http_error', httpStatus: 404 }))).$)).toMatchObject({ title: 'There is no page at this address (HTTP 404)', actions: ['Try a page that reads', 'Ask us about this page'] })
+    const disallowed = { status: 'failed', reason: 'policy_denied', robotsDecision: { decision: 'disallowed', robotsUrl: 'https://docs.example/robots.txt', unreachable: null } }
+    expect(help((await run(notRead({ status: 'failed', failureReason: 'policy_denied' }, disallowed))).$)).toMatchObject({ title: 'This site\'s robots.txt keeps Octocrawl out', actions: ['Try a page that reads', 'Read it on your computer →', 'Ask us about this page'] })
+    // A rule that names Octocrawl is not set aside on a local server either, so the box does not send the reader there.
+    const byName = notRead({ status: 'failed', failureReason: 'policy_denied', trace: [{ event: 'robots_checked', detail: { matchedGroup: 'octocrawl' } }] }, disallowed)
+    expect(help((await run(byName)).$)).toEqual({ hidden: false, title: 'This site\'s robots.txt keeps Octocrawl out by name', actions: ['Try a page that reads', 'Ask us about this page'] })
+    // The sample is put in the form and run: the next answer is the page that reads.
+    const { $, window } = blocked
+    ;([...$('play-help').querySelectorAll('button')].find(b => b.textContent === 'Try a page that reads') as HTMLElement).click()
+    await settle()
+    expect((new window.FormData($('play-form') as never)).get('url')).toBe('https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview')
+    expect((await run({ ...elsewhere, warnings: [], readiness: { state: 'ready', basis: [] }, evidenceRecord: { ...record, finalUrl: 'https://docs.example/a' } })).$('play-help').hidden).toBe(true)
+  })
 })
 
 describe('the account menu and the credit bars', () => {

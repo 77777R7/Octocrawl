@@ -216,6 +216,7 @@ const playgroundBody = (endpoint) => {
 <p class="pg-note" id="play-summary" role="status" aria-live="polite"></p></div>
 </div>
 <section class="panel pg-result" id="play-result" hidden aria-labelledby="result-title"><div class="panel-head"><div><h2 id="result-title">Result</h2><p class="dash-small" id="play-detail"></p><p class="dash-small pg-next" id="play-next" hidden></p></div><span class="status" id="play-status"></span></div>
+<div class="pg-help" id="play-help" role="status" hidden></div>
 <div class="tabs play-views" role="tablist" aria-label="Result view">${views}</div>
 <dl class="facts play-evidence" id="play-evidence" hidden></dl>
 <div class="code"><pre class="play-output" id="play-output" tabindex="0"></pre><button class="copy" type="button" data-copy="play-output">Copy</button></div></section>

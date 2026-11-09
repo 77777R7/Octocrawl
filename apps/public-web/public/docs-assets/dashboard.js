@@ -1117,6 +1117,52 @@
     }
     /** Whether the site answered another page in place of the one asked for (#821): a redirected_off_page warning, or readiness not_served. */
     const offPage = (result) => (Array.isArray(result.warnings) && result.warnings.some((warning) => warning && warning.code === 'redirected_off_page')) || (result.readiness && result.readiness.state === 'not_served')
+    // A page that was not read, in plain words, with what to do next. Most of the accounts that tried the Playground
+    // ran one page and never came back, and the two whose first page was not read left at once (accounts 2026-10-26 to
+    // 11-09), so a page that was not read says why and offers a page that reads. The answer's own agentHints stay in
+    // play-next for those who want the technical next step.
+    const SAMPLE = 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview'
+    const LOCAL = '/docs/connect-mcp/#run-it-on-your-computer'
+    const whyNot = (result) => {
+      const record = result.evidenceRecord || {}
+      const reason = result.failureReason || result.blockReason || record.reason || null
+      const robots = record.robotsDecision || {}
+      const status = record.httpStatus ?? result.httpStatus ?? null
+      // A rule that names Octocrawl itself is the owner's opt-out, which no server sets aside for a named page (hints.ts).
+      const group = Array.isArray(result.trace) ? (result.trace.find((event) => event && event.event === 'robots_checked') || {}).detail : null
+      const byName = group && typeof group.matchedGroup === 'string' && ['octocrawl', 'w2l-research'].includes(group.matchedGroup.toLowerCase())
+      if (robots.decision === 'disallowed' && !robots.unreachable && byName) return ['This site\'s robots.txt keeps Octocrawl out by name', 'The site owner opted out of Octocrawl, so it does not read this site, hosted or on your computer.', []]
+      if (robots.decision === 'disallowed' && !robots.unreachable) return ['This site\'s robots.txt keeps Octocrawl out', 'Hosted Octocrawl follows the site owner\'s robots.txt for every page. On your own computer, a page you name can be read, with the rule kept on the record, unless the rule names Octocrawl itself.', ['local']]
+      if (robots.unreachable) return ['The site\'s robots.txt could not be read', 'A robots.txt that does not answer counts as a "no", so hosted Octocrawl did not read the page. Try again in a few minutes, or read it on your own computer.', ['again', 'local']]
+      if (result.status === 'blocked' && reason === 'login_wall') return ['This page needs a sign-in', 'Hosted Octocrawl reads public pages only. On your own computer it can read a page you are signed in to, in your own Chrome.', ['local']]
+      if (result.status === 'blocked' && reason === 'rate_limit') return ['The site is limiting requests right now', 'It answered that too many requests came in. Try again in a few minutes.', ['again']]
+      if (result.status === 'blocked' && reason === 'geo_restricted') return ['The site does not serve this page where hosted Octocrawl reads from', 'It limits the page by country. On your own computer the page is read from where you are.', ['local']]
+      if (result.status === 'blocked') return ['The site stopped the read with a bot check', 'Some sites turn away automated readers. Your own Chrome on your computer often gets through where hosted Octocrawl cannot.', ['local']]
+      if (reason === 'timeout') return ['The page took too long to answer', 'Nothing came back in time. Pages that load slowly often answer on a second try.', ['again']]
+      if (reason === 'dns_error' || reason === 'connection_error' || reason === 'tls_error') return ['The site could not be reached', 'Check the address for a typo. The site may also be down or not reachable from the internet.', []]
+      if (status === 404 || status === 410) return [`There is no page at this address (HTTP ${status})`, 'Check the address, or open the site and copy the link of the page you want.', []]
+      if (reason === 'http_error' && status) return [`The site answered with an error (HTTP ${status})`, 'The site did not send the page. It may work again later.', ['again']]
+      if (reason === 'empty_unverified') return ['The page came back without readable text', 'It may build its text in a way Octocrawl could not read, or show it only to signed-in visitors.', ['local']]
+      if (reason === 'unsupported_content_type') return ['This address is not a page Octocrawl reads', 'It points at a file type Octocrawl does not turn into text. Web pages and PDFs work.', []]
+      return ['The page was not read', 'The result and the Evidence Record say what happened.', ['again']]
+    }
+    const helpFor = (result, used) => {
+      const help = $('play-help')
+      if (!help) return
+      help.hidden = result === null
+      if (result === null) { help.replaceChildren(); return }
+      const [title, text, steps] = whyNot(result)
+      const head = document.createElement('p'); head.className = 'pg-help-title'; head.textContent = title
+      const body = document.createElement('p'); body.className = 'pg-help-text'; body.textContent = used === '0' ? `${text} No credits were used.` : text
+      const actions = document.createElement('div'); actions.className = 'pg-help-actions'
+      const button = (label, onClick) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'pg-link'; b.textContent = label; b.addEventListener('click', onClick); return b }
+      const link = (label, href) => { const a = document.createElement('a'); a.className = 'pg-link'; a.href = href; a.textContent = label; return a }
+      if (steps.includes('again')) actions.append(button('Run it again', () => submit.click()))
+      actions.append(button('Try a page that reads', () => { play.url.value = SAMPLE; drawCode(); submit.click() }))
+      if (steps.includes('local')) actions.append(link('Read it on your computer →', LOCAL))
+      actions.append(link('Ask us about this page', 'mailto:hello@octocrawl.dev?subject=A%20page%20the%20Playground%20did%20not%20read'))
+      help.replaceChildren(head, body, actions)
+    }
     const idle = (note = COST[endpoint][1]) => { if (creature) creature.set('idle'); $('pg-stage').classList.remove('is-running'); set('play-summary', note) }
     play.addEventListener('submit', async (event) => {
       event.preventDefault()
@@ -1164,6 +1210,7 @@
         const next = $('play-next')
         const hint = Array.isArray(result.agentHints) && typeof result.agentHints[0] === 'string' ? result.agentHints[0] : null
         if (next) { next.hidden = mark === 'ok' || hint === null; next.textContent = next.hidden ? '' : `Next: ${hint}` }
+        helpFor(ran === 'scrape' && mark !== 'ok' ? result : null, used)
         if (ran === 'scrape') view = play.view.value
         if (view === 'markdown' && !(typeof result.markdown === 'string' && result.markdown.trim()) && record) view = 'evidence'
         idle()
