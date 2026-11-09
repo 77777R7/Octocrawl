@@ -22,6 +22,7 @@
 .tool-next-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px 22px; margin: 12px 0 0; padding: 0; list-style: none; }
 .tool-next-item { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: var(--ink-soft); font-size: 14px; line-height: 1.55; }
 .tool-next-item strong { color: #142a57; font-weight: 600; }
+.tool-next-code { display: block; margin-top: 4px; padding: 8px 10px; border-radius: 8px; color: #d9e5fb; background: #0a2463; font: 12px/1.5 var(--tl-mono); overflow-wrap: anywhere; user-select: all; }
 .tool-next-link { align-self: flex-start; margin-top: 2px; padding: 0; border: 0; color: var(--link); background: none; font: inherit; font-weight: 650; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .tool-next-link:hover { color: var(--orange-ink); }
 
@@ -38,6 +39,12 @@
 .tl-card p { margin: 8px 0 0; color: var(--ink-soft); font-size: 14.5px; line-height: 1.6; }
 .tl-card code { font: .92em var(--tl-mono); }
 .tl-card a { color: var(--link); }
+/* What it is: the definition (the section's lead) and the same task in one line, from an agent and from a script. */
+.tl-oneliners { display: grid; gap: 14px; max-width: 860px; margin: 26px 0 0; padding: 0; list-style: none; }
+.tl-oneliners li { display: flex; flex-direction: column; gap: 6px; min-width: 0; color: var(--ink-soft); font-size: 14px; line-height: 1.55; }
+.tl-oneliners a { color: var(--link); }
+.tl-oneliners code { display: block; padding: 10px 12px; border-radius: 9px; color: #d9e5fb; background: #0a2463; font: 12.5px/1.55 var(--tl-mono); overflow-wrap: anywhere; user-select: all; }
+#what .section-lead { max-width: 68ch; color: #142a57; font-size: 17px; }
 .tl-code-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 32px 0 0; padding: 0; list-style: none; }
 .tl-code-card { display: flex; flex-direction: column; min-width: 0; padding: 20px; border: 1px solid var(--line); border-radius: 16px; background: #fff; }
 .tl-code-card h3 { margin: 0; color: #142a57; font-size: 17px; font-weight: 500; }

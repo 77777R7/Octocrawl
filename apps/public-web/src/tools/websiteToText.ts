@@ -14,6 +14,10 @@ export const WEBSITE_TO_TEXT: ToolPage = {
     description: 'Paste a public page and get its readable text: the article, not the menus, without the markup. Copy it or download a <code>.txt</code> file. Free, no sign-up.',
     tool: { crumb: 'Website to Text', text: true },
   },
+  definition: {
+    question: 'What is Octocrawl’s Website to Text converter?',
+    answer: 'A free tool from Octocrawl that extracts the readable text of a public web page: the article’s words in reading order, without menus, markup or link addresses, to copy or download as a <code>.txt</code> file. Use it here in your browser without signing up, five pages a day, or have your AI agent or script read the same page as Markdown.',
+  },
   afterHero: conversionExample('text'),
   steps: { title: 'From a page to plain text.', cards: [
     ['01', 'Paste a public URL', 'Any page anyone can open without signing in: an article, documentation, a product page, a PDF. Five a day, no account.'],

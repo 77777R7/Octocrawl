@@ -11,7 +11,7 @@ import { docFooterMarkup, siteActionsMarkup, siteNavMarkup } from './siteNav.mjs
 import { DASHBOARD_BODIES, dashboardPageHtml } from './dashboardPages.mjs'
 // The free tool pages, built by Vite (vite.config.ts) and listed in the sitemap here.
 // The free tools' pages (apps/public-web/src/tools/pages.ts), with the day each last changed.
-const TOOL_LOCATIONS = [['/tools/url-to-markdown/', '2026-10-21'], ['/tools/link-extractor/', '2026-10-21'], ['/tools/website-to-text/', '2026-10-21']]
+const TOOL_LOCATIONS = [['/tools/url-to-markdown/', '2026-11-10'], ['/tools/link-extractor/', '2026-11-10'], ['/tools/website-to-text/', '2026-11-10']]
 const TOOLS_HUB_PATH = '/tools/'
 const TOOLS_HUB_UPDATED = '2026-10-21'
 // The product pages (src/product/), with the day each last changed.
@@ -395,15 +395,25 @@ await writeFile(join(root, 'dist', 'redirects.json'), `${JSON.stringify({ ...gui
 // all of them in one file.
 const summary = 'Octocrawl turns a public web page into readable Markdown and, on supported pages, fields you can check against the source. It reports blocks, timeouts and missing fields with a reason instead of inventing content. Connect an agent to hosted Octocrawl at https://mcp.octocrawl.dev/mcp (MCP) or call https://api.octocrawl.dev (REST): scrape and map, keyless within a daily allowance; an account adds 1,000 credits a month, crawl jobs of up to 500 pages, batch jobs of up to 1,000 URLs, and with a key the browser lane. The published packages run everything on your own computer, without credits or a daily allowance, and crawls without the 500-page cap (npx octocrawl serve: REST, a TypeScript SDK, a Python client or MCP, with crawl, batch and Monitor), and npx octocrawl serve --hosted --token serves other machines. It is open source (AGPL-3.0).'
 const groups = [...new Set(pages.map(page => page.group))]
+// The Vite-built pages' Markdown copies (src/markdownTwin.ts wrote them into dist before this script runs): each opens
+// with its `# title` and a `> summary`, which the list below quotes.
+const siteTwins = await Promise.all(['/', TOOLS_HUB_PATH, ...TOOL_LOCATIONS.map(([path]) => path), SCRAPE_PATH].map(async path => {
+  const text = await readFile(join(root, 'dist', `${path.slice(1)}index.md`), 'utf8')
+  const [, title] = /^# (.+)$/m.exec(text) ?? []
+  const [, summary] = /^> (.+)$/m.exec(text) ?? []
+  if (!title || !summary) throw new Error(`${path}index.md must open with a # title and a > summary`)
+  return { path, title, summary, text }
+}))
 const llms = [
   '# Octocrawl', '', `> ${summary}`, '',
   `Connect MCP: claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp (other clients: ${ORIGIN}/docs/connect-mcp/index.md). Try one public page in the browser at ${ORIGIN}/ (five previews a day). The source code is at https://github.com/77777R7/Octocrawl.`, '',
+  '## Product and free tools', '', ...siteTwins.map(twin => `- [${twin.title}](${ORIGIN}${twin.path}index.md): ${twin.summary}`), '',
   ...groups.flatMap(group => [`## ${group}`, '', ...pages.filter(page => page.group === group).map(page => `- [${page.title}](${ORIGIN}${pathFor(page)}index.md): ${page.description}`), '']),
   '## Blog', '', ...posts.map(post => `- [${post.title}](${ORIGIN}${blogPath(post)}index.md): ${post.description}`), '',
   '## Optional', '', `- [All documentation in one file](${ORIGIN}/llms-full.txt)`, `- [Changelog](${ORIGIN}${CHANGELOG_PATH}index.md): what changed, version by version`, '',
 ].join('\n')
 await writeFile(join(root, 'dist', 'llms.txt'), llms)
-await writeFile(join(root, 'dist', 'llms-full.txt'), [`# Octocrawl documentation\n\n> ${summary}\n`, ...markdown.map(({ page, text }) => `<!-- ${ORIGIN}${pathFor(page)} -->\n\n${text.trim()}\n`), ...blogMarkdown.map(({ post, text }) => `<!-- ${ORIGIN}${blogPath(post)} -->\n\n${text.trim()}\n`)].join('\n'))
+await writeFile(join(root, 'dist', 'llms-full.txt'), [`# Octocrawl documentation\n\n> ${summary}\n`, ...siteTwins.map(({ path, text }) => `<!-- ${ORIGIN}${path} -->\n\n${text.trim()}\n`), ...markdown.map(({ page, text }) => `<!-- ${ORIGIN}${pathFor(page)} -->\n\n${text.trim()}\n`), ...blogMarkdown.map(({ post, text }) => `<!-- ${ORIGIN}${blogPath(post)} -->\n\n${text.trim()}\n`)].join('\n'))
 
 // The page the server answers with, status 404, for any path without a file: in the docs' reading layout, with the
 // docs pages beside it and the two ways back. It is never indexed.

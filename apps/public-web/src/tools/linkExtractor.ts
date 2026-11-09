@@ -14,6 +14,10 @@ export const LINK_EXTRACTOR: ToolPage = {
     description: 'Find up to 500 URLs from a site’s sitemaps and start page, with a source for each. Or extract one page’s links. It does not crawl every page. Free, no sign-up.',
     tool: { crumb: 'Link Extractor', view: 'links', example: 'https://www.djangoproject.com/', map: true },
   },
+  definition: {
+    question: 'What is Octocrawl’s Link Extractor?',
+    answer: 'A free tool from Octocrawl that lists a website’s URLs from its sitemaps and the links on its start page, up to 500, each with where it was found, or extracts every link on one page. It reads what the site itself lists and does not crawl page after page, so a page in neither place isn’t found. Use it here in your browser without signing up, five a day, or have your AI agent or script map the same site.',
+  },
   afterHero: `
     <section class="map-section" id="map-section" aria-labelledby="map-title" hidden>
       <div class="band">

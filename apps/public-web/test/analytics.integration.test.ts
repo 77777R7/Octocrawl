@@ -68,6 +68,8 @@ describe('first-party event sender and actual receiver', () => {
     // Signed out, the Playground link goes through sign-in without the URL run: it would reach request logs.
     expect(links.map(link => link.getAttribute('href'))).toEqual(['/docs/connect-mcp/?from=tool-link-extractor', '/signin/?next=%2Fdashboard%2Fmap%2F'])
     expect(box.innerHTML).not.toContain('private.example')
+    // The agent's line itself, to copy without opening the guide.
+    expect(box.querySelector('.tool-next-code')?.textContent).toBe('claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp')
     expect(links[1]!.textContent).toBe('Sign in and run it →')
     // A map has no Get code dialog to open; one that stopped at 500 says the site has more.
     expect(box.querySelector('button')).toBeNull()

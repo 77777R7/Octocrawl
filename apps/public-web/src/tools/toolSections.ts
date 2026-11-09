@@ -43,18 +43,27 @@ export const UNREAD: ReadonlyArray<readonly [string, string, string]> = [
   ['⟳', 'It is drawn by JavaScript', 'These tools don’t run scripts, so the result can be incomplete or empty. Check the returned content. For eligible pages, an account’s hosted API can use the browser lane.'],
 ]
 
+/** Claude Code's line for hosted Octocrawl, as Connect MCP writes it: the from-code cards, the definition and the
+ * next step under a result all show it. */
+export const MCP_ADD = 'claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp'
+
 /** What a tool's page asks the API for in its code: Markdown (Website to Text strips it), or links. */
 export type CodeFormat = 'markdown' | 'links' | 'map'
 
-/** The same thing from code: four ways in, each with a real line to copy. */
-export function fromCodeCards(format: CodeFormat = 'markdown'): string {
-  const cards: Array<[string, string, string, string, string]> = [
+/** The same thing from code: four ways in, each with a real line to copy (head, text, the line, link, link text). The
+ * page's cards (fromCodeCards) and its Markdown copy (markdownTwin.ts) both come from here. */
+export function codeWays(format: CodeFormat = 'markdown'): ReadonlyArray<readonly [head: string, text: string, code: string, href: string, link: string]> {
+  return [
     ['REST API', 'Hosted, no key for 20 pages a day; a free account’s key for 1,000 credits a month.', format === 'map' ? `curl https://api.octocrawl.dev/v1/map -H 'content-type: application/json' -d '{"url":"https://example.com","limit":5000}'` : `curl https://api.octocrawl.dev/v1/scrape -H 'content-type: application/json' -d '{"url":"https://example.com","formats":["${format}"]}'`, format === 'map' ? '/docs/reference/#rest-and-sdk' : '/docs/scrape/#first-call', format === 'map' ? 'API reference' : 'Make your first call'],
-    ['MCP', 'Claude Code, Cursor, Codex and OpenCode read pages through Octocrawl’s tools.', 'claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp', '/docs/connect-mcp/', 'Connect MCP'],
+    ['MCP', 'Claude Code, Cursor, Codex and OpenCode read pages through Octocrawl’s tools.', MCP_ADD, '/docs/connect-mcp/', 'Connect MCP'],
     ['CLI', 'On your own computer, with no daily limit, plus crawl and batch.', format === 'map' ? 'npx octocrawl map https://example.com' : format === 'links' ? 'npx octocrawl scrape https://example.com --formats links' : 'npx octocrawl scrape https://example.com --markdown', '/docs/reference/', 'Advanced reference'],
     format === 'map' ? ['Playground', 'Signed in, list up to 5,000 URLs of a site on your credits: 1 credit a map that finds some.', 'octocrawl.dev/dashboard/map/', '/dashboard/map/', 'Open the Playground'] : ['Playground', 'Signed in, run any page on your credits, read in a browser when it needs one.', 'octocrawl.dev/dashboard/scrape/', '/dashboard/scrape/', 'Open the Playground'],
   ]
-  return `<ul class="tl-code-cards" role="list">${cards.map(([head, text, code, href, link]) => `<li class="tl-code-card"><h3>${head}</h3><p>${text}</p><code>${code.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</code><a href="${href}">${link} <span aria-hidden="true">→</span></a></li>`).join('')}</ul>`
+}
+
+/** The same thing from code, as cards: four ways in, each with a real line to copy. */
+export function fromCodeCards(format: CodeFormat = 'markdown'): string {
+  return `<ul class="tl-code-cards" role="list">${codeWays(format).map(([head, text, code, href, link]) => `<li class="tl-code-card"><h3>${head}</h3><p>${text}</p><code>${code.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</code><a href="${href}">${link} <span aria-hidden="true">→</span></a></li>`).join('')}</ul>`
 }
 
 /** More free tools, as chips: the live ones but this one, then the product page and the hub. */

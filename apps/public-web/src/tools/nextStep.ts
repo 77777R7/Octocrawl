@@ -1,4 +1,5 @@
 import { track } from '../analytics'
+import { MCP_ADD } from './toolSections'
 
 /** Under a free tool's result that read something: where to take the same task next. Most of these visitors come from
  * ChatGPT, run the tool once and leave (site events 2026-10-20..11-02: 49 of 58 ran it, 3 opened sign-in), so the
@@ -29,9 +30,12 @@ export function toolNextStep(kind: NextStepKind, url: string, { code, morePages 
   const list = el('ul', 'tool-next-list')
   list.setAttribute('role', 'list')
 
-  const item = (head: string, text: string, action: HTMLElement): void => {
+  const item = (head: string, text: string, action: HTMLElement, code = ''): void => {
     const row = el('li', 'tool-next-item')
-    row.append(el('strong', '', head), el('span', '', text), action)
+    row.append(el('strong', '', head), el('span', '', text))
+    // The line itself, to copy straight into a terminal without opening the guide.
+    if (code) row.append(el('code', 'tool-next-code', code))
+    row.append(action)
     list.append(row)
   }
   const link = (text: string, href: string): HTMLAnchorElement => {
@@ -40,7 +44,7 @@ export function toolNextStep(kind: NextStepKind, url: string, { code, morePages 
     return anchor
   }
 
-  item('In your agent', 'Add Octocrawl to Claude Code, Cursor or Codex, and your agent reads pages itself. No key for 20 pages a day.', link('Connect MCP →', `/docs/connect-mcp/?from=tool-${toolSlug()}`))
+  item('In your agent', 'Add Octocrawl to Claude Code with this line, and your agent reads pages itself. No key for 20 pages a day.', link('Cursor, Codex and others →', `/docs/connect-mcp/?from=tool-${toolSlug()}`), MCP_ADD)
   // Signed in, the Playground opens with this URL, as main.ts's playgroundLink does. Signed out, the link goes through
   // sign-in without it: the dashboard's address would carry it into request logs, which the privacy page rules out for
   // a visitor who has not signed in.

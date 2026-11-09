@@ -416,15 +416,19 @@ function evidence(): string {
     </section>`
 }
 
+/** What a result costs on hosted Octocrawl, and the words above the table; the page and its Markdown copy show both. */
+export const COST_ROWS: ReadonlyArray<readonly [result: string, credits: string]> = [['Page read over HTTP', '1'], ['Page read in a browser', '5'], ['Page not found (404, 410)', '1'], ['Blocked, not allowed, or nothing read', '0']]
+export const COST_LEAD = 'The three pages above were read over HTTP: 1 credit each on an account, or within the 20 free pages a day without a key. A free account gets 1,000 credits a month. On your own computer there is no limit. Paid credit packs aren’t sold yet.'
+
 function cost(): string {
-  const rows: Array<[string, string]> = [['Page read over HTTP', '1'], ['Page read in a browser', '5'], ['Page not found (404, 410)', '1'], ['Blocked, not allowed, or nothing read', '0']]
+  const rows = COST_ROWS
   return `
     <section class="sc-section cs-section" id="cost" aria-labelledby="cs-title">
       <div class="band">
         <div class="frame sc-grid">
           <div class="sc-intro">
             <h2 id="cs-title">What it costs</h2>
-            <p class="sc-lead">The three pages above were read over HTTP: 1 credit each on an account, or within the 20 free pages a day without a key. A free account gets 1,000 credits a month. On your own computer there is no limit. Paid credit packs aren’t sold yet.</p>
+            <p class="sc-lead">${COST_LEAD}</p>
             <p class="sc-small"><a href="/docs/limits/">Limits</a></p>
           </div>
           <table class="cs-table"><thead><tr><th scope="col">Result</th><th scope="col">Credits</th></tr></thead><tbody>${rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('')}</tbody></table>
@@ -482,6 +486,10 @@ function tryIt(): string {
     </section>`
 }
 
+/** The page's heading and lead, at its top and opening its Markdown copy (markdownTwin.ts). */
+export const SCRAPE_HEADING = 'Scrape a web page.'
+export const SCRAPE_LEAD = 'Give Octocrawl a public URL. You get the page as Markdown, its links and tables, the fields you name, and an Evidence Record of where each one came from.'
+
 export function scrapePageMarkup(): string {
   return `
   <div class="page-shell product-page">
@@ -491,8 +499,8 @@ export function scrapePageMarkup(): string {
 ${siteHeaderMarkup()}      <main aria-labelledby="pd-title">
         <div class="band">
           <div class="frame pd-intro">
-            <h1 id="pd-title">Scrape a web page.</h1>
-            <p class="pd-lead">Give Octocrawl a public URL. You get the page as Markdown, its links and tables, the fields you name, and an Evidence Record of where each one came from.</p>
+            <h1 id="pd-title">${SCRAPE_HEADING}</h1>
+            <p class="pd-lead">${SCRAPE_LEAD}</p>
             <div class="pd-actions">
               <a class="pd-button is-primary" href="/dashboard/scrape/">Scrape now <span aria-hidden="true">→</span></a>
               <a class="pd-button" href="/docs/scrape/">Read the docs</a>
