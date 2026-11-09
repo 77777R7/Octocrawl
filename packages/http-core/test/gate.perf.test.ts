@@ -87,6 +87,16 @@ describe('classifyGate on large or hostile pages', () => {
     }
   })
 
+  it('reads a page read as content for a sign-in form in bounded time', () => {
+    const signIn = '<title>Sign in</title><h1>Sign in</h1><p>Sign in to your account to continue.</p>'
+    const bodies = ['<input'.repeat(160_000), '<input type='.repeat(80_000), `${signIn}<input${' type'.repeat(200_000)}>`, `${signIn}${'<input type=text>'.repeat(60_000)}`]
+    for (const body of bodies) {
+      const started = performance.now()
+      classifyGate({ ...res(body), finalUrl: 'https://example.com/login' })
+      expect(performance.now() - started).toBeLessThan(1_500)
+    }
+  })
+
   it('reads a page that asks to verify you are human for a site captcha script in bounded time', () => {
     // A regex reading of the script tag took 6 to 8 s on the first body (review of the x-iinfo change, 2026-10-30).
     const bodies = ['<script/src='.repeat(5_460), '<script ' + '/captcha/'.repeat(7_000), ('<script src=x ' + '/captcha/'.repeat(100)).repeat(70), '<script'.repeat(100_000)]
