@@ -9,6 +9,8 @@ import { buildChannels } from '@w2l/bench'
 import { localNetworkPolicy, type CrawlPage } from '@w2l/contracts'
 import { createApiEngine, type ApiEngine } from '../src/engine.js'
 import { openUserChrome } from '../src/chromeHandoff.js'
+import { connectCdp } from '../src/chromeLogin.js'
+import { rememberSites } from '../src/rememberedSites.js'
 import { launchDebuggingChrome } from './debuggingChrome.js'
 
 /**
@@ -199,6 +201,40 @@ describe('reading a page in the person\'s own Chrome', () => {
       reader.close()
     }
   }, 60_000)
+})
+
+describe('one connection to the person\'s Chrome for a server\'s life (login UX A2)', () => {
+  it('reads two scrapes and a batch on a site the person allowed with one connection: Chrome would ask its Allow once', async () => {
+    // Every connection is one "Allow remote debugging?" in a Chrome with the chrome://inspect switch; this Chrome was
+    // started with a debugging port and asks nothing, so the connections are counted where Octocrawl opens them.
+    let connections = 0
+    const taskRoot = join(root, 'tasks-a2')
+    const sessionsFile = join(root, 'a2-logins', 'sessions.json')
+    await rememberSites(join(root, 'a2-logins', 'allowed-sites.json'), [new URL(base).host], '2026-11-08T00:00:00.000Z')
+    const http = buildChannels('standard', { localSubjects: { browser_local: { fetch: async () => { throw new Error('unused') } } } })[0]!
+    const engine = createApiEngine({ taskRoot, sessionsFile, channelsFor: () => [http], userChrome: { userDataDir: join(root, 'chrome'), connect: (endpoint, timeoutMs, signal) => { connections++; return connectCdp(endpoint, timeoutMs, signal) } } })
+    try {
+      for (let i = 0; i < 2; i++) {
+        const read = await engine.scrape({ url: `${base}/open`, formats: ['markdown'], lane: 'my-browser', debug: true } as never) as unknown as { status: string; markdown?: string; evidenceRecord: { access: { allowance: unknown } } }
+        expect(read.status).toBe('success')
+        expect(read.markdown).toContain('The open page')
+        expect(read.evidenceRecord.access.allowance).toEqual({ basis: 'remembered', allowedAt: '2026-11-08T00:00:00.000Z' })
+      }
+      const { taskId } = await engine.startBatch({ urls: [`${base}/open`, `${base}/sheet`], formats: ['markdown'], lane: 'my-browser' } as never)
+      for (let i = 0; i < 400; i++) {
+        const report = await engine.getBatch(taskId)
+        if (report !== null && ['completed', 'failed', 'cancelled'].includes(report.status)) break
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      expect((await itemsOf(engine, taskId)).map((item) => item.status)).toEqual(['success', 'success'])
+      expect(connections).toBe(1)
+      // No tab of Octocrawl's left in the person's Chrome: closed, though Playwright's list of pages hears of it a moment later.
+      for (let i = 0; i < 40 && chrome.pages().some((page) => page.url().startsWith(base)); i++) await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(chrome.pages().filter((page) => page.url().startsWith(base))).toEqual([])
+    } finally {
+      await engine.close()
+    }
+  }, 90_000)
 })
 
 describe('reading a page in the person\'s own Chrome in a tab opened behind theirs', () => {

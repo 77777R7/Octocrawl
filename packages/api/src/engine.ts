@@ -138,6 +138,7 @@ import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egres
 import { agentHintsFor, withJsonHints, batchExtractionHints, batchFailureHints, batchLoginWallHint, failureGroupOf, httpLaneAskedForBrowser, mapAgentHints, MAX_AGENT_HINTS, pinnedFastModeHints, withFailure, type BatchFailures, type FailureFacts, type FastModePin, type HintOffers } from './hints.js'
 import { HandoffNotThrough, LOGIN_WAIT_MS, openUserChrome, SIGN_IN_SETTLE_MS, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
 import { importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
+import { sharedChrome } from './sharedChrome.js'
 import { forgetSites, listRememberedSites, rememberedSitesFile, rememberSites, watchRevoked } from './rememberedSites.js'
 import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
 import { JobWebhooks, webhookOf } from './jobWebhooks.js'
@@ -749,6 +750,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const sessionBroker = new SessionBroker(new FileSessionBrokerStore(join(taskRoot, 'b3-sessions.json')))
   const managedSessionsServed = (): void => { if (options.hosted === true) throw new SessionsUnavailableError('this server keeps no managed sessions: run Octocrawl on your own machine (octocrawl serve) for them') }
   const userChrome: UserChromeOptions | null = options.hosted === true ? null : options.userChrome ?? null
+  /**
+   * One connection to the person's Chrome for the engine's life (login UX A2): Chrome asks "Allow remote debugging?" at
+   * the first read, handoff or login import, and again only after Chrome closed the connection. Closed with the engine.
+   */
+  const chromeConnection = userChrome === null ? null : sharedChrome(userChrome.connect)
+  const personChrome: UserChromeOptions | null = userChrome === null ? null : { ...userChrome, connect: chromeConnection!.connect }
   /** The batches being handed to the person now: one handoff of a batch at a time. */
   const handoffs = new Set<string>()
   /** Ends every handoff when the engine closes, gracefully or not: a handoff waits on a person, not on work that will finish. */
@@ -1609,7 +1616,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const signal = AbortSignal.any([...(context.signal === undefined ? [] : [context.signal]), ...(hooks.signal === undefined ? [] : [hooks.signal]), shutdownController.signal, handoffClosing.signal])
     const started = Date.now()
     let chrome: UserChrome
-    try { chrome = await openUserChrome(userChrome!, signal) }
+    try { chrome = await openUserChrome(personChrome!, signal) }
     catch (error) { throw new HandoffUnavailableError(error instanceof Error ? error.message : String(error)) }
     try {
       // The host, with a port that is not the scheme's default: another port of it is another site to allow.
@@ -1745,7 +1752,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const open = (): Promise<Opened> => opened ??= (async (): Promise<Opened> => {
       if (userChrome === null) return { refused: 'this server does not read pages in your Chrome: run Octocrawl on your own machine (octocrawl serve, the local MCP host, or the octocrawl CLI)', status: 'connection_error' }
       let chrome: UserChrome
-      try { chrome = await openUserChrome(userChrome, signal) }
+      try { chrome = await openUserChrome(personChrome!, signal) }
       catch (error) { return { refused: error instanceof Error ? error.message : String(error), status: 'connection_error' } }
       // The batch says it waits for the person while it does (waitingForApproval).
       approvalsWaiting.add(taskId)
@@ -1800,7 +1807,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // The caller going away, or this engine shutting down, ends it; the scrape's own timeout does not: the person's time is theirs.
     const signal = AbortSignal.any([...(context.signal === undefined ? [] : [context.signal]), ...(hooks.signal === undefined ? [] : [hooks.signal]), shutdownController.signal, handoffClosing.signal])
     let chrome: UserChrome
-    try { chrome = await openUserChrome(userChrome!, signal) }
+    try { chrome = await openUserChrome(personChrome!, signal) }
     catch (error) { return { reason: error instanceof Error ? error.message : String(error) } }
     try {
       return await readThrough(chrome, req.url, prior, fetchOptions(req, req.formats), req.handoff?.waitMs, hooks, signal)
@@ -1853,7 +1860,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           // The caller going away, or this engine shutting down, ends the handoff.
           const signal = AbortSignal.any([...(hooks.signal === undefined ? [] : [hooks.signal]), shutdownController.signal, handoffClosing.signal])
           let chrome
-          try { chrome = await openUserChrome(userChrome, signal) }
+          try { chrome = await openUserChrome(personChrome!, signal) }
           catch (error) { throw new HandoffUnavailableError(error instanceof Error ? error.message : String(error)) }
           try {
             for (const step of waiting) {
@@ -2829,7 +2836,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         site: req.site,
         sessionsFile: options.sessionsFile!,
         ...(userChrome.userDataDir === undefined ? {} : { userDataDir: userChrome.userDataDir }),
-        ...(userChrome.connect === undefined ? {} : { connect: userChrome.connect }),
+        // The engine's one connection to Chrome: no second "Allow remote debugging?" when a read already connected.
+        connect: chromeConnection!.connect,
         ...(req.approveTimeoutMs === undefined ? {} : { timeoutMs: req.approveTimeoutMs }),
       })
       const saved = (await listSavedLogins(options.sessionsFile!)).find((login) => login.domain === imported.domain)
@@ -2963,6 +2971,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       // A relaunch an append scheduled while a run was finishing is a new entry: wait until nothing is in flight.
       while (inflight.size > 0) await Promise.all([...inflight.values()].map((job) => job.catch(() => {})))
       await Promise.all([...activeScrapes].map((job) => job.catch(() => {})))
+      // Nothing reads in the person's Chrome any more: the engine lets go of its connection to it.
+      chromeConnection?.close()
       await Promise.all([...channelsByMode.values()].flatMap((channels) => channels.map((channel) => channel.close?.().catch(() => {}))))
       channelsByMode.clear()
       // The octocrawl-chrome client is shared by every set of rungs: closed once, with the engine.
