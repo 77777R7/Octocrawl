@@ -1296,6 +1296,38 @@ const blockLoginWallCards: Fixture = {
   }),
 }
 
+const blockLoginRedirect: Fixture = {
+  truth: {
+    id: 'block-login-redirect',
+    target: '/account/settings',
+    kind: 'fixture',
+    category: 'blocked',
+    mustContain: [],
+    mustNotContain: ['Sign in to your account to continue.'],
+    expectedLane: 'http',
+    emptyIsLegit: false,
+    expectedMainTokens: null,
+    budget: budget(500),
+    expectedStatus: 'blocked',
+    expectedBlockReason: 'login_wall',
+    notes:
+      'An account page that redirects a visitor without a login to the site\'s sign-in page, which carries a ' +
+      'sentence of copy beside its password form: copy the extractor reads as a main body, as on GitHub\'s ' +
+      '/notifications and /settings pages signed out (2026-11-09), which must not make the sign-in page read as content.',
+  },
+  respond: (req) => {
+    if (new URL(req.url ?? '/', 'http://x').pathname !== '/account/login') {
+      return { status: 302, headers: { location: '/account/login?return_to=%2Faccount%2Fsettings' }, body: '' }
+    }
+    return html(`<!doctype html><html><head><title>Sign in</title></head><body>
+<main><h1>Sign in</h1>
+<p>Sign in to your account to continue.</p>
+<form method="post" action="/account/session"><label>Email <input name="email" type="email"></label>
+<label>Password <input name="password" type="password"></label><button>Sign in</button></form></main>
+</body></html>`)
+  },
+}
+
 const blockPerimeterX: Fixture = {
   truth: {
     id: 'block-perimeterx',
@@ -1955,6 +1987,7 @@ export const FIXTURES: readonly Fixture[] = [
   blockLoginWall,
   blockLoginWallBenefits,
   blockLoginWallCards,
+  blockLoginRedirect,
   blockPerimeterX,
   blockPerimeterX429,
   soft404,
