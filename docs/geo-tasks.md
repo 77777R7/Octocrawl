@@ -52,7 +52,7 @@
 
 | # | 问题 | 影响 | 默认 |
 | --- | --- | --- | --- |
-| D1 | **ChatGPT 回答怎么测。** 协议规则 5 不让我们写脚本自动问网页版。选项：①你在 ChatGPT 网页版用临时对话手工问 14 题、每题 3 次（42 条回答，估计 1.5 到 2 小时，没测），我出题和记录表，只有这一项完全符合规则 5；②我在内置浏览器里用你已登录的 ChatGPT 提问：这是规则 5 的例外（协议 §8 第 1 项，服务条款与自动化的问题），要你明确接受，选了就在 decisions.md 新增一行记下；③等 OpenAI API key，用 `geo-run.mjs` 加 ChatGPT 适配器（API 结果只能复现网页版约 26% 到 28% 的引用 URL） | M6 | **已定 2026-11-09：②**（decisions.md G-17） |
+| D1 | **ChatGPT 回答怎么测。** 协议规则 5 不让我们写脚本自动问网页版。选项：①你在 ChatGPT 网页版用临时对话手工问 14 题、每题 3 次（42 条回答，估计 1.5 到 2 小时，没测），我出题和记录表，只有这一项完全符合规则 5；②我在内置浏览器里用你已登录的 ChatGPT 提问：这是规则 5 的例外（协议 §8 第 1 项，服务条款与自动化的问题），要你明确接受，选了就在 decisions.md 新增一行记下；③等 OpenAI API key，用 `geo-run.mjs` 加 ChatGPT 适配器（API 结果只能复现网页版约 26% 到 28% 的引用 URL） | M6 | **已定 2026-11-09：①，Howard 在桌面 app 里问**（decisions.md G-17 第二行） |
 | D2 | **GEO 的方向**：把 ChatGPT 已在引用的工具页做成通往 API/MCP 的入口（工具页加"在你的 agent 里做同一件事"），还是把引用往 docs 和 MCP 页引？两者不冲突，问的是先后 | T1、T2、C 组 | 先工具页 |
 | D3 | G-13：对 `Accept: text/markdown` 返回 Markdown，加 `Vary: Accept` 和 `Link` 头。改动在 `packages/public-preview/src/server.ts` 的 `serveStatic()`，约 20 到 30 行加测试，Worker 不用改。效果没有研究证明，但成本低，抽查的同类站多数做了 | S1 | 批准，排在 T 组之后 |
 | D4 | G-16：读 Cloudflare 的 AI 爬虫与 Agent 访问策略、Bot Fight / BIC 设置和近 7 天被拦的已验证爬虫数。需要你登录仪表盘或给一个只读 token。只读，不改设置 | M8 | 你登录后我只读 |
