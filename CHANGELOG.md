@@ -35,6 +35,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **A read in your Chrome says where its tab was led on the way to the page.** On 2026-11-08, three reads of an www.english.ids-cologne.de exhibitor page in a tab out of sight came back signed in after a 30 s wait for the tab, and nothing in their trace said whether the site's single sign-on had led the tab to another host and back meanwhile. The trace's `user_browser_read` now names the addresses the tab was seen at, in order (`hops`: another site, such as a sign-on, by its scheme and host alone, since its paths and queries carry tokens and your details; the page's own site with its path, never its query), when there was more than one, and how many times Octocrawl took the tab back to the page (`returns`).
 - **A finished crawl or batch on your computer tells the agent to give you the folder its Markdown files are in.** The files sit under `.w2l/api/<task id>/markdown/`, a folder Finder and Linux file browsers do not list, and the hint named it last, after the JSONL and CSV. It now names the Markdown folder first, asks the agent to give you its path, and on macOS and Linux says the folder is hidden, so you open it by that path. The files stay where they were: the folder is kept out of git, and on macOS and Linux readable by you alone, because it can hold pages read with your login.
 
 ## 0.8.10 — 2026-11-08
