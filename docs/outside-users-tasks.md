@@ -6,7 +6,7 @@
 - 2026-11-09 的四份文档（PR #912）：[用户画像](launch/2026-11-09-user-personas.md)、[分国家 GTM](launch/2026-11-09-gtm-by-region.md)、[调研记录](../research/market/2026-11-09-global-market-research.md)、[断言台账](../research/market/2026-11-09-claims-ledger.md)；
 - 仓库外的 2026-10-23 GTM 最终方案和外联日志（`.w2l/handoff/`，不进仓库；目前只在 `suspicious-jemison-31a9bb` 工作树里，见 OD3）。方案的第 7 节（第 45 天评审）、Show HN 的日期和"激活"的口径沿用，名单和姓名不抄进本清单。
 
-核实基于 `main` 的 `c059d36f` 加 PR #912，日期 2026-11-09（周一）。
+核实基于 `main` 的 `c059d36f` 加 PR #912，日期 2026-11-09（周一）。P0.7 的表基于 `2959bf95`（#912 合入后的 `main`）。
 
 **目标：** 到 2026-11-29，十位非作者各用 Octocrawl 完成一个自己的真实任务，各有一份 `research/trials/` 记录（ROADMAP 的退出条件）。本清单是通向它的路线：联系谁、用什么材料、怎么量、什么时候停。它自己不加功能、不改引擎、不部署、不收款；引擎只修外部用户遇到并先复现过的问题（ROADMAP），由 M2 窗口决定。
 
@@ -45,7 +45,7 @@
 | OD2（D2） | 日文、韩文、简体中文各一页说明，先放仓库根的 `README.<语言>.md`，不放官网 | P1.1 | 同意 |
 | OD3 | 外联日志、名单和 `grant-credits.mjs` 现在只在 `suspicious-jemison-31a9bb` 工作树的 `.w2l/handoff/`，工作树一删就丢（分母记录也丢）。复制（不是移动）到主 checkout 的 `~/Code/w2l/.w2l/handoff/`（git 忽略）。**复制之后主 checkout 的是唯一的正本**，原处只读不再追加；如果还要在原处追加，每周一对账一次，并在进度里写以哪边为准。`grant-credits.mjs` 写生产 Firestore，复制过来但不运行，按 OD10 才用 | P0.3、P0.5、W2 | 同意，复制 |
 | OD4（D3） | 注册 Kakao PlayMCP 和 Mistral Le Chat（先读条款） | P1.3、P1.4 | 先读条款，再注册 |
-| OD5（D7） | 对外措辞：不再把"失败不计费"当第一卖点；先说 Markdown（能直接用的格式），再说 Evidence Record；"省 token"没有测量过，测出来之前不说（方案第 2 节） | P0.7、P0.8、P1.6 | 同意 |
+| OD5（D7） | 对外措辞：不再把"失败不计费"当第一卖点；先说 Markdown 与"更少 token"这类定性的话，再说 Evidence Record；不写没测过的百分比或具体数字。**你自己的两条规则不一致：** 方案第 2 节（2026-10-23）写"在第 3 节实测出来之前，不说'省 token'"；`docs/seo/core-seo-framework.md:36`、`:294`（2026-10-27）写"Markdown 与省 token 在前，不写未测的百分比"，官网和 README 现在就是后者。默认按较晚的那条；你要从严，改成"测出来之前不说"，P0.7 表里"省 token"一类就都要改 | P0.7、P0.8、P1.6 | 同意（按较晚的规则） |
 | OD6 | 本地语言材料在你找到母语者校对之前不发布，不用机器翻译直接发；校对人的名字只记在仓库外的外联日志，"进度"里只写"已校对" | P1.1、P1.6 | 同意；找不到人就不发该语言 |
 | OD7 | 给 8 个调用过 API 的外部账号各发一封只问一个问题的邮件，其中 10-27 已联系过的那个换成补一个问题或不再发。Privacy 页没有写会不会用注册邮箱联系用户；不读请求行（Privacy 承诺只有用户本人看得到）。P4.2 对发布带来的注册者同样按这条处理；Privacy 页要不要写明由你决定，改文案是 UI 窗口的事 | P0.5、W2 | 同意；邮件里不推销，不提额外积分 |
 | OD8 | P1.2 和两篇文章里要用 Octocrawl 读 30 个文档站，需要一个账号的 key（HTTP 页 1 积分，浏览器页 5 积分；账号每月 1,000 积分，最坏 30 页 × 5 = 150 积分）。用你的账号，key 放 `.w2l/`，不进仓库 | P1.2、P1.6 | 同意 |
@@ -68,7 +68,7 @@
 - **谁做什么：** 邀请、私信、邮件、访谈、发布帖子由 Howard 做；工程侧不代发邀请、不代操作（`research/trials/README.md`）。本窗口只写文档、记录和材料，不替别的窗口协调或规划：给 UI 窗口、M2 窗口的东西是"列给 Howard 的清单"，由 Howard 决定交给谁。
 - **外联数据不进仓库：** 名单、姓名、handle、邮箱、对方原话、私信内容只放仓库外的外联日志。试用记录按模板放进 `research/trials/`，用参与者代号，参与者同意后提交；记录里不含密钥、cookie、邮箱。
 - **证据诚实：** 未测的值写 unknown，不写 0；联系过、没回复、没跑完的都留在分母，凡是出现"人数"或"次数"的数字都带上分母；带日期的记录只追加不改；每次实站运行写命令、commit、走代理还是直连、费用（不知道就写 unknown）。
-- **对外措辞：** 以[画像](launch/2026-11-09-user-personas.md)和 [GTM](launch/2026-11-09-gtm-by-region.md) 的"不说"清单为准：不说"能读任何站"，不说"合规"或"proof"，不把"失败不计费"放在第一位，不提增强访问或绕过拦截。先说 Markdown，再说 Evidence Record；"省 token"没有测量过，测出来之前不说（方案第 2 节）。
+- **对外措辞：** 以[画像](launch/2026-11-09-user-personas.md)和 [GTM](launch/2026-11-09-gtm-by-region.md) 的"不说"清单为准：不说"能读任何站"，不说"合规"或"proof"，不把"失败不计费"放在第一位，不提增强访问或绕过拦截。先说 Markdown 与"更少 token"这类定性的话，再说 Evidence Record；不写没测过的百分比或具体数字（OD5）。
 - **不为了让假设成立而改措辞：** 画像里标【推】和【未知】的东西，要用试用和访谈验证。
 
 ## 阶段与依赖
@@ -116,13 +116,13 @@
 
 ## Phase 0 · 对齐与启动（11-09 到 11-15，不改代码）
 
-- [ ] **P0.1 合入 PR #912（Howard）。** 本清单的提交也推到同一个 PR，所以合入的是四份文档加本清单加对 GTM、画像、调研记录的几处更正。验收：PR 已合入 `main`；若你改了地区顺序或画像，同一天改文档。
+- [x] **P0.1 合入 PR #912（Howard）。** 2026-11-09 17:39Z 合入，`main` 的 `2959bf95`（squash）。 本清单的提交也推到同一个 PR，所以合入的是四份文档加本清单加对 GTM、画像、调研记录的几处更正。验收：PR 已合入 `main`；若你改了地区顺序或画像，同一天改文档。
 - [ ] **P0.2 做 OD1 到 OD9（Howard）。** 验收：上面"现在要定"的每一行在"进度"里有日期和结果；没回复的按默认做并写"按默认"。
 - [ ] **P0.3 日志对账和基线（Howard 对账，本窗口备脚本）。** (a) OD3 通过后把外联日志复制到主 checkout 的 `.w2l/handoff/`；(b) Howard 从日志对账自 2026-11-01 起已发的外联消息数、回复数、同意试用的人数，填进"起点"表的最后一行；(c) 本窗口写一个只读脚本，放在 `~/Code/w2l/.w2l/hosted/`（git 忽略，每周重跑），按"激活"的近似口径数外部账号（读 `creditUsage`，要求 `credits` 大于 0；输出只有计数，不含账号、邮箱、URL）。验收：起点表最后一行有数字或写明"日志里没有记录"；脚本的输出在进度里有一行；仓库里没有账号标识。
 - [ ] **P0.4 来源标记（本窗口，Howard 确认）。** 附录 A 的 `utm_source` 名字固定，所有 Howard 发布的链接都带。站点已经把首次来源写进 `w2l_src`，代码和测试在 `packages/public-preview/src/site.ts`、`packages/public-preview/test/site.test.ts`、`auth.test.ts`。限制：只有人先打开官网才会写入；通过 PlayMCP 或 Le Chat 直接添加 MCP 地址的人不会经过带标记的链接，他们会被记成 `via:mcp-oauth`、`direct` 或引荐域名；提交仓库的 Hacker News 读者先到 github.com，归因看 GitHub Traffic 的引荐网站，不看 `utm_source`。所以目录和连接器渠道靠客户端名称和访谈里问一句"你是怎么找到的"。验收：Howard 确认附录 A 的命名。第一周的邮件和私信不带链接（附录 C），所以链接抽查放到 11-23 的 W1：已发出的带链接消息抽查至多 5 条，不足 5 条就全查，进度里写"查了 N 条，N 条带标记"，一条都没发写 0 of 0。
 - [ ] **P0.5 外联名单（Howard 定人，本窗口的 scout 查公开帖子）。** 仓库外。(a) 8 个调用过 API 的外部账号：Howard 在 Firebase 控制台里按 `creditUsage` 找，只在控制台看，不读请求行，不导出到仓库，并标出 10-27 已联系过的那个；(b) 现有 40 人名单里还没联系的人；(c) 新增候选，供第二、三周用：日本、韩国、欧洲各一批，方法同 40 人名单（公开帖子、公开 handle、对方原话不超过 12 个词，不记邮箱）；(d) 创作者和策展人名单 10 个（公开频道，来源写清，供 P1.5）；(e) 日文、韩文、简体中文的校对人候选（OD6），到 11-15 前每种语言至少有一位候选，没有就不做该语言的 P1.1 和 P1.6。验收：日志里有第一周的 10 个人、新增候选日本不少于 10、韩国不少于 10、欧洲不少于 6、创作者 10 个、校对人候选；每人有 Fit 代号；仓库里没有姓名或 handle。
 - [ ] **P0.6 第一周外联发出（Howard）。** 就是 W2 的第一周，单列出来是因为 ROADMAP 从 11-01 就要求每周 10 条，不能等材料齐了再开始。验收：进度里写已发人数和回复数；少于 10 条写差几条和原因。
-- [ ] **P0.7 口径核对（本窗口）。** 检查所有对外的页面和文件有没有与调研冲突的话：`README.md`、`apps/public-web/content/*.md`、`apps/public-web/src/*.ts` 的页面文案、博客文章里的比较句，以及给 AI 看的文件（有则查）。检查项：是否说了"能读任何站"一类的话；是否把"失败不计费"放在第一位；是否用了"合规""proof"；README 的 Quick start 和官网首页先讲托管、帖子先讲本地（外联日志 2026-11-03 记过，你当时选了暂时不改 README）。验收：一张表放进"进度"，每行有文件和行号、现在的句子、建议；站点的行列给 Howard，由你决定交给 UI 窗口；本任务不改站点。
+- [x] **P0.7 口径核对（本窗口）。** 2026-11-10 做完，结果表在"进度"。 检查所有对外的页面和文件有没有与调研冲突的话：`README.md`、`apps/public-web/content/*.md`、`apps/public-web/src/*.ts` 的页面文案、博客文章里的比较句，以及给 AI 看的文件（有则查）。检查项：是否说了"能读任何站"一类的话；是否把"失败不计费"放在第一位；是否用了"合规""proof"；README 的 Quick start 和官网首页先讲托管、帖子先讲本地（外联日志 2026-11-03 记过，你当时选了暂时不改 README）。验收：一张表放进"进度"，每行有文件和行号、现在的句子、建议；站点的行列给 Howard，由你决定交给 UI 窗口；本任务不改站点。
 - [ ] **P0.8 邀请和访谈材料（本窗口，Howard 审）。** 附录 C 放英文邀请信、5 分钟任务提示和访谈开场；9 个访谈问题在[画像文档](launch/2026-11-09-user-personas.md)末尾。给日本、韩国的邀请由 Howard 亲手写（英文，或母语者帮忙）；日文、韩文、简体中文的邀请信和任务提示版本，等母语者校对后再出，不先写机器版。验收：Howard 审过并在进度里写日期。
 - [ ] **P0.9 第一周访谈（Howard）。** 就是 W3 的第一周：3 次，对象优先是回复了的外部账号。验收：进度里写访谈数和被问到的人数（差几次写明，0 次也写）。
 
@@ -181,9 +181,57 @@
 - 2026-11-09：读了仓库外的 GTM 最终方案和外联日志后，与四份文档对齐了三处：(1) 官网构建把 `lang` 写死为 `en`，所以本地语言说明改成仓库根的 `README.<语言>.md`；(2) GTM 文档 D6 原来的默认值是提前问 MoR，与 ROADMAP 的"付款、MoR、律师推迟到十个人激活之后"冲突，已改成遵守 ROADMAP；(3) 方案第 3 周的 Polar 提问同样受 ROADMAP 的 2026-11-01 决定约束，本清单不做（F4）。
 - 2026-11-10：第二、三轮干净上下文审查（共 36 条）后改了：完成数要求至少一个字段实际交付；欧洲有裁决规则或"样本不足"；`utm_source` 里分语言页，漏斗才分得出；P4.0 只在 12-06 决定发布之后做；P1.2 记托管 revision 的源 commit，且不报比例；P1.5 有无例子的退路；试用记录每周四和 11-28 入库；OD 分成挡着试用的和不挡的，并写了砍法顺序；"省 token"没测过，不说；OD3 写明正本；GTM 文档的律师、访谈下限、欧盟页三处与本清单对齐。
 
+- 2026-11-10：PR #912 已合入（`2959bf95`），P0.1 完成，Phase 0 开始。
+
+- 2026-11-10：**P0.7 口径核对结果。** 方法：9 组文件各一个 scout 逐文件读，每组再由一个质疑者重读被引的行，最后一个覆盖检查员在全仓库按关键词找没被覆盖的文件；总共 19 个 agent。之后我用脚本核对了下表每一条引文都在所引的文件和行（53 条，有 1 条的行号差一行，已按实际行写）。检查项和类别见 GTM 文档 §2 与本清单的"对外措辞"。本任务不改任何文件，表给你；站点文件的修改交给谁由你决定。
+  - **"省 token"一类（只有 OD5 改成"测出来之前不说"才算冲突；按默认，这些定性的句子不用改，只有没测过的费用或百分比要避免）：**
+
+    | 文件:行 | 现在的句子 | 建议 |
+    | --- | --- | --- |
+    | `README.md:12` | "Fewer tokens than raw HTML. Every result records how it was read." | 删去前一句 |
+    | `plugins/octocrawl/README.md:3` | "…your agent reads in fewer tokens than raw HTML." | 去掉这半句 |
+    | `plugins/octocrawl-openai/plugin.json:26` | "…that ChatGPT and Codex can read in fewer tokens than raw HTML." | 去掉这半句 |
+    | `apps/public-web/scrape/index.html:7` 和 `:13`，以及 `apps/public-web/src/product/scrapePage.ts:13` | "…fields your agent reads in fewer tokens than raw HTML…" | 三处要一起改：HTML 是手写的入口文件，`test/scrapePage.test.ts:26` 要求它的 meta 与 `SCRAPE_DESCRIPTION` 一字不差 |
+    | `apps/public-web/content/blog/hosted-crawl-and-batch-jobs.md:48` | "Because the agent pays for every character it reads." | 小节只写量过的大小（7 页约 3.2 MB HTML 对 41,254 个 Markdown 字符），不写 token 或费用 |
+
+  - **"任何站 / 任何页"类：**
+
+    | 文件:行 | 现在的句子 | 建议 |
+    | --- | --- | --- |
+    | `apps/public-web/content/blog/find-all-pages-on-a-website.md:100` | "Try it on any site, no sign-up →" | "Map a public site, no sign-up →" |
+    | 同文 `:120` | "You want a list in seconds, for any site" | "…for a public site" |
+    | `apps/public-web/src/product/scrapePage.ts:267` | "Octocrawl turns any public page into clean, sourced data…" | "…a public page it can read…"，读不到时记录会写原因 |
+    | `apps/public-web/tools/website-to-text/index.html:7` 和 `:13`，以及 `apps/public-web/src/tools/websiteToText.ts:11` | "Extract the readable text of any public web page…"（没有写读不到会怎样） | 去掉 any，补一句"读不到时给原因"；三处要一起改（`test/toolPage.test.ts:41` 要求 HTML 与源头一致） |
+    | `apps/public-web/scripts/siteNav.mjs:38` | "Any public page as clean Markdown" | "A public page as clean Markdown, or the reason it could not be read" |
+    | `apps/public-web/src/tools/toolSections.ts:55` | "Signed in, run any page on your credits…" | 去掉 any |
+    | `apps/public-web/src/tools/urlToMarkdown.ts:10`，以及 `apps/public-web/tools/url-to-markdown/index.html:7` 和 `:13` | "Convert any public web page to clean Markdown…When a page can’t be read, you get the reason." | 优先级低：已写读不到时给原因，只是 any 一词；三处一起改 |
+
+  - **增强访问、绕过拦截的措辞：**
+
+    | 文件:行 | 现在的句子 | 建议 |
+    | --- | --- | --- |
+    | `apps/public-web/content/connect-mcp.md:133` | 先说托管不提供代理、验证码、隐身，随后指向自己服务器上的 access grant | 去掉这一指向，或改成中性说法并注明 robots.txt 仍然遵守、被拦的页仍记为 blocked |
+    | `apps/public-web/content/blog/claude-code-web-scraping.md:96` | "on your computer you can get through the check yourself in your own Chrome." | "…where you sign in or finish a site's own check yourself. The site may still refuse the read." |
+    | `apps/public-web/src/product/scrapePage.ts:295` | "With enhanced access set up on your computer, Octocrawl goes on to read those in the Google Chrome installed there" | 加上"如果你有权读取；仍可能被拒绝" |
+    | `apps/public-web/src/product/scrapePage.ts:321` | "Starts light. <b>Climbs</b> when a page fights back." | "Starts light. <b>Steps up</b> only when a page needs it." |
+
+  - **与别的产品比较：**
+
+    | 文件:行 | 现在的句子 | 建议 |
+    | --- | --- | --- |
+    | `apps/public-web/content/blog/find-all-pages-on-a-website.md:49` | Screaming Frog 免费版的 500 个 URL 与不渲染 JavaScript 的限制 | 来自它的文档，文中第 9 行也说没测过；在句子旁写明来源和日期，或去掉限制 |
+    | `apps/public-web/content/blog/scrape-list-of-urls.md:3` | "The second half is the one most tools skip." | 改成只说本工具：读回来少了的话，你就要自己猜缺了哪几页 |
+
+  - **"proof"：** `apps/public-web/content/blog/claude-code-web-scraping.md:72` 的 "**For proof**, ask for the final URL and fetch time from the evidence record" 用了这个词，建议改成 "To check a read, ask for…"。其余 proof、guarantee 的公开用法都是否定句（"not proof"、"does not guarantee"：`terms.md:48`、`limits.md:83`、`introduction.md:40`、`amazon-product.md:3`、`find-all-pages-on-a-website.md:7`、`urlToMarkdown.ts:44`、`websiteToText.ts:28`）。"合规"、"compliant"：没有公开用法，只有字段名 `compliance`。
+  - **"失败不计费"：** 没有哪一处把它当标题或第一句，所以不算冲突；但下面这些公开句子都写了"被拦的页不收费"，记在这里，你若要降低它的位置再改：`apps/public-web/content/scrape.md:115`、`apps/public-web/src/page.ts:26`（"Is it free?" 一问）、`apps/public-web/scripts/build-docs.mjs:427`、`apps/public-web/src/product/scrapePage.ts:341` 和 `:410`、`apps/public-web/scripts/dashboardPages.mjs:67`（"Not charged · 30 days" 一格）和 `:117`（"…costs nothing"）。
+  - **不当作冲突、记在这里的：** (1) `docs/access.md`、`docs/scrape-options.md`、`docs/local-setup.md`、`docs/hosted-api.md`、`packages/api/src/hints.ts`、`packages/contracts/src/api.ts` 里关于增强访问、验证码求解的文字，是对功能的事实描述和给调用者的提示，不是推广措辞，ADR 0005 和 ROADMAP 的方向就是这样；`ROADMAP.md` 是仓库里的规划文件，不是推广文字（但 `README.md:212` 链到它，所以它是公开可读的）。(2) `apps/public-web/content/scrape.md:69-75` 里的 39,370 和 15,463 个 token 是同一页两种选择器下的 Markdown token 数，不是 Markdown 对 HTML 的比，所以不构成"省 token"的测量。
+  - **谁先谁后（lead_order，信息性）：** 托管在前：`README.md` 的 Quick start、`llms-install.md`、`connect-mcp.md`、`introduction.md`（先是浏览器预览）、`packages/ai-sdk/README.md`、官网首页的 Get code 对话框、`/llms.txt`、博客 `claude-code-web-scraping`、`hosted-crawl-and-batch-jobs`、`web-scraping-for-rag`。本地在前：`packages/cli/README.md`、`packages/mcp/README.md`（托管在第 45 行）、`packages/sdk/README.md`、官网首页 Get started 窗口的第一个标签（`npx octocrawl scrape`）、博客 `firecrawl-v1-migration`、`scrape-list-of-urls`、`scrape-website-with-login`（登录只能走本地）。2026-11-03 的外联日志里你选了暂时不改 README，本表只记现状。
+  - **没读完的（unknown，不是没有）：** `packages/mcp/src` 里的大文件（`hostedApi.ts` 等）和 `packages/api/src/hints.ts` 只按关键词检索，没有逐行读；`packages/sdk/src`、`python/src` 的文档字符串与报错、`apps/public-web/public/docs-assets/*.js` 的页面文字、`apps/public-web/scripts/dashboardPages.mjs`、`docs/` 下其余公开文档（`docs/guides/`、`docs/cli.md` 等）、`examples/`、`cloudflare/` 的错误页没有查；官网首页其余文案由 `src/main.ts`、`src/page.ts` 渲染，只查了 head 和 JSON-LD 以外的关键词。
+  - **顺手发现，不在 P0.7 范围，也不改：** `packages/public-preview/src/preview.ts:393` 向访客打印 "…so W2L did not fetch the page."；AGENTS.md 把代码打印的信息视为标识符、改名要有意为之，所以列为后续项，由你决定要不要改。
+
 ## 下次从这里继续
 
-Phase 0：P0.1（合入 PR #912）和 P0.2（做 OD1 到 OD9）是你的；P0.5（外联名单，你定人、我的 scout 查公开帖子）、P0.6（第一周 10 条外联）和 P0.9（第一周访谈）也是你的，不要等材料齐；P0.3（日志对账和基线脚本）、P0.4（来源标记表）、P0.7（口径核对）、P0.8（邀请材料）我可以直接做，P0.3 要你先决定 OD3，并提供 gcloud 登录。
+Phase 0：P0.1 已完成，P0.7 已完成（结果在"进度"，要不要改、交给谁由你定；与 OD5 联动：只有你把 OD5 改成"测出来之前不说"，"省 token"那几处才是要改的）。P0.2（做 OD1 到 OD9）是你的；P0.5（外联名单，你定人、我的 scout 查公开帖子）、P0.6（第一周 10 条外联）和 P0.9（第一周访谈）也是你的，不要等材料齐；P0.3（日志对账和基线脚本）、P0.4（来源标记表）、P0.8（邀请材料，附录 C 已有草稿，等你审）我可以直接做，P0.3 要你先决定 OD3，并提供 gcloud 登录。
 
 ## 附录 A：来源标记（`utm_source` 的固定名字）
 
