@@ -27,7 +27,7 @@ The hint the agent got at the end of the first batch (shortened): "6 pages of 12
 
 - The fixture logged six reads in the second turn, `/account/a` to `/account/f`, all with the cookie, 01:39:50Z to 01:39:58Z. No docs page was read again.
 - The server's `my_browser_approval` log for `97364cbd…`: `shown` (1 host), `ready`, `answer allowed` after 1,508 ms. Allow reading these sites: 1.
-- Chrome's "Allow remote debugging?": not counted in this record.
+- Chrome's "Allow remote debugging?": 1, counted by Howard.
 - The agent gave every account page's line ("Your 2026-11 invoice totals 4,210 SGD", …) and the two Markdown folders, then said to turn remote debugging off.
 
 ## Found on the way
