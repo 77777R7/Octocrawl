@@ -321,8 +321,14 @@ export function hostedTools(browser: boolean, jobs = false, regexChecks = false)
  * get_scrape (a scrape's record, while it is kept) are listed by the same rule (stage H W0).
  */
 export const HOSTED_JOB_TOOLS: ReadonlySet<string> = new Set(['crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'wait_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'get_batch_errors', 'cancel_batch', 'wait_batch', 'get_scrape'])
-/** A hosted wait ends as a local one does (MAX_WAIT_MS), well inside the request timeout, and answers the status so far. */
-export const HOSTED_MCP_WAIT_MS = MAX_WAIT_MS
+/**
+ * The longest hosted wait_crawl or wait_batch, under the 60 s a Claude Code client gives an HTTP MCP request before its
+ * first response byte (code.claude.com/docs/en/mcp, "Time limits on MCP tool calls"; the hosted answer is sent whole,
+ * serveHttp.ts enableJsonResponse). On 2026-11-09 five waits of 90-120 s, as the tool then offered, each died in the
+ * client as "The operation timed out." before the status came (hosted walkthrough of 2026-11-09). A local stdio
+ * wait keeps MAX_WAIT_MS, since a stdio request has no such timer. At its end a wait answers the status so far.
+ */
+export const HOSTED_MCP_WAIT_MS = 55_000
 /** The most items a hosted job list answers at once (hostedJobRoutes.ts PAGE_LIST_MAX). */
 const HOSTED_MCP_LIST_MAX = 100
 /** A hosted job's statuses: queued while the account's running slots are taken, expired once its results are deleted. */
