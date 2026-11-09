@@ -521,6 +521,58 @@ describe('classifyGate — login wall needs structure, not a keyword', () => {
       classifyGate(res({ status: 200, body: '<form><input type="password"></form>' })),
     ).toBeNull()
   })
+
+  // GitHub's /notifications and /settings pages signed out redirect to its sign-in page, whose sentence of copy the
+  // extractor read as a main body: success, 2026-11-09. A short page at a login path that a sign-in title or h1 names,
+  // with a password field, is the sign-in page itself, read as content or not.
+  const signIn = (title: string, h1: string) => `<!doctype html><html><head><title>${title}</title></head><body>
+<header><a href="/">Home</a> <a href="/pricing">Pricing</a></header>
+<main><h1>${h1}</h1><p>Sign in to your account to continue.</p>
+<form method="post" action="/session"><label>Username or email address <input name="login"></label>
+<label>Password <input name="password" type="password"></label><a href="/password_reset">Forgot password?</a>
+<input type="submit" value="Sign in"></form><p>New here? <a href="/signup">Create an account</a></p></main>
+<footer><a href="/terms">Terms</a> <a href="/privacy">Privacy</a></footer></body></html>`
+  const at = (finalUrl: string, body: string) => classifyGate(res({ status: 200, body, finalUrl, contentful: true }))
+
+  it('classifies a short sign-in page at a login path read as content', () => {
+    expect(at('https://github.com/login?return_to=%2Fnotifications', signIn('Sign in to GitHub · GitHub', 'Sign in to GitHub'))).toEqual({
+      reason: 'login_wall',
+      signals: ['login_url', 'input_password', 'heading_sign_in', 'short_page'],
+    })
+    expect(at('https://example.com/users/sign_in', signIn('Acme', 'Log in'))?.reason).toBe('login_wall')
+    expect(at('https://example.com/account/login.php', signIn('Sign in', 'Welcome back'))?.reason).toBe('login_wall')
+  })
+
+  it('reads a page elsewhere for its content, whatever its headings and fields say', () => {
+    // The same sign-in page served at the URL asked for, with no redirect to a login path, stays as the extractor read it.
+    expect(at('https://example.com/account/settings', signIn('Sign in', 'Sign in'))).toBeNull()
+    expect(classifyGate(res({ status: 200, body: signIn('Sign in', 'Sign in'), contentful: true }))).toBeNull()
+    // An article with a sign-in modal hidden in its markup.
+    const article = `<html><head><title>How we rebuilt our search</title></head><body><h1>How we rebuilt our search</h1>
+<p>Our search index outgrew a single machine last spring, so we split it by tenant.</p>
+<div style="display:none"><h1>Log in</h1><form><input name="email"><input type="password"></form></div></body></html>`
+    expect(at('https://example.com/blog/search-rebuild', article)).toBeNull()
+    // A signed-in account page about the login, with its password fields.
+    const security = `<html><head><title>Login &amp; security</title></head><body><h1>Login &amp; security</h1>
+<form><label>Current password <input type="password"></label><label>New password <input type="password"></label><button>Save</button></form></body></html>`
+    expect(at('https://example.com/account/security', security)).toBeNull()
+    // A docs page on signing in, with a demo form.
+    const docs = `<html><head><title>Login with SSO – Acme Docs</title></head><body><h1>Login with SSO</h1>
+<p>Point your identity provider at Acme, then sign in with your work address.</p><form><input type="password"></form></body></html>`
+    expect(at('https://docs.example.com/guides/sso', docs)).toBeNull()
+    // A slug that mentions a login is not a login endpoint.
+    expect(at('https://example.com/blog/login-page-design', signIn('Sign in', 'Sign in'))).toBeNull()
+  })
+
+  it('keeps a page at a login path read as content without the sign-in page\'s signs', () => {
+    // A sign-in heading with no password field (a passwordless link form) is not the form.
+    expect(at('https://example.com/login', signIn('Sign in', 'Sign in').replace('type="password"', 'type="text"'))).toBeNull()
+    // Neither title nor h1 names a sign-in.
+    expect(at('https://example.com/login', signIn('Acme', 'Welcome to Acme'))).toBeNull()
+    // A long page is read for its content.
+    const long = signIn('Sign in', 'Sign in').replace('</main>', `<p>${'Each step of signing in is explained here in detail. '.repeat(60)}</p></main>`)
+    expect(at('https://example.com/login', long)).toBeNull()
+  })
 })
 
 describe('classifyGate — geo restriction', () => {

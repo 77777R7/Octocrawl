@@ -115,7 +115,7 @@ Without an account the tools are not listed, and a call says it needs one. A job
 - Each page costs credits as a scrape does: 1 over HTTP and 5 in a browser.
 - An account runs two jobs at a time, with up to ten more waiting. A job reads 8 pages at once, 2 of them in a browser, across up to 100 sites a slice.
 - Results are kept 7 days after the job ends. Once it has ended, `get_crawl`, `get_batch` and the waits carry `export`: a link that downloads every page as one gzip JSONL file, good for 24 hours, and asking again gives a fresh one, so a thousand pages need not pass through the chat. A job that runs out of credits is not lost: it waits, its status says so and where to ask for more, and it goes on by itself when credits come back.
-- A wait returns after at most 120 seconds (`timeoutMs`, default 30 seconds) with the status so far. Call it again, or check later with `get_crawl` or `get_batch`.
+- A wait returns after at most 55 seconds (`timeoutMs`, default 30 seconds; a wait on a server on your computer takes up to 120 seconds, but Claude Code ends an HTTP MCP request that has sent nothing for 60 seconds) with the status so far. Call it again, or check later with `get_crawl` or `get_batch`.
 
 ```text
 Use Octocrawl's batch_scrape tool on https://example.com/ and https://books.toscrape.com/ with fastMode true. Wait for it, then list its items with each URL, status and first heading.

@@ -182,6 +182,21 @@ describe.each([
   })
 })
 
+describe('resilient-http on a redirect to a sign-in page', () => {
+  // GitHub's /notifications and /settings pages signed out (2026-11-09): a redirect to its sign-in page, whose sentence
+  // of copy the extractor read as a main body, came back success. extract-tf follows no redirect, so it is not asked.
+  it('names the sign-in page a login wall, not content', async () => {
+    const out = await resilientSubject.fetch(`${server.url}/account/settings`)
+    expect(out.evidence.finalUrl).toBe(`${server.url}/account/login?return_to=%2Faccount%2Fsettings`)
+    expect(out.status).toBe('blocked')
+    expect(out.blockReason).toBe('login_wall')
+    expect(out.markdown).toBeNull()
+    expect(out.escalations).toEqual([
+      { from: 'http', to: 'browser_local_authed', trigger: 'blocked:login_wall', improved: null },
+    ])
+  })
+})
+
 describe('classifier vocabulary matches the contract', () => {
   it('every contract BlockReason is emittable by the classifier', () => {
     // The cross-package drift guard. http-core stays dependency-free and

@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { hostedNetworkPolicy } from '@w2l/contracts'
-import { accessTokenDigest, createHostedApi, HOSTED_JOB_TOOLS, keyDigest, MCP_OAUTH_RESOURCE, MemoryHostedKeys, MemoryHostedOAuthTokens, MemoryHostedQuota, SITE_ACCOUNT_HEADER, siteAccountAssertion, type HostedKeyRecord, type HostedLeases } from '../src/hostedApi.js'
+import { accessTokenDigest, createHostedApi, HOSTED_JOB_TOOLS, HOSTED_MCP_WAIT_MS, keyDigest, MCP_OAUTH_RESOURCE, MemoryHostedKeys, MemoryHostedOAuthTokens, MemoryHostedQuota, SITE_ACCOUNT_HEADER, siteAccountAssertion, type HostedKeyRecord, type HostedLeases } from '../src/hostedApi.js'
 import { MemoryCreditsStore } from '../src/hostedCredits.js'
 import { MemoryHostedJobStore, type HostedJob } from '../src/hostedJobs.js'
 import { JOB_WORKER_COUNT, jobStatus, type JobFiles } from '../src/hostedJobRoutes.js'
@@ -93,7 +93,11 @@ describe('hosted job tools over MCP', () => {
     // A batch is offered no more either (docs/launch/2026-11-05-batch-concurrency-plan.md D4): locally the schema has no ceiling.
     expect((tools.find((tool) => tool.name === 'batch_scrape')!.inputSchema as { properties: Record<string, { maximum?: number }> }).properties.maxConcurrency?.maximum).toBe(JOB_WORKER_COUNT)
     const wait = tools.find((tool) => tool.name === 'wait_crawl')!
-    expect((wait.inputSchema as unknown as { properties: { timeoutMs: { maximum: number } } }).properties.timeoutMs.maximum).toBe(120_000)
+    // A hosted wait ends under the 60 s Claude Code gives an HTTP MCP request before its first byte (HOSTED_MCP_WAIT_MS).
+    expect((wait.inputSchema as unknown as { properties: { timeoutMs: { maximum: number } } }).properties.timeoutMs.maximum).toBe(HOSTED_MCP_WAIT_MS)
+    expect(HOSTED_MCP_WAIT_MS).toBeLessThan(60_000)
+    expect(wait.description).toMatch(`at most ${HOSTED_MCP_WAIT_MS}`)
+    expect(wait.description).not.toMatch('120000')
     // Its instructions say jobs run here, not only on the person's computer.
     const instructions = (await connect('oc_account')).getInstructions() ?? ''
     expect(instructions).toMatch(/Crawls and batches run here as jobs/)
