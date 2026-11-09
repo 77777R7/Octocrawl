@@ -18,6 +18,7 @@
 | G-12 | 2026-11-01 | 试点第一轮**先放着**：4 周目标是让 10 个外部用户完成真实任务，试点不直接帮外部用户试用。脚本保留，Anthropic 验证完成、并提供 OpenAI key 后可以直接跑 | Howard 说「先放着」 | 对话 |
 | G-17 | 2026-11-09 | ChatGPT 网页版的回答样本由 agent 在内置浏览器里、用 Howard 已登录的 ChatGPT 账号提问（[geo-tasks.md](../../geo-tasks.md) D1 选项 ②，M6）。这是协议规则 5 的例外（[geo-protocol.md](geo-protocol.md) §8 第 1 项：服务条款与自动化的问题），由 Howard 接受。条件：逐题在网页里输入，不写脚本批量提交；用临时对话；结果标明是 agent 代为提问，与人工采集分开记录 | Howard 说「你在浏览器里问」 | 对话 |
 | G-17 | 2026-11-09 | **改为**由 Howard 本人在 ChatGPT 桌面 app 里手工提问，agent 只出题、给记录表、判分（[geo-tasks.md](../../geo-tasks.md) D1 选项 ①，符合协议规则 5）。上一行的浏览器代问没有执行：内置浏览器里 ChatGPT 未登录，一题都没问 | Howard 说「你给我 prompt，我直接在 app 上发」 | 对话 |
+| G-17 | 2026-11-09 | **再改为**由 agent 的子对话用 Computer use 控制 Howard 的 ChatGPT 桌面 app 提问（Howard 已登录的账号）。这是协议规则 5 的例外（[geo-protocol.md](geo-protocol.md) §8 第 1 项），由 Howard 接受。条件同第一行：逐题手工输入、每题一个新的临时对话、不追问、不改账号设置；结果标明是 agent 代为提问 | Howard 说「开个子对话去控制，然后从子对话接收结果」 | 对话 |
 
 ## 待决：SEO（框架 §8.1，状态都是「开」）
 
