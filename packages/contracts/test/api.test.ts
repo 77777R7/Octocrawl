@@ -30,6 +30,20 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(thrown(() => parseBatchStartRequest({ urls: [url], access: 'my-browser', webhook: 'https://hooks.example/x' }))).toMatchObject({ details: { parameters: ['lane', 'webhook'] } })
   })
 
+  it('takes a finished batch\'s pages at a login wall in place of urls, read again as the person (login UX A4)', () => {
+    const id = 'a9f1c2d3-0000-4000-8000-000000000001'
+    expect(parseBatchStartRequest({ loginWallsOf: id, lane: 'my-browser', formats: ['markdown'] })).toMatchObject({ urls: [], loginWallsOf: id, lane: 'my-browser', formats: ['markdown'] })
+    expect(parseBatchStartRequest({ loginWallsOf: id, urls: [], mode: 'authed' })).toMatchObject({ urls: [], loginWallsOf: id, mode: 'authed' })
+    // Read the same way again, they would stop at the same wall.
+    expect(thrown(() => parseBatchStartRequest({ loginWallsOf: id }))).toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['loginWallsOf', 'lane', 'mode'] } })
+    expect(thrown(() => parseBatchStartRequest({ loginWallsOf: id, lane: 'my-browser', urls: ['https://example.com/'] }))).toMatchObject({ details: { parameters: ['loginWallsOf', 'urls'] } })
+    expect(thrown(() => parseBatchStartRequest({ loginWallsOf: id, lane: 'my-browser', appendToId: id }))).toMatchObject({ details: { parameters: ['loginWallsOf', 'appendToId'] } })
+    expect(thrown(() => parseBatchStartRequest({ loginWallsOf: id, mode: 'authed', ignoreInvalidURLs: true }))).toMatchObject({ details: { parameters: ['loginWallsOf', 'ignoreInvalidURLs'] } })
+    expect(() => parseBatchStartRequest({ loginWallsOf: '', lane: 'my-browser' })).toThrow('loginWallsOf must be a non-empty string')
+    // The rest is read as for any batch: neither route takes a webhook.
+    expect(thrown(() => parseBatchStartRequest({ loginWallsOf: id, lane: 'my-browser', webhook: 'https://hooks.example/x' }))).toMatchObject({ details: { parameters: ['lane', 'webhook'] } })
+  })
+
   it('scrape request is url + optional mode/allowlist', () => {
     const req: ScrapeRequest = { url: 'https://example.com/' }
     expect(req.url).toBe('https://example.com/')

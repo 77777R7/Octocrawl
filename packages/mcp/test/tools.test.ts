@@ -523,6 +523,16 @@ describe('MCP tools', () => {
     expect(calls).toHaveLength(1)
   })
 
+  it('forwards loginWallsOf on batch_scrape in place of urls, refused without a way to read as the person (login UX A4)', async () => {
+    const calls: unknown[] = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (_input, init) => { calls.push(JSON.parse(String(init?.body))); return json({ taskId: 'batch-2' }, 202) }) as typeof fetch })
+    expect(await callTool(client, 'batch_scrape', { loginWallsOf: 'batch-1', lane: 'my-browser' })).toEqual({ taskId: 'batch-2' })
+    expect(calls[0]).toMatchObject({ urls: [], loginWallsOf: 'batch-1', lane: 'my-browser' })
+    await expect(callTool(client, 'batch_scrape', { loginWallsOf: 'batch-1' })).rejects.toThrow('loginWallsOf reads those pages again as the person')
+    await expect(callTool(client, 'batch_scrape', {})).rejects.toThrow('urls must contain 1 to 1000 URLs')
+    expect(calls).toHaveLength(1)
+  })
+
   it('declares and forwards idempotencyKey on crawl and batch_scrape, and appendToId on batch_scrape', async () => {
     const calls: Array<{ line: string; body: unknown }> = []
     const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {

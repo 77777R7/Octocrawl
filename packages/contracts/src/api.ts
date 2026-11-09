@@ -684,6 +684,13 @@ export interface BatchStartRequest extends PageOptions, RequestAttribution {
    * changed`). The appended URLs go to the end of the job's list, in order.
    */
   appendToId?: string
+  /**
+   * The id of a finished batch whose pages stopped at a login wall: the new batch reads those pages again, in place of
+   * `urls` (send none, or an empty list), as the person, so it needs `lane: "my-browser"` or `mode: "authed"` (login UX
+   * A4). Its other options are its own, as given here. A batch still running, one without such a page, or an id this
+   * server does not know is refused.
+   */
+  loginWallsOf?: string
   /** A receiver for the batch's events (`started`, one `page` per item recorded, then `completed`, `failed` or `cancelled`); see WebhookConfig. */
   webhook?: WebhookOption
 }
@@ -1165,7 +1172,7 @@ export const CRAWL_SCOPE_KEYS = ['regexOnFullURL', 'ignoreQueryParameters', 'ded
 export const CRAWL_KEYS = ['url', 'mode', 'access', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', 'maxCredits', 'webhook', 'ignoreRobotsTxt', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** Firecrawl's extract scope flags a batch takes in their no-op form (`false`), each with the crawl option that does what `true` would ask for. */
 const BATCH_SCOPE_NOOP_KEYS = { allowExternalLinks: 'allowExternalLinks', includeSubdomains: 'allowSubdomains' } as const
-export const BATCH_KEYS = ['urls', 'mode', 'lane', 'access', 'backgroundTabs', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'retry', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'maxCredits', 'appendToId', 'webhook', 'actions', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+export const BATCH_KEYS = ['urls', 'mode', 'lane', 'access', 'backgroundTabs', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'retry', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'maxCredits', 'appendToId', 'loginWallsOf', 'webhook', 'actions', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** What a batch body may carry beside `appendToId`: the job's own options are not among them (the scope no-ops change nothing, so they may come along). */
 export const BATCH_APPEND_KEYS = ['urls', 'appendToId', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'robotsOverrides', ...ATTRIBUTION_KEYS] as const
 const ROBOTS_OVERRIDE_KEYS = ['reason', 'recordedBy'] as const
@@ -2374,6 +2381,8 @@ export function parseMapRequest(body: unknown): MapRequest {
 export function parseBatchStartRequest(body: unknown): ParsedBatchStartRequest {
   const rec = asRecord(body)
   rejectUnknownKeys(rec, BATCH_KEYS)
+  const loginWallsOf = readLoginWallsOf(rec)
+  if (loginWallsOf !== undefined) return parseLoginWallsBatch(rec, loginWallsOf)
   const appendToId = readAppendToId(rec.appendToId)
   if (appendToId !== undefined) {
     const changed = BATCH_KEYS.find((key) => rec[key] !== undefined && !(BATCH_APPEND_KEYS as readonly string[]).includes(key))
@@ -2434,6 +2443,30 @@ export function parseBatchStartRequest(body: unknown): ParsedBatchStartRequest {
   }
   checkScreenshotViewport(req.mobile, req.formats, req.actions)
   return req
+}
+
+/** The batch whose pages at a login wall a new batch reads again (`loginWallsOf`): a non-empty string of at most 200 characters; never with an append, nor with URLs of its own. */
+function readLoginWallsOf(rec: Record<string, unknown>): string | undefined {
+  const value = rec.loginWallsOf
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || value.length < 1 || value.length > 200) throw new RequestError('loginWallsOf must be a non-empty string')
+  if (rec.appendToId !== undefined) throw new RequestError('loginWallsOf starts a new batch; appendToId adds to one: send one of them', 'unsupported_parameter', { parameters: ['loginWallsOf', 'appendToId'] })
+  if (rec.urls !== undefined && !(Array.isArray(rec.urls) && rec.urls.length === 0)) throw new RequestError('loginWallsOf takes its URLs from that batch: send no urls', 'unsupported_parameter', { parameters: ['loginWallsOf', 'urls'] })
+  for (const key of ['robotsOverrides', 'ignoreInvalidURLs'] as const) {
+    if (rec[key] !== undefined) throw new RequestError(`${key} is not available with loginWallsOf: its URLs come from that batch`, 'unsupported_parameter', { parameters: ['loginWallsOf', key] })
+  }
+  return value
+}
+
+/**
+ * A batch of another's pages at a login wall (`loginWallsOf`): its URLs are left for the engine to fill from that batch,
+ * and the rest is read as for any batch. It reads them as the person, in their Chrome or with their saved login: in the
+ * same way again they would stop at the same wall.
+ */
+function parseLoginWallsBatch(rec: Record<string, unknown>, loginWallsOf: string): ParsedBatchStartRequest {
+  const parsed = parseBatchStartRequest({ ...rec, loginWallsOf: undefined, urls: ['https://login-walls.invalid/'] })
+  if (parsed.mode !== 'authed' && parsed.lane !== 'my-browser') throw new RequestError('loginWallsOf reads those pages again as the person: send lane "my-browser" (their own Chrome) or mode "authed" (their saved login), after asking them', 'unsupported_parameter', { parameters: ['loginWallsOf', 'lane', 'mode'] })
+  return { ...parsed, urls: [], loginWallsOf }
 }
 
 /** `GET /v1/batches/:id/errors`: `cursor` and `limit` (1 to 1000) from the query string. */

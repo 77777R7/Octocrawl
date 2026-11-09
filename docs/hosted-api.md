@@ -604,7 +604,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 <!-- hosted-parity:start -->
 **Tools.** Of the local server's 39 MCP tools, hosted serves 17: 2 as locally and 15 limited. 21 are planned and 1 is different on purpose.
 
-**Options.** Of the 120 local options of scrape, map, crawl and batch_scrape, hosted lists 87: 75 as locally and 12 limited. 23 are planned and 10 different on purpose. Below the options, 7 option values that hosted leaves out or limits.
+**Options.** Of the 121 local options of scrape, map, crawl and batch_scrape, hosted lists 87: 75 as locally and 12 limited. 23 are planned and 11 different on purpose. Below the options, 7 option values that hosted leaves out or limits.
 
 **Planned, by stage H item** (tools, options and values): item 2, hosted access: 3; item 3, actions and waitFor: 2; item 4, monitors and delivery: 18; item 5, identity-bound features: 5; item 7, the json model fallback: 1; item 8, beyond local: 13; no item yet: 5.
 
@@ -770,6 +770,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `batch_scrape` `includeSubdomains` | Planned: no stage H item yet | Locally only false is taken, since a batch follows no link; hosted refuses the field by name. Sent anyway: refused by name. |
 | `batch_scrape` `idempotencyKey` | Supported |  |
 | `batch_scrape` `appendToId` | Planned: no stage H item yet | A hosted batch's URLs are fixed when it starts. Sent anyway: refused by name. |
+| `batch_scrape` `loginWallsOf` | Different on purpose | Reads a batch's pages at a login wall again as the person, in their own Chrome or with their saved login: hosted holds no logins and never drives their Chrome (ADR 0005). Sent anyway: refused by name. |
 | `batch_scrape` `webhook` | Planned: stage H item 4, monitors and delivery | REST takes it for the job's end (https, no headers or secretEnv), signed with a secret the start returns; the MCP tool refuses it so the secret stays out of the transcript. Sent anyway: served over REST only. |
 | `batch_scrape` `integration` | Supported |  |
 | `scrape` `mode: authed` | Planned: stage H item 5, identity-bound features | Hosted holds no saved logins: the schema leaves the value out, and REST reads such a page anonymously. Sent anyway: taken, not honoured. |
