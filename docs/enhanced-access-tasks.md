@@ -39,7 +39,7 @@
 | D3 | 本地授权由一条用户自己运行的命令来写（L1）。`docs/access.md` 现在写 "Octocrawl never writes the grant for you"，这条要改那句话。 | L1 | **2026-11-10 Howard："按照这上面说的来做"（指把 D3 定下来、L1 提到和 R1 同一批的建议），按同意处理** |
 | D4 | 报告修正 R1–R4 现在做。R1 给公开的 `blockReason` 新增一个值，只增不改。 | R1–R4 | 同 D1，按同意处理 |
 | D5 | R1 新值叫什么。候选：`access_denied`（站点拒绝了这个出口，等待没有用）。 | R1 | 已定（2026-11-10）：`access_denied` |
-| D6 | R1 里"拦截页不再等待"会改变 `installed_chrome` 和 `hosted_chrome` 两档的行为（每次省约 9 s，不改读到与否）。`hosted_chrome` 的进一步工作是冻结项，ADR 决定八要求它的启动改动过两次 challenge16。 | R1.4 | 本地先做；托管那档保持原样，等 Howard 开口 |
+| D6 | R1 里"拦截页不再等待"会改变 `installed_chrome` 和 `hosted_chrome` 两档的行为（每次省约 9 s，不改读到与否）。`hosted_chrome` 的进一步工作是冻结项，ADR 决定八要求它的启动改动过两次 challenge16。 | R1.4 | 本地先做；托管那档保持原样，等 Howard 开口。**2026-11-10 已定：本地不等，直接报；托管那档没有改，留给 H7** |
 | D7 | R1–R3 的托管部分要部署才生效。 | R1–R3 | 只合并，不部署；Howard 要求时再部署 |
 | D8 | M1 出结果后，冻结的 Phase 3 是否解冻、先解哪一项。 | Phase 3 | 不解冻，把结果和建议交给 Howard |
 
@@ -163,7 +163,7 @@
 - [x] **R1.1**（2026-11-10，PR #930，待合并）fixture：Cloudflare 拦截页（`cf_attention_required`）、1020、1015、AWS WAF 的 403 各一份，清理后放进测试目录。先写失败的测试：今天它们报 `cloudflare_challenge` 或不被识别。
 - [x] **R1.2**（2026-11-10，PR #936，待合并，叠在 #930 上）`GateBlockReason` 加一个值（名字按 D5），`gate.ts` 把拦截页、1020、AWS WAF 的拒绝归到它；1015 归 `rate_limit`。跟着改：`contracts/src/status.ts` 的 blockReason 列表、`http-core/src/failureClass.ts`、SDK 的类型（JS 和 Python）、`docs/` 里列 blockReason 的地方、CHANGELOG 的 Unreleased。
 - [x] **R1.3** 新值的提示：说清站点拒绝的是这个出口，等待和重试没有用；本地的下一步是换网络，或在用户自己的 Chrome 里读；托管的下一步是在自己的机器上跑。提示只说这台服务器真有的路。
-- [ ] **R1.4** 拦截页不进挑战等待（`browserLocal.ts:209` 附近）。本地先做；`hosted_chrome` 那一档按 D6。
+- [x] **R1.4** 拦截页不进挑战等待（`browserLocal.ts:209` 附近）。本地先做；`hosted_chrome` 那一档按 D6。（PR #940，叠在 #939 上）
 - [ ] **R1.5** 真实站点核对：crunchbase 和 lead411 各读一次，记录新旧 `blockReason`。
 
 ### L1 一条命令写本地授权　S（D3 已定，和 R1 同一批）
@@ -253,7 +253,8 @@
 | 2026-11-10 | R1.1 做完 | PR #930（待合并）：5 份 fixture（1 份真实抓取清理后，1 份取自 10-30 的记录，1020、1015、负载均衡器 403 三份照厂商公开页面写成，没对过线上页面）；今天的报法 6 条测试，应有的报法 5 条 `it.fails`，暂用名 `access_denied`（D5 未定）；1015 今天已报 `rate_limit` |
 | 2026-11-10 | R1.2 做完 | PR #936（待合并）：D5 定名 `access_denied`；Cloudflare 拦截页、403 上的 1020、CloudFront 的 “Request blocked.”、`awselb` 的 403 报它，1015 仍报 `rate_limit`；等待、下一档、hints 都照旧（R1.3、R1.4 再改）；除名字外有一处行为变化：带打码服务的授权下，拦截页不再当作 Cloudflare 验证送去打码；SDK 没有 blockReason 列表，不用改；ADR 0005 没动，留给 R1.4；1020、1015、负载均衡器三份 fixture 仍没对过线上页面 |
 | 2026-11-10 | R1.3 做完 | PR #939（待合并，叠在 #936 上）：`access_denied` 的页面有自己的提示（站点拒绝的是这个出口，等待和重试没有用；本地说换网络或在自己的 Chrome 里读，托管说在自己的机器上跑），批量结束时单独一行；在用户自己的 Chrome 里也被拒的页面不再让人回 Chrome；推荐 `installed_chrome` 的那行不再跟在它后面（这一档读拦截页的结果没测过）；没验证：交接后在 Chrome 里被拒的页面，步骤上的 lane 是不是 `my_browser`；my-browser 批量遇到拦截页会等满 10 分钟，属于 R1.4 |
+| 2026-11-10 | R1.4 做完 | PR #940（待合并，叠在 #939 上）：D6 定为不等、直接报；`installed_chrome` 对 `access_denied` 的页面只读一次就报，trace 的 `challenge_wait` 记 `not_waited`、`capMs: 0`；`hosted_chrome` 单列一份上限，仍等 10 秒（H7）；ADR 0005 加了 2026-11-10 修订；没改：这一级之后试哪一档、`my-browser` 等人的 10 分钟；没验证：真实站点（R1.5） |
 
 ## 下次从这里继续
 
-L1.1 已在 PR #928，R1.1 已在 PR #930，R1.2 已在 PR #936（叠在 #930 上，先合 #930），R1.3 已在 PR #939（叠在 #936 上）。R1 接着是 R1.4，要先定 D6；R1.5 是真实站点检查。测量这边：M3.4（只读探测，查本机 Chrome 和同版本 Chrome for Testing 差在哪）；M3.3 和 M4.2 要分散在 3 天以上，从明天起每天跑一次基线组和代理组。
+L1.1 已在 PR #928，R1.1 已在 PR #930，R1.2 已在 PR #936（叠在 #930 上，先合 #930），R1.3 已在 PR #939（叠在 #936 上），R1.4 已在 PR #940（叠在 #939 上）。R1 只剩 R1.5：真实站点检查（crunchbase、lead411）。测量这边：M3.4（只读探测，查本机 Chrome 和同版本 Chrome for Testing 差在哪）；M3.3 和 M4.2 要分散在 3 天以上，从明天起每天跑一次基线组和代理组。
