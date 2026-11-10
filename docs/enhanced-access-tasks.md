@@ -162,7 +162,7 @@
 
 - [x] **R1.1**（2026-11-10，PR #930，待合并）fixture：Cloudflare 拦截页（`cf_attention_required`）、1020、1015、AWS WAF 的 403 各一份，清理后放进测试目录。先写失败的测试：今天它们报 `cloudflare_challenge` 或不被识别。
 - [x] **R1.2**（2026-11-10，PR #936，待合并，叠在 #930 上）`GateBlockReason` 加一个值（名字按 D5），`gate.ts` 把拦截页、1020、AWS WAF 的拒绝归到它；1015 归 `rate_limit`。跟着改：`contracts/src/status.ts` 的 blockReason 列表、`http-core/src/failureClass.ts`、SDK 的类型（JS 和 Python）、`docs/` 里列 blockReason 的地方、CHANGELOG 的 Unreleased。
-- [ ] **R1.3** 新值的提示：说清站点拒绝的是这个出口，等待和重试没有用；本地的下一步是换网络，或在用户自己的 Chrome 里读；托管的下一步是在自己的机器上跑。提示只说这台服务器真有的路。
+- [x] **R1.3** 新值的提示：说清站点拒绝的是这个出口，等待和重试没有用；本地的下一步是换网络，或在用户自己的 Chrome 里读；托管的下一步是在自己的机器上跑。提示只说这台服务器真有的路。
 - [ ] **R1.4** 拦截页不进挑战等待（`browserLocal.ts:209` 附近）。本地先做；`hosted_chrome` 那一档按 D6。
 - [ ] **R1.5** 真实站点核对：crunchbase 和 lead411 各读一次，记录新旧 `blockReason`。
 
@@ -252,7 +252,8 @@
 | 2026-11-10 | L1.1 做完 | PR #928（待合并）：`octocrawl access-grant` 只在终端里回答本人，不覆盖已有文件，没有东西自动加载它；能挂伪终端的程序仍可替人输入，ADR 0005 修订里写明 |
 | 2026-11-10 | R1.1 做完 | PR #930（待合并）：5 份 fixture（1 份真实抓取清理后，1 份取自 10-30 的记录，1020、1015、负载均衡器 403 三份照厂商公开页面写成，没对过线上页面）；今天的报法 6 条测试，应有的报法 5 条 `it.fails`，暂用名 `access_denied`（D5 未定）；1015 今天已报 `rate_limit` |
 | 2026-11-10 | R1.2 做完 | PR #936（待合并）：D5 定名 `access_denied`；Cloudflare 拦截页、403 上的 1020、CloudFront 的 “Request blocked.”、`awselb` 的 403 报它，1015 仍报 `rate_limit`；等待、下一档、hints 都照旧（R1.3、R1.4 再改）；除名字外有一处行为变化：带打码服务的授权下，拦截页不再当作 Cloudflare 验证送去打码；SDK 没有 blockReason 列表，不用改；ADR 0005 没动，留给 R1.4；1020、1015、负载均衡器三份 fixture 仍没对过线上页面 |
+| 2026-11-10 | R1.3 做完 | PR #939（待合并，叠在 #936 上）：`access_denied` 的页面有自己的提示（站点拒绝的是这个出口，等待和重试没有用；本地说换网络或在自己的 Chrome 里读，托管说在自己的机器上跑），批量结束时单独一行；在用户自己的 Chrome 里也被拒的页面不再让人回 Chrome；推荐 `installed_chrome` 的那行不再跟在它后面（这一档读拦截页的结果没测过）；没验证：交接后在 Chrome 里被拒的页面，步骤上的 lane 是不是 `my_browser`；my-browser 批量遇到拦截页会等满 10 分钟，属于 R1.4 |
 
 ## 下次从这里继续
 
-L1.1 已在 PR #928，R1.1 已在 PR #930，R1.2 已在 PR #936（叠在 #930 上，先合 #930）。R1 接着做 R1.3（hints 的说法，不需要决定）；R1.4 要先定 D6；R1.5 是真实站点检查。测量这边：M3.4（只读探测，查本机 Chrome 和同版本 Chrome for Testing 差在哪）；M3.3 和 M4.2 要分散在 3 天以上，从明天起每天跑一次基线组和代理组。
+L1.1 已在 PR #928，R1.1 已在 PR #930，R1.2 已在 PR #936（叠在 #930 上，先合 #930），R1.3 已在 PR #939（叠在 #936 上）。R1 接着是 R1.4，要先定 D6；R1.5 是真实站点检查。测量这边：M3.4（只读探测，查本机 Chrome 和同版本 Chrome for Testing 差在哪）；M3.3 和 M4.2 要分散在 3 天以上，从明天起每天跑一次基线组和代理组。
