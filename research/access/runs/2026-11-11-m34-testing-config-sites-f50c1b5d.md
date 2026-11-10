@@ -55,7 +55,7 @@ page, the other two with a challenge).
 
 - **T048** separates by the rule (C157 2 of 2, S157 0 of 2), and C157N is mixed (1 of 2). Counting only the reads
   the real Chrome made, there is less still: C157 1 of 1, C157N 0 of 1, S157 0 of 2.
-- **T076** and **B001** do not separate today: C157 and S157 both verified both reads. In M3.2, fifteen hours
+- **T076** and **B001** do not separate today: C157 and S157 both verified both reads. In M3.2, about eleven hours
   earlier, the installed Chrome was refused on T076 in both rounds and Chrome for Testing was challenged on B001 in
   all four runs.
 
