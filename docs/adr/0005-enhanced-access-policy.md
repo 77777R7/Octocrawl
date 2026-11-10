@@ -585,7 +585,6 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 
 **没定的。** 被站点拦下的页面（403、质询、限流）走这一级，上文已有规则，本修订不改。
 
-
 ## 修订 2026-11-10：一条由使用者自己运行的命令可以写本机 grant（决定 D3）
 
 2026-10-23 的修订写的是"Octocrawl 不替使用者写 grant"，2026-10-28 的修订写的是"grant 由使用者自己写"。实测里，本机没有 grant 时 16 个挑战页面读到 0 个，有 grant 时读到 11 到 14 个（2026-10-31 到 2026-11-09 的记录），而手写一个 JSON 文件是多数人过不去的一步。Howard 在 2026-11-10 决定（D3）放宽成下面这样。
@@ -595,3 +594,20 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 - **这道检查拦不住什么。** 能给命令接上伪终端的程序可以替人键入。这条检查拦的是无意的代劳，不是有意绕过；规则仍然是 agent 不得替使用者运行。
 - **不变的。** 没有任何默认能力因此改变：文件写出来之后没有东西会自己去读它，服务仍然要用 `--access-grant` 或 `W2L_ACCESS_GRANT` 启动，请求仍然要选 `access: "enhanced"`。已有的文件不覆盖。手写 grant 照旧可用。托管服务照旧拒绝 `installed_chrome`。grant 的校验规则不变，命令写出的文件走同一个加载器。
 - **取代的句子。** 2026-10-23 修订里的"Octocrawl 不替使用者写 grant"和 2026-10-28 修订里的"grant 由使用者自己写"，从今天起读作：grant 带使用者自己的 attestation，由使用者手写，或由使用者自己运行上面的命令写出；服务器和 agent 都不替他做。
+
+## 修订 2026-11-10：拒绝出口的页面不进挑战等待（增强访问任务清单 R1.4，决定 D6）
+
+**背景。** 2026-11-10 起，站点拒绝这个出口的页面（Cloudflare 拦截页、错误 1020、AWS WAF 的 "Request blocked." 页、AWS 负载均衡器的裸 403）报 `access_denied`，不再报 `cloudflare_challenge` 或 `bot_detected_generic`。这种页面不跑任何校验脚本，没有会自己放行的东西。改名时它保留了原来 10 秒的等待，等待每次都等满（最后一次重读在约 9 秒处），读到与否不变。
+
+**决定（Howard，2026-11-10，在对话中："不等，直接报"）。**
+
+- `installed_chrome`：`access_denied` 的等待上限是 0，不等。页面只读一次，立即照常报 blocked。
+- trace 的 `challenge_wait` 仍记这个决定：`blockReason: "access_denied"`、`outcome: "not_waited"`、`ms: 0`、`capMs: 0`，和 `captcha` 的记法相同。
+- `cloudflare_challenge`、`bot_detected_generic`（各 10 秒）和 `captcha`（0）不变。
+- `hosted_chrome`：不变，`access_denied` 仍等 10 秒。它的上限从此单列（`HOSTED_CHROME_WAIT_CAP_MS`），其余各门与本机相同。上文 2026-10-27 修订的决定五写的是"上限与本机相同"，到这一条为止有这一处不同；要让它也不等，按决定八另行决定并验证（任务清单 H7）。
+
+**本修订的边界。**
+
+- 梯子在这一级之后试哪一档、`my-browser` 交给本人 Chrome 时等人的时间（`access_denied` 页面上仍等满），本修订都不改。
+- 识别错了的代价：一个其实会自己放行的页面如果被判成 `access_denied`，现在不再等它，直接报 blocked。判定规则只认拦截页自己的标记（见 `packages/http-core/test/fixtures/gate/` 的样本），这种误判在真实站点上出现过没有，unknown。
+- 真实站点上的确认（crunchbase、lead411）是任务清单 R1.5，尚未运行。

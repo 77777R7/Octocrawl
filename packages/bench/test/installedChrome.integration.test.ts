@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { chromium } from 'playwright'
 import { startFixtureServer, type FixtureServer } from '@w2l/fixtures'
@@ -36,6 +36,7 @@ beforeAll(async () => {
     if (req.url?.startsWith('/slowhead') && (req.headers.cookie ?? '').includes('passed=1')) { res.writeHead(200, { 'content-type': 'text/html' }); res.end(ARTICLE.replace('<main>', '<script src="/slow.js"></script><main>')); return }
     if (req.url?.startsWith('/slow.js')) { setTimeout(() => { res.writeHead(200, { 'content-type': 'text/javascript' }); res.end('') }, 3_000); return }
     if (req.url?.startsWith('/slowhead')) { res.writeHead(403, { 'content-type': 'text/html', 'cf-mitigated': 'challenge' }); res.end(CHALLENGE + `<script>setTimeout(() => { document.cookie = 'passed=1; path=/'; location.reload() }, 1500)</script>`); return }
+    if (req.url?.startsWith('/refused')) { res.writeHead(403, { 'content-type': 'text/html', server: 'cloudflare' }); res.end(readFileSync(new URL('../../http-core/test/fixtures/gate/cloudflare-block.html', import.meta.url))); return }
     if (req.url?.startsWith('/datadome')) { res.writeHead(403, { 'content-type': 'text/html', 'x-datadome-cid': 'abc' }); res.end(DATADOME); return }
     if (req.url?.startsWith('/widget')) { res.writeHead(200, { 'content-type': 'text/html' }); res.end(WIDGET); return }
     if (req.url?.startsWith('/clears') || req.url?.startsWith('/holds')) {
@@ -156,6 +157,17 @@ describe('installed_chrome: the browser lane on it', () => {
       expect(out.trace).toContainEqual(expect.objectContaining({ event: 'challenge_wait', detail: expect.objectContaining({ blockReason: 'cloudflare_challenge', outcome: 'cleared' }) }))
       expect(out).toMatchObject({ status: 'success', evidence: { httpStatus: 200 } })
       expect(out.markdown).toContain('harbour office')
+    } finally {
+      await subject.teardown()
+    }
+  }, 90_000)
+
+  it('does not wait on a page that refused the exit: it is reported at once, and the trace says it was not waited on (ADR 0005, revision of 2026-11-10)', async () => {
+    const subject = new BrowserLocalSubject('standard', null, true, undefined, null, undefined, null, undefined, undefined, null, false, undefined, 'installed_chrome', 'actual', seams)
+    try {
+      const out = await subject.fetch(`${attackerUrl}refused`)
+      expect(out).toMatchObject({ status: 'blocked', blockReason: 'access_denied' })
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'challenge_wait', detail: { blockReason: 'access_denied', outcome: 'not_waited', ms: 0, capMs: 0 } }))
     } finally {
       await subject.teardown()
     }

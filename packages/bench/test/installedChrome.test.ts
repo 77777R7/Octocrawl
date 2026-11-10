@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { join } from 'node:path'
 import { browserNotInstalled, browserInstallCommand } from '../src/browserInstall.js'
-import { CHALLENGE_WAIT_CAP_MS, chromeProxyError, waitOutGate } from '../src/subjects/browserLocal.js'
+import { CHALLENGE_WAIT_CAP_MS, HOSTED_CHROME_WAIT_CAP_MS, chromeProxyError, waitOutGate } from '../src/subjects/browserLocal.js'
 import {
   AVOID_PORTS, chromeCandidates, DETECTION_FLAGS, findInstalledChrome, freeDebuggingPort, INSTALLED_CHROME_INSTALL,
   InstalledChromeMissingError, installedChromeArgs, installedChromeRefusal, WindowGate,
@@ -109,7 +109,7 @@ describe('installed_chrome: the wait for a check that clears itself (ADR 0005, r
 
   it("waits 10 s at most for a Cloudflare challenge or a bot check that does not clear, and never into the capture's reserve", async () => {
     vi.useFakeTimers()
-    for (const reason of ['cloudflare_challenge', 'bot_detected_generic', 'access_denied']) {
+    for (const reason of ['cloudflare_challenge', 'bot_detected_generic']) {
       const held = page(reason)
       const waiting = waitOutGate(held.gateNow, {}, undefined)
       await vi.advanceTimersByTimeAsync(30_000)
@@ -120,6 +120,22 @@ describe('installed_chrome: the wait for a check that clears itself (ADR 0005, r
     const near = waitOutGate(page('cloudflare_challenge').gateNow, { deadlineAt: Date.now() + 5_000 }, undefined)
     await vi.advanceTimersByTimeAsync(30_000)
     expect(await near).toEqual({ blockReason: 'cloudflare_challenge', outcome: 'still_gated', ms: 3_000, capMs: 10_000 })
+  })
+
+  it('does not wait on a page that refused the exit, which runs no check that could clear, and says so (R1.4)', async () => {
+    vi.useFakeTimers()
+    const refused = page('access_denied')
+    expect(await waitOutGate(refused.gateNow, {}, undefined)).toEqual({ blockReason: 'access_denied', outcome: 'not_waited', ms: 0, capMs: 0 })
+    expect(refused.reads()).toBe(1)
+  })
+
+  it('keeps the wait hosted_chrome had for such a page, and its other caps, until that rung is changed on purpose (D6)', async () => {
+    vi.useFakeTimers()
+    expect([...HOSTED_CHROME_WAIT_CAP_MS]).toEqual([['cloudflare_challenge', 10_000], ['bot_detected_generic', 10_000], ['access_denied', 10_000], ['captcha', 0]])
+    const held = page('access_denied')
+    const waiting = waitOutGate(held.gateNow, {}, undefined, HOSTED_CHROME_WAIT_CAP_MS)
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(await waiting).toEqual({ blockReason: 'access_denied', outcome: 'still_gated', ms: 10_000, capMs: 10_000 })
   })
 
   it('ends as soon as the check gives way, here 3 s in', async () => {
