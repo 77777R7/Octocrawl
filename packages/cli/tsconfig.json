@@ -5,5 +5,5 @@
     "outDir": "./dist"
   },
   "include": ["src/**/*.ts"],
-  "references": [{ "path": "../contracts" }, { "path": "../api" }]
+  "references": [{ "path": "../contracts" }, { "path": "../api" }, { "path": "../octopus" }]
 }
