@@ -10,7 +10,8 @@
     "skipLibCheck": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "types": []
+    "types": [],
+    "paths": { "@w2l/octopus": ["../../packages/octopus/src/index.ts"] }
   },
   "include": ["src"]
 }

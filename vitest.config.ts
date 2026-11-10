@@ -47,6 +47,7 @@ export default defineConfig({
   // silently test old code (dist/ is gitignored and rebuilt separately).
   resolve: {
     alias: {
+      '@w2l/octopus': resolve(root, 'packages/octopus/src/index.ts'),
       '@w2l/contracts': resolve(root, 'packages/contracts/src/index.ts'),
       '@w2l/extract-tf': resolve(root, 'packages/extract-tf/src/index.ts'),
       '@w2l/fixtures': resolve(root, 'packages/fixtures/src/index.ts'),

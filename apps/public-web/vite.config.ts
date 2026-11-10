@@ -12,6 +12,8 @@ const publicDir = fileURLToPath(new URL('./public', import.meta.url))
 const srcDir = fileURLToPath(new URL('./src/', import.meta.url))
 
 export default defineConfig({
+  // The octopus package resolves to its source, as in vitest.config.ts: the site never draws from a stale dist/.
+  resolve: { alias: { '@w2l/octopus': fileURLToPath(new URL('../../packages/octopus/src/index.ts', import.meta.url)) } },
   plugins: [{
     // Prerender: index.html ships with the page's markup, and main.ts only brings it to life.
     name: 'w2l-prerender-page',

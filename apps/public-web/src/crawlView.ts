@@ -1,4 +1,5 @@
 import { crawlCap, fillWords, hashText, layoutPage, mayRead, PROGRESS_STEPS, stageLabel, stepsDone, Cell, type CrawlStage, type PageLayout, type StageEvent } from './crawlModel'
+import { octopusPose, SPRITE_H, SPRITE_W } from '@w2l/octopus'
 
 /** While a preview runs, the URL card grows down into a frameless navy window: an octopus of glyphs crawls a page
  * drawn as a grid, the page scrolling under it. It never goes further down than the server's reported stages allow
@@ -71,33 +72,6 @@ const CELL_MS = 80
 /** The effects layer reaches this far past the card, for the arms and the falling letters. */
 const FX_MARGIN = 110
 
-// The octopus: its mantle, eyes (O, drawn as navy cells as on the hero's static octopus) and two strides of arms.
-const MANTLE = [
-  '    ,=####=,    ',
-  '  ,##########,  ',
-  ' =###O####O###= ',
-  ' =############= ',
-  '  \\##########/  ',
-]
-const ARMS = [[
-  '  /x/ x||x \\x\\  ',
-  ' / /  x||x  \\ \\ ',
-  ' + :  : :: :  + ',
-], [
-  '  \\x\\ x||x /x/  ',
-  '   \\ \\x||x/ /   ',
-  '  :  + :: +  :  ',
-]]
-// Landing: squashed flat, arms splayed.
-const SQUASH = [
-  '   ,=########=,   ',
-  ' =####O####O####= ',
-  '=################=',
-  ' \\##############/ ',
-  '/x/x/ x||||x \\x\\x\\',
-]
-const SPRITE_W = MANTLE[0]!.length
-const SPRITE_H = MANTLE.length + ARMS[0]!.length
 /** The thud's flying bits: column speed, upward row speed and glyph, fixed so every landing looks alike. */
 const DEBRIS: ReadonlyArray<readonly [number, number, string]> = [
   [-22, 14, '.'], [-17, 20, "'"], [-13, 26, '*'], [-9, 17, ','], [-6, 29, '.'], [-3, 22, "'"], [-1, 31, '*'],
@@ -834,19 +808,13 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
 
   function drawOctopus(now: number, head: number, top: number): void {
     const ctx = context!
-    const since = now - slamAt
-    // Landing: squashed flat with its eyes screwed shut, a short hop back up, then itself, eyes still shut a moment.
-    const squashed = since >= 0 && since < 200
-    const hop = since >= 200 && since < 320 ? 1 : 0
-    const squint = since >= 0 && since < 400
-    const stride = Math.floor(now / (phase === 'failed' ? 520 : 240)) % 2
-    const blink = !squint && (phase === 'failed' ? Math.floor(now / 700) % 3 === 0 : (now % 2600) < 140)
     // Dropping fast, it stretches a row taller and leaves streaks above it.
     const drop = phase === 'finishing' ? clamp01((now - phaseAt) / finishMs) : 0
-    const stretched = drop > 0.6
-    const lines = squashed ? SQUASH : stretched ? [...MANTLE.slice(0, 4), MANTLE[3]!, MANTLE[4]!, ...ARMS[stride]!] : [...MANTLE, ...ARMS[stride]!]
-    const row0 = head + (squashed ? SPRITE_H - SQUASH.length : stretched ? -1 : -hop)
-    const left = octoX - (squashed ? 1 : 0)
+    // How it holds itself (landing squash, hop, stride, eyes) is the octopus's own, shared with every place that draws it.
+    const pose = octopusPose({ now, failed: phase === 'failed', sinceLanding: now - slamAt, drop })
+    const lines = pose.lines
+    const row0 = head + pose.rowOffset
+    const left = octoX + pose.colOffset
     if (drop > 0.35) {
       const length = Math.round(1 + 4 * (drop - 0.35) / 0.65)
       for (let k = 1; k <= length; k++) {
@@ -872,12 +840,12 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
         if (char === ' ') continue
         const x = (left + dx) * pitchX + pitchX / 2
         if (char === 'O') {
-          if (squint) { ctx.fillStyle = '#ffffff'; ctx.fillText(eye++ === 0 ? '>' : '<', x, y) }
-          else if (blink) { ctx.fillStyle = '#a8c9fa'; ctx.fillText('-', x, y) }
+          if (pose.eyes === 'squint') { ctx.fillStyle = '#ffffff'; ctx.fillText(eye++ === 0 ? '>' : '<', x, y) }
+          else if (pose.eyes === 'blink') { ctx.fillStyle = '#a8c9fa'; ctx.fillText('-', x, y) }
           else { ctx.fillStyle = '#011758'; ctx.fillRect(x - pitchX * 0.4, y - pitchY * 0.3, pitchX * 0.8, pitchY * 0.6) }
           continue
         }
-        ctx.fillStyle = squashed || dy < MANTLE.length + (stretched ? 1 : 0) ? '#d6e6ff' : '#a8c9fa'
+        ctx.fillStyle = dy < pose.mantleRows ? '#d6e6ff' : '#a8c9fa'
         ctx.fillText(char, x, y)
       }
     })

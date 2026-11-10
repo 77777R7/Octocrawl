@@ -2,42 +2,8 @@
  * octopus may go given what the server has reported, and the words of a read page that its cells resolve into.
  * Everything a visitor reads in the window comes from the run itself; the page's silhouette is drawn, never claimed. */
 
-/** What the server reported while the preview ran (packages/public-preview, PreviewStage), in the order it does. */
-export type StageEvent = { stage: 'started' } | { stage: 'robots'; allowed: boolean; unreachable?: true } | { stage: 'page' }
-export type CrawlStage = StageEvent['stage']
-
-/** How far down the page (0 to 1) the octopus may crawl. It never runs ahead of what the server has reported: it
- * waits at the door until robots.txt lets it in, and only the result lets it reach the foot. */
-export function crawlCap(seen: ReadonlySet<CrawlStage>, robotsAllowed: boolean | null, done: boolean): number {
-  if (done) return 1
-  if (robotsAllowed === false) return 0
-  if (seen.has('page')) return 0.9
-  if (seen.has('robots')) return 0.35
-  return 0
-}
-
-/** Whether the content the octopus passes may dissolve: only once the result says the page was read. The `page`
- * stage is not enough: the server receives a challenge page or an empty shell too, and refuses it after. */
-export function mayRead(pageRead: boolean): boolean {
-  return pageRead
-}
-
-/** The progress bar's steps, in order: the request was taken, robots.txt read, the page read, the result back. */
-export const PROGRESS_STEPS = ['started', 'robots', 'page', 'result'] as const
-
-/** How many of the bar's steps the server has completed. Steps are counted only when reported, never estimated. */
-export function stepsDone(seen: ReadonlySet<CrawlStage>, done: boolean): number {
-  return PROGRESS_STEPS.filter(step => step === 'result' ? done : seen.has(step)).length
-}
-
-/** What the server is doing, said plainly from the last thing it reported. */
-export function stageLabel(seen: ReadonlySet<CrawlStage>, robotsAllowed: boolean | null, robotsUnreachable = false): string {
-  if (robotsAllowed === false) return robotsUnreachable ? 'robots.txt could not be read · not fetching' : 'robots.txt disallows this page'
-  if (seen.has('page')) return 'Page received · checking it'
-  if (seen.has('robots')) return 'robots.txt allows it · fetching the page'
-  if (seen.has('started')) return 'Checking robots.txt'
-  return 'Sending the link'
-}
+// The stages and how far they let the octopus go live with the octopus itself, so every place that shows a run agrees.
+export { crawlCap, mayRead, PROGRESS_STEPS, stageLabel, stepsDone, type CrawlStage, type StageEvent } from '@w2l/octopus'
 
 /** A cell of the drawn page: nothing, the page's chrome (navigation, sidebar, footer), or its main content. */
 export const Cell = { Empty: 0, Chrome: 1, Text: 2, Title: 3, Image: 4 } as const
