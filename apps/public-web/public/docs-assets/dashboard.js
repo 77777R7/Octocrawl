@@ -1242,6 +1242,9 @@
         const hint = Array.isArray(result.agentHints) && typeof result.agentHints[0] === 'string' ? result.agentHints[0] : null
         if (next) { next.hidden = mark === 'ok' || hint === null; next.textContent = next.hidden ? '' : `Next: ${hint}` }
         helpFor(ran === 'scrape' && mark !== 'ok' ? result : null, used)
+        // A page or a map that was read offers the same task from the person's agent: most accounts ran the Playground
+        // once and did not come back (2026-10-26 to 11-09), and four of the six did get what they asked for.
+        if ($('play-agent')) $('play-agent').hidden = mark !== 'ok'
         if (ran === 'scrape') view = play.view.value
         if (view === 'markdown' && !(typeof result.markdown === 'string' && result.markdown.trim()) && record) view = 'evidence'
         idle()
