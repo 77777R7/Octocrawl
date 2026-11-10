@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "packages/contracts" },
+    { "path": "packages/octopus" },
     { "path": "packages/fixtures" },
     { "path": "packages/http-core" },
     { "path": "packages/attest" },
