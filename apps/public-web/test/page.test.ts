@@ -57,6 +57,17 @@ describe('Page markup', () => {
     expect(wordmark).not.toContain('#ff8659')
   })
 
+  it('lays Recent runs out as a ledger: column names for the eye over an empty list of rows, then the selected run', () => {
+    const section = /<section class="runs-section" id="result-section"[\s\S]*?<\/section>/.exec(pageMarkup())?.[0] ?? ''
+    expect(section).toContain('hidden>')
+    // Each row names its own cells for a screen reader (runsLedger.ts), so the header row is hidden from it.
+    const header = /<div class="runs-cols" aria-hidden="true">([\s\S]*?)<\/div>/.exec(section)?.[1] ?? ''
+    expect([...header.matchAll(/<span[^>]*>([^<]*)<\/span>/g)].map(([, name]) => name)).toEqual(['Page', 'Type', 'Status', 'Time', 'Started', 'Output', ''])
+    expect(section).toContain('<div class="runs-grid" id="runs-grid"></div>')
+    expect(section.indexOf('id="runs-grid"')).toBeLessThan(section.indexOf('id="run-detail"'))
+    expect(section).toContain('<h2 id="result-heading" tabindex="-1">')
+  })
+
   it('keeps the crawl window inside the URL card, hidden until a run opens it, with a way to skip it', () => {
     const card = /<div class="url-card">([\s\S]*?)<p class="form-message"/.exec(pageMarkup())?.[1] ?? ''
     expect(card).toContain('<div class="crawl-window" id="crawl-window" hidden>')
