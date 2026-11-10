@@ -128,7 +128,7 @@ export function fileHint(file: NonNullable<FetchResult['file']>, noFiles = false
 /** Quality events the http lane raises as an offer to the browser lane (see the ladder's QUALITY_ESCALATION_EVENTS). */
 const QUALITY_EVENTS: ReadonlySet<string> = new Set(['quality_low_yield', 'quality_client_rendered'])
 
-/** The block reasons that are a check on automated access, which W2L does not get past. A refused exit (`access_denied`) is not one: it has its own hints. */
+/** The block reasons that are a check on automated access, which Octocrawl does not get past. A refused exit (`access_denied`) is not one: it has its own hints. */
 const GATES: ReadonlySet<string> = new Set(['cloudflare_challenge', 'captcha', 'bot_detected_generic'])
 
 /** What a hint is read from: the result's verdict, caveats, trace and json issues, and the lanes the run tried. */
@@ -323,7 +323,7 @@ function failedPages(group: BatchFailures[string]): string {
  * `browserLane` false when the key has no browser lane, so the batch ran on HTTP alone and no fastMode of its own kept it
  * from the browser; `handoff` true when this server hands a batch's stopped pages to the person's Chrome.
  */
-export function batchFailureHints(failures: BatchFailures, batch: { timeout?: number; hosted?: boolean; browserLane?: boolean; handoff?: boolean }): string[] {
+export function batchFailureHints(failures: BatchFailures, batch: { timeout?: number; hosted?: boolean; browserLane?: boolean; handoff?: boolean; refusedInPersonChrome?: boolean }): string[] {
   const hosted = batch.hosted === true
   const most = DEFAULT_SCRAPE_TIMEOUT_MS
   const groups = Object.entries(failures).filter(([, group]) => group.count > 0)
@@ -349,6 +349,7 @@ export function batchFailureHints(failures: BatchFailures, batch: { timeout?: nu
         : '; this server has no Chrome of the person\'s to hand them to; on their own computer Octocrawl can (npx octocrawl serve, then the batch with a handoff)'}`
       case 'access_denied': return `${pages} refused ${hosted ? 'hosted Octocrawl\'s' : 'this'} exit with a block page, which has no check to pass: waiting or a new batch from ${hosted
         ? `here does not help, and hosted Octocrawl has no proxy or session of yours; on your computer Octocrawl asks from your own network (npx octocrawl serve), and can hand ${one ? 'it' : 'them'} to you in your own Chrome (the batch with a handoff)`
+        : batch.refusedInPersonChrome === true ? 'the same network does not help, and the person\'s own Chrome was refused there too; another network may be let in (a proxy or session you own)'
         : `the same network does not help; another network may be let in (a proxy or session you own)${batch.handoff === true
           ? ', or read them in your own Chrome: a batch handoff (hand_off_batch, POST /v1/batches/:id/handoff, octocrawl batch --handoff) opens them there and Octocrawl reads the page'
           : '; this server has no Chrome of the person\'s to hand them to; on their own computer Octocrawl can (npx octocrawl serve, then the batch with a handoff)'}`}`
