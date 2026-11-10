@@ -9,6 +9,8 @@ import { ChromeLoginError } from './chromeLogin.js'
 import { bearerTokenMatcher } from './auth.js'
 import type { JobKind } from './jobEvents.js'
 import { checkStreamCursor, jobStream, readJobReport, sseEvent } from './jobStream.js'
+import { scrapeStages } from './stages.js'
+import type { ServerActivity, ServerActivityListener } from './activity.js'
 import {
   API_ERROR_STATUS,
   WS_TOKEN_PROTOCOL_PREFIX,
@@ -44,6 +46,7 @@ import {
   wrapScrape,
   isLockdownCacheMiss,
   type ScrapeResponse,
+  type TraceEvent,
 } from '@w2l/contracts'
 
 export interface AppOptions {
@@ -72,6 +75,8 @@ export interface AppOptions {
    * 404 on all four, and clients poll the status and listing routes instead.
    */
   jobStreams?: boolean
+  /** Told each scrape and map call as it starts, a scrape's stages and the call's end (ServerActivity). Absent, the calls are the ones they were: no stage is listened to. */
+  onActivity?: ServerActivityListener
   /**
    * Answer only requests addressed to this machine by a loopback name
    * (`Host` 127.0.0.1, localhost or [::1]) and, when a browser sends an
@@ -222,9 +227,24 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     })
   }
 
+  /**
+   * A scrape or map call, told to `onActivity` from its start to its end, however it ends. `run` gets the listener for
+   * the call's trace (a scrape's stages); with nobody listening it gets none, and the call is the one it was.
+   */
+  let calls = 0
+  const watched = async <T>(kind: 'scrape' | 'map', req: { url: string; origin?: string }, run: (onTrace: { onTrace?: (event: TraceEvent) => void }) => Promise<T>): Promise<T> => {
+    const listener = options.onActivity
+    if (listener === undefined) return run({})
+    const id = ++calls
+    const tell = (event: ServerActivity): void => { try { listener(event) } catch { /* What is shown is advisory. */ } }
+    tell({ type: 'call_started', id, kind, url: req.url, ...(req.origin === undefined ? {} : { origin: req.origin }) })
+    try { return await run(kind === 'scrape' ? { onTrace: scrapeStages((stage) => tell({ type: 'call_stage', id, stage })) } : {}) }
+    finally { tell({ type: 'call_ended', id }) }
+  }
+
   app.post('/v1/scrape', async (c) => {
     const req = parseScrapeRequest(await c.req.json())
-    return c.json(await engine.scrape(req, { signal: c.req.raw.signal }), 200)
+    return c.json(await watched('scrape', req, (trace) => engine.scrape(req, { signal: c.req.raw.signal, ...trace })), 200)
   })
 
   /** The record of one scrape call, by the `scrapeId` its response carried. */
@@ -236,7 +256,7 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   /** A map answers at its deadline with what it found (200, never a 408); a client that disconnects cancels it, and nothing is recorded. */
   app.post('/v1/map', async (c) => {
     const req = parseMapRequest(await c.req.json())
-    return c.json(await engine.map(req, { signal: c.req.raw.signal }), 200)
+    return c.json(await watched('map', req, () => engine.map(req, { signal: c.req.raw.signal })), 200)
   })
 
   /** The record of one map, by the `id` its response carried. */
@@ -570,7 +590,7 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   app.post('/fc/v1/scrape', async (c) => {
     const req = parseFirecrawlScrapeRequest(await c.req.json())
     // A client disconnect cancels the scrape, as on native /v1/scrape.
-    const response = await engine.scrape({ ...req, debug: true }, { signal: c.req.raw.signal }) as ScrapeResponse
+    const response = await watched('scrape', req, (trace) => engine.scrape({ ...req, debug: true }, { signal: c.req.raw.signal, ...trace })) as ScrapeResponse
     // Firecrawl answers a cache-only miss with 404; nothing was fetched.
     if (isLockdownCacheMiss(response)) return c.json({ success: false, error: 'lockdown: no stored result of this page fits the request, so nothing was fetched', code: 'SCRAPE_LOCKDOWN_CACHE_MISS' }, 404)
     return c.json(wrapScrape(response), 200)
@@ -586,7 +606,7 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   /** A map as Firecrawl answers one: 200 with the links as strings, success false when it found nothing; a client disconnect cancels it. */
   app.post('/fc/v1/map', async (c) => {
     const req = parseFirecrawlMapRequest(await c.req.json())
-    return c.json(wrapMap(await engine.map(req, { signal: c.req.raw.signal })), 200)
+    return c.json(wrapMap(await watched('map', req, () => engine.map(req, { signal: c.req.raw.signal }))), 200)
   })
 
   /** One page of the latest attempt's steps; `next` carries the native cursor to the following one. */

@@ -17,15 +17,23 @@ async function signin(search: string) {
   open.push(window)
   window.document.body.innerHTML = PAGE
   const asked: string[] = []
+  // The page's own events (/api/events) are kept apart from the sign-in calls, in `events`.
+  const events: unknown[] = []
+  ;(window.navigator as unknown as { sendBeacon: unknown }).sendBeacon = (_url: string, blob: Blob) => { void blob.text().then(text => events.push(JSON.parse(text))); return true }
   ;(window as unknown as { fetch: unknown }).fetch = async (url: string) => { asked.push(url); return { ok: true, json: async () => ({ signedIn: false }) } }
   window.eval(SCRIPT)
   await new Promise(resolve => setTimeout(resolve, 0))
   const message = window.document.getElementById('signin-message')!
   const options = window.document.querySelector('.signin-options')!
-  return { window, asked, message, options, links: [...window.document.querySelectorAll('[data-provider]')].map(link => link.getAttribute('href')) }
+  return { window, asked, events, message, options, links: [...window.document.querySelectorAll('[data-provider]')].map(link => link.getAttribute('href')) }
 }
 
 describe('the sign-in page around deleting an account', () => {
+  it('reports its page view by path only, never the query that can carry a sign-in code', async () => {
+    const page = await signin('?deleted=1&next=%2Fdashboard%2Fscrape%2F%3Furl%3Dhttps%3A%2F%2Fprivate.example')
+    expect(page.events).toEqual([{ name: 'page_view', props: { path: '/signin/' } }])
+  })
+
   it('says, above the buttons, that a deleted account can be replaced by signing in again', async () => {
     const page = await signin('?deleted=1')
     expect(page.message.textContent).toMatch(/^Your Octocrawl account is deleted/)

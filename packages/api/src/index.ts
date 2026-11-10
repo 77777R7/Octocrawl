@@ -13,6 +13,7 @@ export type { ApiEngine, ApiEngineOptions, BrowserTurn, CallCapability, CrawlWit
 export { compactScrapeResponse, extractStructured, hasFormat, modelCallsMaxCostUsd, structuredModelConfigFromEnv } from './structured.js'
 export { scrapeStages } from './stages.js'
 export type { ScrapeStage } from './stages.js'
+export type { ServerActivity, ServerActivityListener } from './activity.js'
 export { deliveryConfig, JOB_STREAMS_OFF_NOTICE, parseListen, parsePort } from './listen.js'
 export { loadEngineConfig, preloadEngineModules, startCaptchaSolving, tunedPolicy } from './engineConfig.js'
 export type { EngineConfig } from './engineConfig.js'
