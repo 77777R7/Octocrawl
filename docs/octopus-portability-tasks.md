@@ -87,15 +87,17 @@ CLI：
 
 ### Phase 0：共享内核
 
-- [ ] **K1 抽出精灵和阶段模型。** 新包（名字见 D3），零依赖，不碰 DOM。内容：`MANTLE`、`ARMS`、`SQUASH` 字符串，`crawlCap`，以及一个 `frame(state, t)`，返回字符网格和每格的色调。`state` 含已见阶段、是否结束、结束原因。网站的 `crawlView.ts` 和 `crawlModel.ts` 改为从它导入，画面不变。
+- [x] **K1 抽出精灵和阶段模型。**（#921，`@w2l/octopus`） 新包（名字见 D3），零依赖，不碰 DOM。内容：`MANTLE`、`ARMS`、`SQUASH` 字符串，`crawlCap`，以及一个 `frame(state, t)`，返回字符网格和每格的色调。`state` 含已见阶段、是否结束、结束原因。网站的 `crawlView.ts` 和 `crawlModel.ts` 改为从它导入，画面不变。
   - 完成标准：`apps/public-web` 的现有测试全过；新包有帧快照测试，覆盖未开始、robots 允许、robots 拒绝、读到页面、成功、失败；在 `public:preview:local` 上人工看一遍 Extract，和改动前一致。
-- [ ] **K2 把单页抓取的阶段接出来。** 让本地 API 的 `scrape` 能把 `robots` 和 `page` 两个阶段交给调用方，做法照 `preview.ts:138-146`。只增不改：不传监听就和今天一样。
+- [x] **K2 把单页抓取的阶段接出来。**（#922，`scrapeStages`，`packages/api/src/stages.ts`） 让本地 API 的 `scrape` 能把 `robots` 和 `page` 两个阶段交给调用方，做法照 `preview.ts:138-146`。只增不改：不传监听就和今天一样。
   - 完成标准：一个本地 fixture 测试，断言阶段顺序是 robots 在前、page 在后，robots 拒绝时没有 page；不改任何结果字段。
+  - 做完后的边界：只有进程内调用引擎的一方拿得到阶段（CLI 是这样）；只有 HTTP 通道报阶段，从浏览器起步的抓取一个都不报；REST 的回答里没有阶段。本地用户给了网址时 robots 拒绝会被覆盖并照抓，阶段里带 `overridden`。
 
 ### Phase 1：终端
 
-- [ ] **C1 `scrape` 和 `map` 的终端八爪鱼。** 写 stderr。启用条件和关闭开关见 D4。Ctrl-C、异常退出时恢复光标。结束时清掉动画区，留一行摘要（今天 `run.ts:169-175` 那一行）。`map` 没有阶段，只有两态。
+- [x] **C1 `scrape` 和 `map` 的终端八爪鱼。**（`packages/cli/src/motion.ts`） 写 stderr。启用条件和关闭开关见 D4。Ctrl-C、异常退出时恢复光标。结束时清掉动画区，留一行摘要（今天 `run.ts:169-175` 那一行）。`map` 没有阶段，只有两态。
   - 完成标准：测试覆盖非 TTY 时一个转义字符都不写、stdout 字节和今天完全一样、关闭开关生效、中断后光标恢复序列已写出；在真实终端里对一个公开页面和一个 robots 拒绝的页面各跑一次，记录命令和 commit。
+  - 做完后的样子：15 行（一页 14 行字符加一行状态），终端不足 49 列或 17 行时只画状态行；150 ms 内答完的调用（缓存命中）什么都不画；结果一到立刻清掉，不为落地动画多等，所以没有结束姿态，失败原因由原有的那行 stderr 说。stderr 的文字行和今天一样，没有新增摘要行。`TERM=dumb` 也不画。运行期间写到 stderr 的整行（命令自己的提示、引擎的 `console.error` 日志）先清掉画面、打印、再重画，留在滚动历史里（`motionTerminal`）；C2 的提示行走同一条路。已知缺口：运行中按回车，终端回显的换行会让画面错开一行，结束后滚动历史里留下一行残画。
 - [ ] **C2 `crawl` 和 `batch` 的终端八爪鱼。** 在 `settled` 的轮询里（`run.ts:293-299`）取计数，八爪鱼旁边一行 `N/M`。等用户点 Allow 的提示行（`handoffPrompts`，`run.ts:261-275`）照常打印，不被动画区盖住。
   - 完成标准：同 C1，另加一条：动画期间打印的提示行完整保留在滚动历史里。
 - [ ] **S1 `serve` 终端的活动区。** 有请求进来时，在终端底部画一次八爪鱼和一行"谁在读什么"（工具或路由、host、阶段）；空闲时只留一行。启动行和之后的日志行照常往上滚。只在 stderr 是 TTY 时启用。
@@ -103,7 +105,7 @@ CLI：
 
 ### Phase 2：MCP 进度
 
-- [ ] **P1 普通 `scrape` 和 `map` 发阶段进度。** 依赖 K2。只在调用带 `progressToken` 时发；文字是白话阶段，一行以内（措辞见 D6）。不改工具列表和 instructions。
+- [ ] **P1 普通 `scrape` 和 `map` 发阶段进度。** 依赖 K2。MCP 服务器是本地 API 的 REST 客户端，而 REST 的回答今天不带阶段，所以要先让阶段经 REST 传出来（例如 `/v1/scrape` 的流式回答），这一步算在 P1 里。只在调用带 `progressToken` 时发；文字是白话阶段，一行以内（措辞见 D6）。不改工具列表和 instructions。
   - 完成标准：测试断言带 token 时收到 robots 和 page 两条、不带时一条不发、工具列表和 instructions 的长度测试仍过；在 Claude Code 里实际看一次，把看到的排版写进本文件"现状"一节，替换"排版方式不明"。
 - [ ] **P2 托管端进度。** 见 D7，列出但不开工。
 

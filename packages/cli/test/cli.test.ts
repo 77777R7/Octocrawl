@@ -104,6 +104,14 @@ describe('flags', () => {
     expect(() => parseCommandLine('crawl', ['u', '--webhook', 'https://hooks.example/w'])).toThrow(/--webhook is not offered by the command line.*octocrawl serve/)
     expect(() => parseCommandLine('batch', ['u', '--webhook={"url":"https://hooks.example/w"}'])).toThrow(/--webhook is not offered/)
   })
+
+  it('takes --no-motion on every command', () => {
+    for (const command of COMMANDS) {
+      expect(parseCommandLine(command, ['u', '--no-motion']).cli).toEqual({ noMotion: true })
+      expect(usage(command)).toContain('--no-motion   draw no octopus on the terminal while a scrape or a map runs (or set OCTOCRAWL_NO_MOTION=1)')
+    }
+    expect(() => parseCommandLine('scrape', ['u', '--no-motion=1'])).toThrow('--no-motion takes no value')
+  })
 })
 
 const PROSE = 'The harbour office records tide height, wind and visibility for every hour of the day and publishes them each morning for the pilots. '.repeat(3)
@@ -117,6 +125,8 @@ let root: string
 beforeAll(async () => {
   server = createServer((req, res) => {
     if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n'); return }
+    // A page that takes long enough for the terminal's octopus to be drawn; the same page under every path.
+    if (req.url?.startsWith('/pause')) { setTimeout(() => res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page('Pause')), 700); return }
     if (req.url?.startsWith('/slow')) { setTimeout(() => res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page('Slow')), 3_000); return }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page(`Tides ${req.url}`, req.url === '/tides/a' ? TABLE : ''))
   })
@@ -294,6 +304,59 @@ describe('octocrawl against a local site', () => {
     const map = await cli(['map', `${origin}/tides/`, '--sitemap', 'skip'])
     expect(map.code).toBe(0)
     expect(JSON.parse(map.out).links.map((link: { url: string }) => link.url)).toContain(`${origin}/tides/b`)
+  })
+
+  it('draws the octopus on stderr when it is a terminal, while a scrape or a map runs, and changes no other byte', async () => {
+    const HIDE = '\x1b[?25l'
+    const SHOW = '\x1b[?25h'
+    const run = async (argv: string[], options: { terminal?: boolean; env?: Record<string, string>; signal?: AbortSignal } = {}) => {
+      const out: string[] = []
+      const err: string[] = []
+      const drawn: string[] = []
+      // What reached stderr, in order: the command's lines and the drawing's writes.
+      const stderr: string[] = []
+      const code = await runCli(argv, {
+        env: { W2L_TASK_ROOT: join(root, 'tasks'), ...options.env }, stdout: (text) => out.push(text), stderr: (text) => { err.push(text); stderr.push(text) },
+        ...(options.terminal === false ? {} : { motion: { write: (text: string) => { drawn.push(text); stderr.push(text) }, size: () => ({ columns: 100, rows: 30 }) } }),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+      })
+      return { code, out: out.join('\n'), err: err.join('\n'), drawn, stderr }
+    }
+    // stderr is no terminal: nothing is drawn, and no escape sequence is written anywhere.
+    const piped = await run(['scrape', `${origin}/pause/a`, '--markdown'], { terminal: false })
+    expect(piped.code).toBe(0)
+    expect(piped.out).toContain('# Pause')
+    expect(piped.out + piped.err).not.toContain('\x1b')
+    // A terminal: drawn while the scrape runs, with the stage the engine reported, then wiped and the cursor given back.
+    const watched = await run(['scrape', `${origin}/pause/b`, '--markdown'])
+    expect(watched.drawn.length).toBeGreaterThan(3)
+    expect(watched.drawn[0]!.startsWith(HIDE)).toBe(true)
+    expect(watched.drawn.join('')).toContain('robots.txt allows it · fetching the page')
+    expect(watched.drawn.at(-2)).toBe('\x1b[15A\r\x1b[J')
+    expect(watched.drawn.at(-1)).toBe(SHOW)
+    // What the command answers, and says, is the same bytes with the drawing as without.
+    expect({ code: watched.code, out: watched.out, err: watched.err }).toEqual({ code: piped.code, out: piped.out, err: piped.err })
+    // Switched off, a terminal gets nothing either.
+    for (const [flags, env] of [[['--no-motion'], {}], [[], { OCTOCRAWL_NO_MOTION: '1' }], [[], { CI: 'true' }]] as Array<[string[], Record<string, string>]>) {
+      const off = await run(['scrape', `${origin}/pause/c${flags.length}${Object.keys(env).join('')}`, '--markdown', ...flags], { env })
+      expect(off.drawn, JSON.stringify([flags, env])).toEqual([])
+      expect(off.out).toBe(piped.out)
+    }
+    // A map reports no stages: the drawing says what it maps, and the map is the one it was.
+    const plainMap = await run(['map', `${origin}/pause/`], { terminal: false })
+    const watchedMap = await run(['map', `${origin}/pause/`])
+    expect(watchedMap.drawn.join('')).toContain(`Mapping ${new URL(origin).host}`)
+    expect(watchedMap.drawn.at(-1)).toBe(SHOW)
+    expect(JSON.parse(watchedMap.out).links).toEqual(JSON.parse(plainMap.out).links)
+    expect(watchedMap.err).toBe(plainMap.err)
+    // Ctrl-C with the drawing up: it is wiped and the cursor comes back before the command says it was interrupted.
+    const controller = new AbortController()
+    setTimeout(() => controller.abort(), 800)
+    const interrupted = await run(['scrape', `${origin}/slow/motion`], { signal: controller.signal })
+    expect(interrupted.code).toBe(130)
+    expect(interrupted.err).toBe('octocrawl scrape: interrupted')
+    expect(interrupted.drawn[0]!.startsWith(HIDE)).toBe(true)
+    expect(interrupted.stderr.slice(-3)).toEqual(['\x1b[15A\r\x1b[J', SHOW, 'octocrawl scrape: interrupted'])
   })
 
   it('answers 130 when a scrape is interrupted, and refuses to resume a crawl another process may be running', async () => {

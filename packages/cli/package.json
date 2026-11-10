@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@w2l/api": "*",
-    "@w2l/contracts": "*"
+    "@w2l/contracts": "*",
+    "@w2l/octopus": "*"
   }
 }
