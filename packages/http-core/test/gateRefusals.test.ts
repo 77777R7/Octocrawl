@@ -3,8 +3,9 @@ import { describe, expect, it } from 'vitest'
 import { classifyGate, type GateResponse } from '../src/gate.js'
 
 /**
- * Pages on which a site refuses this exit outright, read from files under fixtures/gate. Waiting does not clear
- * them and a retry from the same exit gets the same page, which is what sets them apart from a challenge.
+ * Pages on which a site refuses this exit outright, read from files under fixtures/gate. Waiting on the page does
+ * not clear them and a retry from the same exit gets the same page, which is what sets them apart from a challenge.
+ * Error 1015 is the one that ends by itself: a rate limit, lifted after a while, and to be reported as one.
  *
  * Where each file comes from:
  *   cloudflare-block.html       a page Cloudflare served on 2026-11-09 ("Attention Required! | Cloudflare", "Sorry,
@@ -87,8 +88,11 @@ describe('classifyGate — pages that refuse this exit, as they should be report
     expect(reason(res(403, cloudflareBlock, CLOUDFLARE))).toBe(REFUSED)
   })
 
-  it.fails('reports Cloudflare\'s error 1020 as a refused exit, as a page and as the one-line body', () => {
+  it.fails('reports Cloudflare\'s error 1020 page as a refused exit', () => {
     expect(reason(res(403, cloudflare1020, CLOUDFLARE))).toBe(REFUSED)
+  })
+
+  it.fails('reports the one-line 1020 body as a refused exit', () => {
     expect(reason(res(403, 'error code: 1020', CLOUDFLARE))).toBe(REFUSED)
   })
 
