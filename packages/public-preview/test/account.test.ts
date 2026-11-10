@@ -62,7 +62,7 @@ describe('the account page\'s data', () => {
     expect(body).toEqual({
       email: 'ada@example.org',
       providers: ['github.com', 'emailLink'],
-      credits: { remaining: 1_040, monthly: { left: 1_000, of: 1_000, resetsAt: '2026-11-01T00:00:00.000Z' }, purchased: 40 },
+      credits: { remaining: 540, monthly: { left: 500, of: 500, resetsAt: '2026-11-01T00:00:00.000Z' }, purchased: 40 },
       usage: [{ day: '2026-10-10', http: 3, browser: 1, notFound: 0, map: 1, unread: 2, jobPages: 0, credits: 9 }],
       keys: [],
       // No OAuth connections served here: an empty list, not a missing field.

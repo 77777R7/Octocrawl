@@ -61,7 +61,7 @@ A page that cannot be read stays in the job with its reason (`blocked`, `failed`
 
 ## What does a job cost?
 
-A page in a job costs what a single scrape costs: 1 credit read over HTTP, 5 in a browser. The run above used 7 credits. Every account gets 1,000 credits a month free.
+A page in a job costs what a single scrape costs: 1 credit read over HTTP, 5 in a browser. The run above used 7 credits. Every account gets 500 credits a month free.
 
 - `maxCredits` caps a job: it stops before the next page would pass the cap.
 - An account runs two jobs at a time, with up to ten more waiting.

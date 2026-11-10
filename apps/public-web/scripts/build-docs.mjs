@@ -393,7 +393,7 @@ await writeFile(join(root, 'dist', 'redirects.json'), `${JSON.stringify({ ...gui
 
 // llms.txt (https://llmstxt.org): what Octocrawl is, and a link to the Markdown copy of every page. llms-full.txt carries
 // all of them in one file.
-const summary = 'Octocrawl turns a public web page into readable Markdown and, on supported pages, fields you can check against the source. It reports blocks, timeouts and missing fields with a reason instead of inventing content. Connect an agent to hosted Octocrawl at https://mcp.octocrawl.dev/mcp (MCP) or call https://api.octocrawl.dev (REST): scrape and map, keyless within a daily allowance; an account adds 1,000 credits a month, crawl jobs of up to 500 pages, batch jobs of up to 1,000 URLs, and with a key the browser lane. The published packages run everything on your own computer, without credits or a daily allowance, and crawls without the 500-page cap (npx octocrawl serve: REST, a TypeScript SDK, a Python client or MCP, with crawl, batch and Monitor), and npx octocrawl serve --hosted --token serves other machines. It is open source (AGPL-3.0).'
+const summary = 'Octocrawl turns a public web page into readable Markdown and, on supported pages, fields you can check against the source. It reports blocks, timeouts and missing fields with a reason instead of inventing content. Connect an agent to hosted Octocrawl at https://mcp.octocrawl.dev/mcp (MCP) or call https://api.octocrawl.dev (REST): scrape and map, keyless within a daily allowance; an account adds 500 credits a month, crawl jobs of up to 500 pages, batch jobs of up to 1,000 URLs, and with a key the browser lane. The published packages run everything on your own computer, without credits or a daily allowance, and crawls without the 500-page cap (npx octocrawl serve: REST, a TypeScript SDK, a Python client or MCP, with crawl, batch and Monitor), and npx octocrawl serve --hosted --token serves other machines. It is open source (AGPL-3.0).'
 const groups = [...new Set(pages.map(page => page.group))]
 // The Vite-built pages' Markdown copies (src/markdownTwin.ts wrote them into dist before this script runs): each opens
 // with its `# title` and a `> summary`, which the list below quotes.
@@ -434,7 +434,7 @@ function accountPageHtml(path, title, description, body, layout = '') {
 <body><a class="skip-link" href="#main-content">Skip to content</a>${header('account')}
 <div class="doc-layout account-layout${layout}"><main id="main-content" class="doc-main"><p class="doc-eyebrow"><span class="kicker-square" aria-hidden="true"></span>Octocrawl / Account</p>${body}</main></div><script defer src="/docs-assets/account.js?v=${assetVersions['account.js']}"></script><script defer src="/docs-assets/nav.js"></script></body></html>`
 }
-const signinBody = `<article class="doc-article" id="signin"><h1>Sign in to Octocrawl</h1><p class="account-lead">An account gets 1,000 credits a month for hosted Octocrawl's API and MCP, and API keys for your agents. A credit is one page read over HTTP; a page that needs a browser costs 5, and a page that is blocked or kept out by robots.txt costs nothing. No card is needed.</p>
+const signinBody = `<article class="doc-article" id="signin"><h1>Sign in to Octocrawl</h1><p class="account-lead">An account gets 500 credits a month for hosted Octocrawl's API and MCP, and API keys for your agents. A credit is one page read over HTTP; a page that needs a browser costs 5, and a page that is blocked or kept out by robots.txt costs nothing. No card is needed.</p>
 <div class="account-panel"><div class="signin-options"><a class="signin-button" data-provider="github" href="/auth/github">${GITHUB_ICON}Continue with GitHub</a><a class="signin-button" data-provider="google" href="/auth/google">${GOOGLE_ICON}Continue with Google</a><p class="signin-or">or</p>
 <form class="account-form" id="email-form"><label for="signin-email">Email<input id="signin-email" name="email" type="email" required autocomplete="email" maxlength="254" /></label><button class="account-button" type="submit">Email me a sign-in link</button></form></div>
 <p class="account-message" id="signin-message" role="status" aria-live="polite"></p></div>
@@ -445,7 +445,7 @@ const emailFinishBody = `<article class="doc-article" id="signin-finish"><h1>Fin
 <div class="account-panel"><!--w2l:email-finish--><p class="account-small">Open the sign-in link from your email to finish here, or <a href="/signin/">start again</a>.</p><!--/w2l:email-finish--></div>
 <p class="account-small">The link works once, for an hour. Signing in takes this click so that a mail scanner opening the link cannot use it up.</p></article>`
 for (const [path, title, description, body, layout] of [
-  ['/signin/', 'Sign in', 'Sign in to Octocrawl with GitHub, Google or an email link to get 1,000 hosted credits a month and API keys.', signinBody, ' signin-layout'],
+  ['/signin/', 'Sign in', 'Sign in to Octocrawl with GitHub, Google or an email link to get 500 hosted credits a month and API keys.', signinBody, ' signin-layout'],
   ['/signin/email/', 'Finish signing in', 'Finish signing in to Octocrawl with the link from your email.', emailFinishBody, ' signin-layout'],
 ]) {
   await mkdir(join(root, 'dist', path.slice(1)), { recursive: true })

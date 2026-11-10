@@ -112,7 +112,7 @@ describe('hosted job routes', () => {
       expect(response.status, String(key)).toBe(403)
       const refused = await response.json() as { code: string; agentHints: string[] }
       expect(refused.code).toBe('jobs_need_account')
-      expect(refused.agentHints[0]).toContain('sign in free for 1,000 credits a month')
+      expect(refused.agentHints[0]).toContain('sign in free for 500 credits a month')
       expect(refused.agentHints[0]).toContain('https://octocrawl.dev/signin/')
     }
     // Another route is refused with what hosted Octocrawl does serve, the jobs included.

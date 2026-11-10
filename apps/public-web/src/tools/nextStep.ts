@@ -56,7 +56,7 @@ export function toolNextStep(kind: NextStepKind, url: string, { code, morePages 
   const dashboard = `/dashboard/${kind === 'map' ? 'map' : 'scrape'}/`
   const playground = signedIn ? `${dashboard}?${new URLSearchParams({ url })}` : `/signin/?${new URLSearchParams({ next: dashboard })}`
   item(kind === 'map' ? 'Up to 5,000 URLs' : 'Past five a day',
-    kind === 'map' ? `${morePages ? 'This site has more than 500 pages. ' : ''}List up to 5,000 of its URLs in the Playground, 1 credit a map, from 1,000 free credits a month.` :'Run this page in the Playground, read in a browser when it needs one, from 1,000 free credits a month.',
+    kind === 'map' ? `${morePages ? 'This site has more than 500 pages. ' : ''}List up to 5,000 of its URLs in the Playground, 1 credit a map, from 500 free credits a month.` :'Run this page in the Playground, read in a browser when it needs one, from 500 free credits a month.',
     link(signedIn ? 'Open it in your Playground →' : 'Sign in and run it →', playground))
   if (code) {
     const open = el('button', 'tool-next-link', 'Get the same call as code →')

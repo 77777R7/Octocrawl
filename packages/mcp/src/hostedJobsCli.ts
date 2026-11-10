@@ -3,7 +3,7 @@
  * It takes Cloud Tasks deliveries only (OIDC for W2L_JOBS_TASKS_ACCOUNT, audience W2L_JOBS_WORKER_URL) and runs a slice each.
  * Environment: the five jobs variables (hostedJobsCloud.ts), and
  *   PORT                        default 8080
- *   W2L_MONTHLY_CREDITS         as the hosted API's (default 1000)
+ *   W2L_MONTHLY_CREDITS         as the hosted API's (default 500)
  *   W2L_JOBS_DAILY              job pages a UTC day for every account together (default 10000)
  *   W2L_JOBS_ACCOUNT_DAILY      job pages a UTC day for one account (default 2000)
  *   W2L_JOBS_WORK_ROOT          where slices keep task directories (default /tmp/octocrawl-jobs)
@@ -56,7 +56,7 @@ const worker = await startJobWorker({
   verify: googleOidcVerifier({ audience: cloud.workerAudience, email: cloud.tasksAccount }),
   deps: {
     store: new FirestoreHostedJobStore(cloud.project, serviceAccessToken()),
-    credits: new FirestoreCreditsStore(cloud.project, serviceAccessToken(), positive('W2L_MONTHLY_CREDITS', 1_000)),
+    credits: new FirestoreCreditsStore(cloud.project, serviceAccessToken(), positive('W2L_MONTHLY_CREDITS', 500)),
     files: cloud.bucket,
     enqueueSlice: cloud.enqueueSlice,
     enqueueExpiry: cloud.enqueueExpiry,

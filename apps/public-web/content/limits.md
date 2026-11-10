@@ -9,7 +9,7 @@ Hosted Octocrawl (`https://api.octocrawl.dev`, `https://mcp.octocrawl.dev/mcp`) 
 | | Without a key | With your account's key | With a key issued by hand |
 | --- | --- | --- | --- |
 | Identity | Your address, hashed per day | The key, hashed, and its account | The key, hashed |
-| Allowance | 20 pages a day per address | The account's credits: 1,000 a month | The key's pages a day |
+| Allowance | 20 pages a day per address | The account's credits: 500 a month | The key's pages a day |
 | Lane | HTTP only: no screenshot, no `scrape_product` | HTTP, then the browser | HTTP, then the browser when the key allows it |
 | Starts a minute | 10 | 60 | 60 |
 | Browser-lane scrapes at once | none | 1 per key | 1 per key |
@@ -95,4 +95,4 @@ This is a support boundary, not a list of sites guaranteed to return content. Se
 
 The 200-page Amazon audit includes a fixed regression set and a separately frozen candidate set; neither cohort passed the 100/100 gate. The repository's R0 failure ledger records same-capture hashes and missing-evidence boundaries. Original HTML remains private on the operator's machine.
 
-Need more than the keyless allowance, or the browser lane? [Sign in](/signin/) for 1,000 credits a month and keys. Need more than that, a team, or something hosted Octocrawl does not do yet? Write to [hello@octocrawl.dev](mailto:hello@octocrawl.dev).
+Need more than the keyless allowance, or the browser lane? [Sign in](/signin/) for 500 credits a month and keys. Need more than that, a team, or something hosted Octocrawl does not do yet? Write to [hello@octocrawl.dev](mailto:hello@octocrawl.dev).

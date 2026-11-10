@@ -176,14 +176,14 @@ const crawl = mountCrawlView(urlCard, hero)
  * credits, docs/hosted-api.md, Accounts and credits). */
 function moreLink(className: string): HTMLAnchorElement {
   if (signedIn) return playgroundLink(className, 'Need more? Run it in your dashboard with your credits →')
-  const link = textElement('a', 'Need more? Sign in for 1,000 free credits a month →', className)
+  const link = textElement('a', 'Need more? Sign in for 500 free credits a month →', className)
   link.href = '/signin/'
   return link
 }
 /** A page that needs a browser: the Playground reads it on the account's credits; first, an account. */
 function browserLink(className: string): HTMLAnchorElement {
   if (signedIn) return playgroundLink(className, 'Read it in a browser in your dashboard →')
-  const link = textElement('a', 'Sign in to read it in a browser (1,000 free credits a month) →', className)
+  const link = textElement('a', 'Sign in to read it in a browser (500 free credits a month) →', className)
   link.href = '/signin/'
   return link
 }
@@ -451,7 +451,7 @@ function failureAdvice(result: PreviewResponse): string[] {
     failed: [retry],
     timeout: [retry],
     invalid_url: ['Use a public http:// or https:// address that anyone can open.'],
-    quota_exceeded: ['Try again after 00:00 UTC, when the daily allowance of five previews resets.', 'For regular use, sign in for 1,000 free credits a month and make a key for mcp.octocrawl.dev or api.octocrawl.dev, or run Octocrawl on your own computer with no limit.'],
+    quota_exceeded: ['Try again after 00:00 UTC, when the daily allowance of five previews resets.', 'For regular use, sign in for 500 free credits a month and make a key for mcp.octocrawl.dev or api.octocrawl.dev, or run Octocrawl on your own computer with no limit.'],
   })[result.status]
 }
 

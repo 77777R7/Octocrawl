@@ -45,7 +45,7 @@ export const LINK_EXTRACTOR: ToolPage = {
   ] },
   code: { title: 'The same map, from your own tools.', format: 'map' },
   faq: [
-    ['Is it free? Do I need an account?', 'Yes, and no. You get five runs a day without signing up, whole site or one page (at most 150 a day for the whole site), reset at 00:00 UTC. Signed in, the Playground lists up to 5,000 URLs of a site for 1 credit, from 1,000 free credits a month.'],
+    ['Is it free? Do I need an account?', 'Yes, and no. You get five runs a day without signing up, whole site or one page (at most 150 a day for the whole site), reset at 00:00 UTC. Signed in, the Playground lists up to 5,000 URLs of a site for 1 credit, from 500 free credits a month.'],
     ['Can it find every page on a website?', 'It reads the site’s robots.txt and the sitemaps it names (or <code>/sitemap.xml</code>), following a sitemap index one level and up to 50 files, and the links on the page you paste. Each URL says where it was found. It doesn’t crawl page after page; for that, run <code>npx octocrawl serve</code> and use crawl. More in <a href="/blog/find-all-pages-on-a-website/">how to find all pages on a website</a>.'],
     ['How many URLs does it list?', 'Up to 500 for a whole site, and up to 500 links for one page. When there are more, the result says how many more it saw. The hosted API’s <code>map</code> and the Playground list up to 5,000.'],
     ['Does it respect robots.txt?', 'Yes. Pages robots.txt disallows are left out, and the result counts them. It reads every sitemap file only if that file’s own robots.txt allows it, and it never signs in or gets past a verification page.'],

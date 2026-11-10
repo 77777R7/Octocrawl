@@ -15,7 +15,7 @@ export function startListMarkup(): string {
           <div class="start-list-copy">
             <p class="section-kicker"><span class="kicker-square" aria-hidden="true"></span>HOSTED OCTOCRAWL</p>
             <h2 id="start-list-title">Free to start. Pick where it runs.</h2>
-            <p>Without a key, hosted Octocrawl reads 20 pages a day per address. <a href="/signin/">Signing in</a> adds 1,000 credits a month and API keys.</p>
+            <p>Without a key, hosted Octocrawl reads 20 pages a day per address. <a href="/signin/">Signing in</a> adds 500 credits a month and API keys.</p>
           </div>
           <ul class="start-list-rows" role="list">${rows}</ul>
         </div>

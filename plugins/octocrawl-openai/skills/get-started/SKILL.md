@@ -9,7 +9,7 @@ Octocrawl turns public web pages into clean Markdown, tables, links and JSON, ea
 
 ## Connect
 
-The plugin connects to `https://mcp.octocrawl.dev/mcp-oauth`. The first time a tool runs, the person signs in to their Octocrawl account (with Google, GitHub or an emailed link at octocrawl.dev) and chooses Authorize. Every account gets 1,000 free credits a month. The connection is listed under MCP connections at https://octocrawl.dev/dashboard/keys/, where it can be disconnected.
+The plugin connects to `https://mcp.octocrawl.dev/mcp-oauth`. The first time a tool runs, the person signs in to their Octocrawl account (with Google, GitHub or an emailed link at octocrawl.dev) and chooses Authorize. Every account gets 500 free credits a month. The connection is listed under MCP connections at https://octocrawl.dev/dashboard/keys/, where it can be disconnected.
 
 ## Choose the tool
 

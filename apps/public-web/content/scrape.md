@@ -112,6 +112,6 @@ An error body (`{ "error", "code" }` with HTTP 4xx or 5xx) is about the call, no
 
 ## Cost
 
-On an account's credits, a page read over HTTP costs 1 credit and a page read in a browser 5. A blocked or refused page costs nothing. Each answer gives `X-Credits-Used` and `X-Credits-Remaining`. An account gets 1,000 credits a month; [sign in](/signin/) to make a key. Without a key the call is free, within 20 pages a day. [Limits](/docs/limits/#hosted-api-and-mcp) has the rest.
+On an account's credits, a page read over HTTP costs 1 credit and a page read in a browser 5. A blocked or refused page costs nothing. Each answer gives `X-Credits-Used` and `X-Credits-Remaining`. An account gets 500 credits a month; [sign in](/signin/) to make a key. Without a key the call is free, within 20 pages a day. [Limits](/docs/limits/#hosted-api-and-mcp) has the rest.
 
 The same call goes through the [TypeScript SDK](https://www.npmjs.com/package/@octocrawl/sdk), the Python client `octocrawl-client`, `npx octocrawl scrape` and the MCP `scrape` tool ([Connect MCP](/docs/connect-mcp/)). To read many pages, list them with `POST /v1/map` first.

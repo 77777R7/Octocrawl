@@ -32,7 +32,7 @@ export const WEBSITE_TO_TEXT: ToolPage = {
   unread: { title: 'An empty file is not an answer.', lead: 'Review the result state and the returned text before using it. A page read is not proof that your task is complete.', cards: UNREAD },
   code: { title: 'The same text, from your own tools.', format: 'markdown' },
   faq: [
-    ['Is it free? Do I need an account?', 'Yes, and no. You get five pages a day without signing up (at most 150 a day for the whole site), reset at 00:00 UTC. A free account gets 1,000 credits a month for the hosted API, MCP and the Playground, and Octocrawl on your own computer has no limit.'],
+    ['Is it free? Do I need an account?', 'Yes, and no. You get five pages a day without signing up (at most 150 a day for the whole site), reset at 00:00 UTC. A free account gets 500 credits a month for the hosted API, MCP and the Playground, and Octocrawl on your own computer has no limit.'],
     ['What is the difference from URL to Markdown?', 'The same read, shown two ways. Markdown keeps headings, lists, tables and links as marks a model or an editor understands; text drops the marks and keeps the words. The Markdown is one click away here too.'],
     ['What happens to tables, links and images?', 'A table becomes one line per row with its cells separated by tabs. A link keeps its text and loses its address; an image is left out. List items keep a dash.'],
     ['Does it work on pages that need JavaScript?', 'It reads the page as the server sends it and does not run scripts, so a page that draws its content in the browser can come back incomplete or empty, and the result says so. With a free account, the hosted API reads such pages in a browser.'],

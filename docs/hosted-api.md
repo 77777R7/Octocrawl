@@ -241,7 +241,7 @@ The key is printed once. Keep it somewhere ignored by git, such as `.w2l/hosted/
 
 A key that names an account (`uid` on its `hostedApiKeys` document) spends that account's credits instead of a daily limit. Decided 2026-10-11 (ROADMAP PH); `packages/mcp/src/hostedCredits.ts` holds the rules.
 
-- **The grant.** Every account gets `W2L_MONTHLY_CREDITS` (1,000) credits each month. The grant resets at 00:00 UTC on the 1st and nothing rolls over. It is spent before bought credits.
+- **The grant.** Every account gets `W2L_MONTHLY_CREDITS` (500) credits each month. The grant resets at 00:00 UTC on the 1st and nothing rolls over. It is spent before bought credits.
 - **What a call costs**, settled from its result:
 
   | Result | Credits |

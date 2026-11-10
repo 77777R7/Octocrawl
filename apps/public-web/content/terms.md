@@ -37,7 +37,7 @@ The preview is run by Howard Lun, an individual in British Columbia, Canada. You
 
 ## Accounts and credits
 
-- Signing in gives an account free credits each month (1,000 today), spent by its API keys on the hosted API and MCP. What a call costs is on [Limits](/docs/limits/#hosted-api-and-mcp).
+- Signing in gives an account free credits each month (500 today), spent by its API keys on the hosted API and MCP. What a call costs is on [Limits](/docs/limits/#hosted-api-and-mcp).
 - Credits have no cash value and cannot be transferred. A month's free credits do not roll over. The amount and the costs may change, and this site says what applies.
 - One person, one account. Making accounts to collect more free credits, or sharing a key to get around a limit, may get the accounts suspended and their keys revoked.
 - Keep your keys secret. A key's calls spend its account's credits, whoever makes them.
