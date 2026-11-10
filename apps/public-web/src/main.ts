@@ -196,7 +196,6 @@ function playgroundLink(className: string, text: string): HTMLAnchorElement {
   for (const type of ['pointerenter', 'pointerdown', 'focus', 'click']) link.addEventListener(type, point)
   return link
 }
-if (signedIn) urlHelp.append(' · ', playgroundLink('url-help-link', 'Run with your credits ↗'))
 const formatButton = document.querySelector<HTMLButtonElement>('#format-button')!
 const formatLabel = document.querySelector<HTMLElement>('#format-label')!
 const formatPanel = document.querySelector<HTMLElement>('#format-panel')!
@@ -260,7 +259,8 @@ document.querySelector<HTMLButtonElement>('#example-button')!.addEventListener('
   track('example_click')
   // A free tool's page has an example of its own (page.ts, heroMarkup `tool.example`).
   input.value = hero.dataset.toolExample ?? 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview'
-  // Clears the hint an earlier address left and shows the quota line again; the submit drops the hint it schedules.
+  // Drops a hint still on its way for an earlier address (one already shown has replaced the note this button sits
+  // in); the submit drops the hint it schedules.
   scheduleCapability()
   // The example runs at once, through the form's own submit, as Extract page would.
   form.requestSubmit()

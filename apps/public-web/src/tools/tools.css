@@ -151,6 +151,8 @@
 }
 /* Whole site takes a URL alone: the card's format, options and one-page code don't apply (the code is further down). */
 .hero[data-tool-map="site"] .url-tools, .hero[data-tool-map="site"] #code-button { display: none; }
+/* The one control left in the row keeps the primary action's place, on the right. */
+.hero[data-tool-map="site"] .submit-button { margin-left: auto; }
 
 /* Local conversion examples keep long source lines inside the page on narrow screens. */
 .tl-example { max-width: 100%; overflow-x: auto; padding: 20px; background: #f3f6fa; color: var(--ink); font-size: 13px; line-height: 1.7; tab-size: 4; }

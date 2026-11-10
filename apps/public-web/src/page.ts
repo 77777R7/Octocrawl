@@ -176,7 +176,6 @@ ${siteHeaderMarkup()}
               <label class="visually-hidden" for="url-input">Public web page URL</label>
               <div class="url-card">
                 <div class="url-entry">
-                  <span class="url-chip" aria-hidden="true">URL</span>
                   <input id="url-input" name="url" type="url" inputmode="url" autocomplete="url" spellcheck="false" placeholder="Paste a public page URL…" aria-describedby="url-help capability-message form-message" required />
                 </div>
                 <div class="url-toolbar">
@@ -184,8 +183,7 @@ ${siteHeaderMarkup()}
                     <button class="tool-button" id="format-button" type="button" popovertarget="format-panel" aria-haspopup="dialog"><span class="tool-icon tool-icon-format" aria-hidden="true"></span><span class="visually-hidden">Output format: </span><span id="format-label">${copy.tool?.text ? 'Text' : 'Markdown'}</span><span class="tool-caret" aria-hidden="true"></span></button>
                     <button class="tool-button" id="options-button" type="button" popovertarget="options-panel" aria-haspopup="dialog"><span class="tool-icon tool-icon-options" aria-hidden="true"></span><span class="tool-text">Options</span><span class="tool-badge" id="options-badge" hidden></span></button>
                   </div>
-                  <button class="tool-button" id="code-button" type="button" aria-haspopup="dialog"><span class="tool-icon tool-icon-code" aria-hidden="true">&lt;/&gt;</span><span class="tool-text">Get code</span></button>
-                  <button class="example-button" id="example-button" type="button">Try an example</button>
+                  <button class="tool-button tool-button-quiet" id="code-button" type="button" aria-haspopup="dialog"><span class="tool-icon tool-icon-code" aria-hidden="true">&lt;/&gt;</span><span class="tool-text">Get code</span></button>
                   <button class="submit-button" id="submit-button" type="submit"><span id="submit-label">Extract page</span><span class="button-arrow" aria-hidden="true">→</span></button>
                 </div>
                 <div class="crawl-window" id="crawl-window" hidden>
@@ -204,7 +202,7 @@ ${siteHeaderMarkup()}
               </div>
               <p class="form-message" id="form-message" role="status" aria-live="polite"></p>
               <p class="capability-message" id="capability-message" role="status" aria-live="polite"></p>
-              <p class="url-help" id="url-help"><span id="quota-note">5 free previews a day</span> · Public pages only · <a class="url-help-link" href="/docs/connect-mcp/">Use it from your agent <span aria-hidden="true">↗</span></a></p>
+              <p class="url-help" id="url-help"><span id="quota-note">5 free previews a day</span> · <button class="url-help-link example-button" id="example-button" type="button">Try an example</button> · <a class="url-help-link" href="/docs/connect-mcp/">Use it from your agent <span aria-hidden="true">↗</span></a></p>
               <div class="sheet format-sheet" id="format-panel" popover role="dialog" aria-labelledby="format-title">
                 <div class="sheet-head">
                   <p class="sheet-title" id="format-title"><span class="kicker-square" aria-hidden="true"></span>Format</p>
