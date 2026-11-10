@@ -36,6 +36,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **The SDK's `W2LError.code` carries hosted Octocrawl's codes.** The TypeScript SDK kept an error's `code` only when it was one of the eight request-error codes or `rate_limited`, so `quota_exhausted`, `browser_busy`, `job_running` and hosted's other codes arrived as `undefined` and a caller had to read `error.body.code`. It now keeps any code the answer names, as the Python client does and the reference describes; the type of `code` is wider to match.
+
 ## 0.8.11 — 2026-11-09
 
 The published packages at 0.8.11. Reading pages behind your login in your own Chrome now takes fewer clicks and survives Chrome quitting: **a site you allowed is not asked for again, and a server asks Chrome's "Allow remote debugging?" once while it runs**; **a `my-browser` batch reads on when Chrome comes back after it quit**; and **a new batch reads again only the pages of a finished batch that stopped at a login wall** (`loginWallsOf`), which now include a sign-in page with a sentence of copy, as GitHub's is.
