@@ -469,9 +469,9 @@ export class W2L {
     return this.getPageList<ListedPage<O>>(`/v1/batches/${encodeURIComponent(id)}/items`, options, request, `batch not found: ${id}`)
   }
 
-  /** Every item of a batch, page by page (at most 50 per request), or as many as the PaginationLimits allow; the generator's return value says where it stopped. */
+  /** Every item of a batch, page by page (50 per request, the most the API gives, unless `limit` names fewer), or as many as the PaginationLimits allow; the generator's return value says where it stopped. */
   listBatchItems<O extends PagedListOptions = PagedListOptions>(id: string, options: O = {} as O, request: RequestOptions = {}): AsyncGenerator<ListedPage<O>, PaginationEnd> {
-    return this.paginate<ListedPage<O>>((query) => this.getBatchItems(id, query, request) as Promise<CrawlPageList<ListedPage<O>>>, options, request, BATCH_ITEM_MAX_LIMIT, 'batch items')
+    return this.paginate<ListedPage<O>>((query) => this.getBatchItems(id, query, request) as Promise<CrawlPageList<ListedPage<O>>>, options.limit === undefined ? { ...options, limit: BATCH_ITEM_MAX_LIMIT } : options, request, BATCH_ITEM_MAX_LIMIT, 'batch items')
   }
 
   /** The items listBatchItems would yield under the same options, collected, with where the listing stopped. */

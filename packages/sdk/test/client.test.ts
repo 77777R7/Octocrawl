@@ -490,6 +490,13 @@ describe('W2L SDK', () => {
     for await (const item of client.listBatchItems('batch-1', { maxResults: 3 })) items.push(item.id)
     expect(items).toEqual(['p1', 'p2', 'p3'])
     expect(calls.at(-1)).toBe('/v1/batches/batch-1/items?limit=3')
+    // Following every cursor with no page size named asks for the largest page the server gives, not its default of 10.
+    calls.length = 0
+    expect((await client.collectBatchItems('batch-1')).items).toHaveLength(8)
+    expect(calls).toEqual(['/v1/batches/batch-1/items?limit=50'])
+    // One page asked for by hand is left to the server's default.
+    await client.getBatchItems('batch-1')
+    expect(calls.at(-1)).toBe('/v1/batches/batch-1/items')
     await client.getBatchItems('batch-1', { limit: 2, fields: ['url', 'json'] })
     expect(calls.at(-1)).toBe('/v1/batches/batch-1/items?limit=2&fields=url%2Cjson')
     await client.collectBatchItems('batch-1', { limit: 5, fields: ['status'] })

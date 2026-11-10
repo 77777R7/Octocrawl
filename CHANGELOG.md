@@ -36,6 +36,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **The SDK reads a batch's items 50 at a time.** `listBatchItems`, `collectBatchItems` and `getBatchDocuments` named no page size unless given a `limit` or `maxResults`, so a server on your computer answered its default of 10 items a request: 100 requests for a 1,000-URL batch. They now ask for 50, the most that server gives, which is what the Python client and `batchAndWait` already did. Hosted Octocrawl already answered 50 by default, so nothing changes there. A `limit` you pass is kept, and `getBatchItems` (one page) is unchanged.
+
 - **The SDK's `W2LError.code` carries hosted Octocrawl's codes.** The TypeScript SDK kept an error's `code` only when it was one of the eight request-error codes or `rate_limited`, so `quota_exhausted`, `browser_busy`, `job_running` and hosted's other codes arrived as `undefined` and a caller had to read `error.body.code`. It now keeps any code the answer names, as the Python client does and the reference describes; the type of `code` is wider to match.
 
 ## 0.8.11 — 2026-11-09
