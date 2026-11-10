@@ -107,7 +107,7 @@ CLI：
 
 ### Phase 2：MCP 进度
 
-- [ ] **P1 普通 `scrape` 发阶段进度。**（`map` 没有阶段可报，不发。分三步：① 本地 API 的 `/v1/scrape` 带 `Accept: application/x-ndjson` 时逐行回阶段，已做；② SDK 的 `scrape` 加 `onStage`；③ MCP 把阶段发成进度，不带 `total`。） 依赖 K2。MCP 服务器是本地 API 的 REST 客户端，而 REST 的回答今天不带阶段，所以要先让阶段经 REST 传出来（例如 `/v1/scrape` 的流式回答），这一步算在 P1 里。只在调用带 `progressToken` 时发；文字是白话阶段，一行以内（措辞见 D6）。不改工具列表和 instructions。
+- [ ] **P1 普通 `scrape` 发阶段进度。**（`map` 没有阶段可报，不发。分三步：① 本地 API 的 `/v1/scrape` 带 `Accept: application/x-ndjson` 时逐行回阶段，已做；② SDK 的 `scrape` 加 `onStage`，已做；③ MCP 把阶段发成进度，不带 `total`。） 依赖 K2。MCP 服务器是本地 API 的 REST 客户端，而 REST 的回答今天不带阶段，所以要先让阶段经 REST 传出来（例如 `/v1/scrape` 的流式回答），这一步算在 P1 里。只在调用带 `progressToken` 时发；文字是白话阶段，一行以内（措辞见 D6）。不改工具列表和 instructions。
   - 完成标准：测试断言带 token 时收到 robots 和 page 两条、不带时一条不发、工具列表和 instructions 的长度测试仍过；在 Claude Code 里实际看一次，把看到的排版写进本文件"现状"一节，替换"排版方式不明"。
 - [ ] **P2 托管端进度。** 见 D7，列出但不开工。
 

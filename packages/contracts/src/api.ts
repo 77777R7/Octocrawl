@@ -297,6 +297,18 @@ export interface ScrapeRecord extends RequestAttribution {
   agentHints?: AgentHints
 }
 
+/**
+ * What a scrape has got to while it runs, for a caller that shows progress: robots.txt was read (`allowed` false
+ * when it disallows the page, with `unreachable` when it could not be read, which counts as a disallow; `overridden`
+ * when it disallows the page and the page is fetched all the same, on the record, as a local server does for a URL
+ * the request names), then the page's body was received and parsed. `page` does not mean the page was read: a
+ * challenge page or an empty shell is still refused after it, and only the result says. Only the HTTP lane reports
+ * them, so a scrape that starts in a browser tells none; any step may never come. The robots stage is the first
+ * check's alone: when an https URL is read again over http (a site with no HTTPS), that second read checks robots.txt
+ * for itself and is not told, so a page can follow a refusal, and a refusal an override.
+ */
+export type ScrapeStage = { stage: 'robots'; allowed: boolean; unreachable?: true; overridden?: true } | { stage: 'page' }
+
 export interface CompactScrapeResponse {
   requestedUrl: string
   finalUrl: string
