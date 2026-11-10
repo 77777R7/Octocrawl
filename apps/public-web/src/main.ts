@@ -983,7 +983,11 @@ function renderOutputPanel(result: PreviewResponse, build: 'window' | 'body' | '
   const view = views.includes(outputView) ? outputView : views[0]!
   const asText = view === 'markdown' && markdownMode === 'text'
   const text = asText ? TEXT_VIEW : VIEW_TEXT[view]
-  const payload = asText ? markdownToText(viewPayload(result, view)) : viewPayload(result, view)
+  // A result whose data for one view is not in the shape that view reads must not take the panel, and the tabs to
+  // every other view, down with it: that view says it cannot be shown, and offers nothing to copy.
+  let payload = ''
+  let broken = false
+  try { payload = asText ? markdownToText(viewPayload(result, view)) : viewPayload(result, view) } catch { broken = true }
   const output = document.createElement('section')
   output.className = 'output-panel result-window'
   output.setAttribute('aria-labelledby', 'content-title')
@@ -1063,14 +1067,20 @@ function renderOutputPanel(result: PreviewResponse, build: 'window' | 'body' | '
   body.setAttribute('aria-labelledby', `window-tab-${view}`)
   // Scrolls with the keyboard too.
   body.tabIndex = 0
-  if (view === 'json') body.append(sourceView(payload, jsonTint))
-  else if (view === 'fields') body.append(renderFields(result))
-  else if (view === 'links') body.append(renderLinks(result))
-  else if (view === 'info') body.append(renderPageInfo(result))
-  else if (!payload.trim()) body.append(textElement('p', 'No readable Markdown was returned. Switch to JSON to inspect the status and reason.', 'empty-content'))
-  else if (asText) body.append(sourceView(payload.slice(0, MARKDOWN_PREVIEW_LIMIT), (line, into) => tinted(into, line)))
-  else if (markdownMode === 'preview') body.append(renderMarkdown(payload))
-  else body.append(sourceView(payload.slice(0, MARKDOWN_PREVIEW_LIMIT), markdownTint()))
+  try {
+    if (broken) throw new Error('view payload')
+    if (view === 'json') body.append(sourceView(payload, jsonTint))
+    else if (view === 'fields') body.append(renderFields(result))
+    else if (view === 'links') body.append(renderLinks(result))
+    else if (view === 'info') body.append(renderPageInfo(result))
+    else if (!payload.trim()) body.append(textElement('p', 'No readable Markdown was returned. Switch to JSON to inspect the status and reason.', 'empty-content'))
+    else if (asText) body.append(sourceView(payload.slice(0, MARKDOWN_PREVIEW_LIMIT), (line, into) => tinted(into, line)))
+    else if (markdownMode === 'preview') body.append(renderMarkdown(payload))
+    else body.append(sourceView(payload.slice(0, MARKDOWN_PREVIEW_LIMIT), markdownTint()))
+  } catch {
+    copy.disabled = download.disabled = true
+    body.replaceChildren(textElement('p', view === 'json' ? 'This view could not be shown.' : `The ${viewName(view)} view could not be shown for this result. The JSON view has everything the service returned.`, 'empty-content'))
+  }
 
   const foot = document.createElement('div')
   foot.className = 'window-foot'

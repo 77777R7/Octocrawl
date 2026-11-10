@@ -64,6 +64,35 @@ describe('rendered task completion', () => {
   })
 })
 
+describe('a view the result cannot fill', () => {
+  it('says so in that view and keeps the panel and its other views', async () => {
+    const page = await browser.newPage({ reducedMotion: 'reduce' })
+    const errors: string[] = []
+    page.on('pageerror', error => errors.push(error.message))
+    try {
+      await page.route('**/*', async route => {
+        const url = new URL(route.request().url())
+        if (url.origin !== new URL(origin).origin) return route.abort()
+        // Links that are not the strings the view reads.
+        if (url.pathname === '/api/preview') return route.fulfill({ json: { status: 'success', requestedUrl: 'https://example.test', finalUrl: 'https://example.test', title: 'Captured page', markdown: 'The page’s words', totalMs: 10, reason: null, links: [{ url: 'https://example.test/a' }], linksTotal: 1 } })
+        if (url.pathname === '/api/quota') return route.fulfill({ json: { enabled: true, remaining: 5, limit: 5 } })
+        if (url.pathname === '/api/capability') return route.fulfill({ json: {} })
+        return route.continue()
+      })
+      await page.goto(origin)
+      await page.locator('#url-input').fill('https://example.test')
+      await page.locator('#submit-button').click()
+      await page.locator('.window-tab', { hasText: 'Links' }).click()
+      expect(await page.locator('#window-body').innerText()).toContain('The Links view could not be shown for this result.')
+      expect(await page.locator('.window-tab[aria-selected="true"]').innerText()).toBe('Links')
+      expect(await page.locator('.output-panel .copy-button').isDisabled()).toBe(true)
+      await page.locator('.window-tab', { hasText: 'Markdown' }).click()
+      expect(await page.locator('#window-body').innerText()).toContain('The page’s words')
+      expect(errors).toEqual([])
+    } finally { await page.close() }
+  })
+})
+
 describe('Try an example', () => {
   it('reads the example page at once, dropping an earlier hint still on its way without sending one for the example', async () => {
     const page = await browser.newPage({ reducedMotion: 'reduce' })
