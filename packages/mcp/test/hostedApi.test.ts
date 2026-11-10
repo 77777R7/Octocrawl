@@ -106,6 +106,14 @@ it('answers a challenge page served with a 200 as blocked, not as the page', asy
   expect(body).toMatchObject({ status: 'blocked', blockReason: 'cloudflare_challenge', readiness: { state: 'not_served' }, evidenceRecord: { httpStatus: 200, status: 'blocked' } })
 })
 
+it('answers a scrape as one JSON body to a caller that asks for the stage stream: hosted Octocrawl tells no stages', async () => {
+  const { url } = await start()
+  const response = await post(url, '/v1/scrape', { url: `${origin}/challenge` }, { accept: 'application/x-ndjson, application/json' })
+  expect(response.status).toBe(200)
+  expect(response.headers.get('content-type')).toMatch(/^application\/json/)
+  expect(await response.json()).toMatchObject({ status: 'blocked', blockReason: 'cloudflare_challenge' })
+})
+
 it('keeps no file on the server and names no path of its own, since nothing could read one', async () => {
   const { url } = await start({ keylessDaily: 3 })
   const text = await post(url, '/v1/scrape', { url: `${origin}/notes.txt` })

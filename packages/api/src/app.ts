@@ -9,7 +9,7 @@ import { ChromeLoginError } from './chromeLogin.js'
 import { bearerTokenMatcher } from './auth.js'
 import type { JobKind } from './jobEvents.js'
 import { checkStreamCursor, jobStream, readJobReport, sseEvent } from './jobStream.js'
-import { scrapeStages } from './stages.js'
+import { scrapeStages, type ScrapeStage } from './stages.js'
 import type { ServerActivity, ServerActivityListener } from './activity.js'
 import {
   API_ERROR_STATUS,
@@ -48,6 +48,9 @@ import {
   type ScrapeResponse,
   type TraceEvent,
 } from '@w2l/contracts'
+
+/** The media type a caller names in `Accept` to be told a scrape's stages as they happen (`POST /v1/scrape`). */
+export const STAGE_STREAM_TYPE = 'application/x-ndjson'
 
 export interface AppOptions {
   /** A bearer token requests must present; accepted together with `tokens`. */
@@ -232,19 +235,73 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
    * the call's trace (a scrape's stages); with nobody listening it gets none, and the call is the one it was.
    */
   let calls = 0
-  const watched = async <T>(kind: 'scrape' | 'map', req: { url: string; origin?: string }, run: (onTrace: { onTrace?: (event: TraceEvent) => void }) => Promise<T>): Promise<T> => {
+  const watched = async <T>(kind: 'scrape' | 'map', req: { url: string; origin?: string }, run: (onTrace: { onTrace?: (event: TraceEvent) => void }) => Promise<T>, onStage?: (stage: ScrapeStage) => void): Promise<T> => {
     const listener = options.onActivity
-    if (listener === undefined) return run({})
+    // The caller's own listener for a scrape's stages (the stage stream) hears them whether or not the server is watched.
+    if (listener === undefined) return run(onStage === undefined ? {} : { onTrace: scrapeStages(onStage) })
     const id = ++calls
     const tell = (event: ServerActivity): void => { try { listener(event) } catch { /* What is shown is advisory. */ } }
     tell({ type: 'call_started', id, kind, url: req.url, ...(req.origin === undefined ? {} : { origin: req.origin }) })
-    try { return await run(kind === 'scrape' ? { onTrace: scrapeStages((stage) => tell({ type: 'call_stage', id, stage })) } : {}) }
+    try { return await run(kind === 'scrape' ? { onTrace: scrapeStages((stage) => { tell({ type: 'call_stage', id, stage }); onStage?.(stage) }) } : {}) }
     finally { tell({ type: 'call_ended', id }) }
   }
 
+  /**
+   * `POST /v1/scrape` answers one JSON body when the scrape ends. A caller that shows progress asks for the scrape's
+   * stages as they happen with `Accept: application/x-ndjson`: a line a stage (`{"type":"stage","stage":"robots",
+   * "allowed":true}`, then `{"type":"stage","stage":"page"}`: ScrapeStage), then one last line with the answer,
+   * `{"type":"result","http":<status>,"body":<the body the plain call answers>}`.
+   *
+   * The stream starts with the first stage. A call that ends before any (a request refused, a scrape that starts in
+   * a browser, which tells none) is answered as the plain call is, status and body. Once it has started the HTTP
+   * status is 200 whatever follows, so the last line's `http` carries the status the plain call would have had, and
+   * `body` its body, an error's included. A stream that ends without that line was cut off.
+   */
   app.post('/v1/scrape', async (c) => {
     const req = parseScrapeRequest(await c.req.json())
-    return c.json(await watched('scrape', req, (trace) => engine.scrape(req, { signal: c.req.raw.signal, ...trace })), 200)
+    const scrape = (onStage?: (stage: ScrapeStage) => void) => watched('scrape', req, (trace) => engine.scrape(req, { signal: c.req.raw.signal, ...trace }), onStage)
+    const wantsStages = (c.req.header('accept') ?? '').split(',').some((type) => type.trim().split(';')[0]!.toLowerCase() === STAGE_STREAM_TYPE)
+    if (!wantsStages) return c.json(await scrape(), 200)
+    const encoder = new TextEncoder()
+    const line = (value: unknown): Uint8Array => encoder.encode(`${JSON.stringify(value)}\n`)
+    /** The stages told before the stream was open, then the stream itself. */
+    const early: Uint8Array[] = []
+    let open: ReadableStreamDefaultController<Uint8Array> | null = null
+    let started!: () => void
+    const firstStage = new Promise<'stage'>((resolve) => { started = () => resolve('stage') })
+    const ended = scrape((stage) => {
+      const told = line({ type: 'stage', ...stage })
+      // A caller that went away has closed the stream: the scrape is being cancelled, and nothing is left to tell.
+      if (open === null) early.push(told); else try { open.enqueue(told) } catch { /* closed */ }
+      started()
+    }).then((body) => ({ body }), (error: unknown) => ({ error }))
+    if (await Promise.race([firstStage, ended.then(() => 'ended' as const)]) === 'ended') {
+      const outcome = await ended
+      if ('error' in outcome) throw outcome.error
+      return c.json(outcome.body, 200)
+    }
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const told of early) controller.enqueue(told)
+        open = controller
+        void ended.then(async (outcome) => {
+          // A caller that went away gets no last line, and its cancelled scrape is no error to log: the plain call logs none.
+          if (c.req.raw.signal.aborted) return null
+          if (!('error' in outcome)) return line({ type: 'result', http: 200, body: outcome.body })
+          // An error is answered as the plain call answers it (and logged as it logs it), under the status it would have had.
+          const answer = await onError(outcome.error, c)
+          return line({ type: 'result', http: answer.status, body: await answer.json() })
+        }).catch((error: unknown) => {
+          // The answer could not be written as a line (a body that is not JSON, an error that cannot be said): the stream
+          // still ends with a last line, and the log says why.
+          console.error(JSON.stringify({ component: 'api', method: c.req.method, path: c.req.path, error: error instanceof Error ? error.stack ?? String(error) : 'the scrape\'s answer could not be written to its stage stream' }))
+          return line({ type: 'result', http: 500, body: { error: 'internal error', code: 'internal_error' } })
+        }).then((last) => {
+          try { if (last !== null) controller.enqueue(last); controller.close() } catch { /* The caller closed it first. */ }
+        })
+      },
+    })
+    return c.body(stream, 200, { 'content-type': `${STAGE_STREAM_TYPE}; charset=utf-8`, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' })
   })
 
   /** The record of one scrape call, by the `scrapeId` its response carried. */
@@ -635,7 +692,7 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
 
   app.notFound((c) => fail(c, 'not_found', `no route for ${c.req.method} ${c.req.path}`))
 
-  app.onError((err, c) => {
+  function onError(err: unknown, c: Context): Response | Promise<Response> {
     if (err instanceof RequestError) return fail(c, err.code, err.message, err.details, err.agentHints)
     if (err instanceof CrawlStateError) return fail(c, 'conflict', err.message)
     // A scrape on the my-browser lane whose Chrome was not reached, or whose site the person did not allow.
@@ -646,9 +703,10 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     if (err instanceof SyntaxError) return fail(c, 'invalid_json', 'body must be JSON')
     // Logged whether or not the response carries the message: a client that keeps no error body (a batch runner) leaves
     // the log as the only record of what broke.
-    console.error(JSON.stringify({ component: 'api', method: c.req.method, path: c.req.path, error: err.stack ?? String(err) }))
-    return fail(c, 'internal_error', options.exposeInternalErrors === true ? err.message : 'internal error')
-  })
+    console.error(JSON.stringify({ component: 'api', method: c.req.method, path: c.req.path, error: err instanceof Error ? err.stack ?? String(err) : String(err) }))
+    return fail(c, 'internal_error', options.exposeInternalErrors === true && err instanceof Error ? err.message : 'internal error')
+  }
+  app.onError(onError)
 
   return app
 }
