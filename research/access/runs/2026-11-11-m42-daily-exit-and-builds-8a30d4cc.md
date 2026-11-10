@@ -29,4 +29,58 @@ Label: `research`. Task list: [docs/enhanced-access-tasks.md](../../docs/enhance
 
 ## Runs
 
-Filled in day by day; the tables come from `node research/access/exit-split/daily-table.mjs`.
+One bullet a day. No verdict is written until three days have a session. The tables below are the output of `node research/access/exit-split/daily-table.mjs`, replaced whole after each day: a cell is `verified`, or the read's reason with the real Chrome's gate signals and challenge wait; `real Chrome: …` is how the real-Chrome attempt itself ended when it got no page.
+
+- **2026-11-11 (day 1):** `EXIT_SPLIT_STATE=… EXIT_SPLIT_GRANT=… EXIT_SPLIT_PROXIES=… EXIT_SPLIT_CFT=… research/access/exit-split/daily.sh`, 18:19–18:52Z on 2026-11-10 (02:19–02:52 local on 11-11). Scripts at `4b8fee8b`, product code `8a30d4cc`; run-set's build check (`tsc --build --dry`) up to date in all 8 runs. Proxied: the API through the shell's Clash client on `127.0.0.1:7890`, arm B's Chrome through one datacenter proxy per launch. Installed Chrome 157.0.8103.50, Chrome for Testing 157.0.8103.50. All 8 runs ended with exit code 0. Verified of 16, rounds 1 and 2: A 8 and 6, B 7 and 6, C 10 and 8, N 7 and 6. Arm B launched the real Chrome 26 times (launches 1–26 of the proxy list); 4 of those reads ended in `connection_error` or `timeout`. After this session the branch merged main `7dc9b768`, which adds documents only.
+
+## Tables
+
+Verified per run (of 16):
+
+| Day (local) | A r1 | A r2 | B r1 | B r2 | C r1 | C r2 | N r1 | N r2 | commit |
+|---|---|---|---|---|---|---|---|---|---|
+| 2026-11-11 | 8 | 6 | 7 | 6 | 10 | 8 | 7 | 6 | 4b8fee8b |
+
+### 2026-11-11
+
+| Task | A1 | B1 | C1 | N1 | A2 | B2 | C2 | N2 |
+|---|---|---|---|---|---|---|---|---|
+| T001 | cloudflare_challenge `header_cf_mitigated` 9.0 s | cloudflare_challenge `header_cf_mitigated` 9.0 s | cloudflare_challenge `header_cf_mitigated` 9.0 s | cloudflare_challenge `header_cf_mitigated` 9.0 s | cloudflare_challenge `header_cf_mitigated` 9.0 s | captcha `site_captcha_script+text_verify_you_are_human+text_complete_the_security_check` | cloudflare_challenge `header_cf_mitigated` 9.0 s | cloudflare_challenge `header_cf_mitigated` 9.0 s |
+| T002 | verified (no Chrome) | verified (no Chrome) | verified (no Chrome) | verified (no Chrome) | verified (no Chrome) | verified (no Chrome) | verified (no Chrome) | verified (no Chrome) |
+| T005 | verified (no Chrome) | verified (no Chrome) | verified (no Chrome) | verified (no Chrome) | verified (no Chrome) | verified (no Chrome) | verified (no Chrome) | verified (no Chrome) |
+| T034 | verified (no Chrome) | verified (no Chrome) | verified (no Chrome) | verified (no Chrome) | verified (no Chrome) | verified (no Chrome) | verified (no Chrome) | verified (no Chrome) |
+| T038 | verified | verified | verified | verified | verified | bot_detected_generic `header_x_datadome` 9.0 s | verified | verified |
+| T045 | captcha `header_x_datadome+datadome_captcha` not waited | captcha `header_x_datadome+datadome_captcha` not waited | captcha `header_x_datadome+datadome_captcha` not waited | captcha `header_x_datadome+datadome_captcha` not waited | captcha `header_x_datadome+datadome_captcha` not waited | captcha `header_x_datadome+datadome_captcha` not waited | captcha `header_x_datadome+datadome_captcha` not waited | captcha `header_x_datadome+datadome_captcha` not waited |
+| T046 | verified | verified | verified | captcha `header_x_datadome+datadome_captcha` not waited | captcha `header_x_datadome+datadome_captcha` not waited | verified | captcha `header_x_datadome+datadome_captcha` not waited | captcha `header_x_datadome+datadome_captcha` not waited |
+| T047 | cloudflare_challenge `header_cf_mitigated` 9.1 s | cloudflare_challenge `header_cf_mitigated` 9.1 s | verified | cloudflare_challenge `header_cf_mitigated` 9.0 s | cloudflare_challenge `header_cf_mitigated` 9.1 s | cloudflare_challenge `header_cf_mitigated` 9.1 s | cloudflare_challenge `header_cf_mitigated` 9.1 s | cloudflare_challenge `header_cf_mitigated` 9.1 s |
+| T048 | cloudflare_challenge `header_cf_mitigated` 9.0 s | access_denied `cf_attention_required+text_you_have_been_blocked` not waited | cloudflare_challenge `header_cf_mitigated` 9.0 s | access_denied `cf_attention_required+text_you_have_been_blocked` not waited | cloudflare_challenge `header_cf_mitigated` 9.1 s | access_denied; real Chrome: connection_error | verified | cloudflare_challenge `header_cf_mitigated` 9.0 s |
+| T049 | verified | captcha `header_x_datadome+datadome_captcha` not waited | captcha `header_x_datadome+datadome_captcha` not waited | captcha `header_x_datadome+datadome_captcha` not waited | captcha `header_x_datadome+datadome_captcha` not waited | captcha; real Chrome: connection_error | captcha `header_x_datadome+datadome_captcha` not waited | captcha `header_x_datadome+datadome_captcha` not waited |
+| T053 | bot_detected_generic `weak_access_denied+status_403` | bot_detected_generic `weak_access_denied+status_403` | verified | bot_detected_generic `weak_access_denied+status_403` | bot_detected_generic `weak_access_denied+status_403` | bot_detected_generic; real Chrome: timeout | bot_detected_generic `weak_access_denied+status_403` | bot_detected_generic `weak_access_denied+status_403` |
+| T068 | bot_detected_generic `header_x_datadome` 9.0 s | bot_detected_generic `header_x_datadome` 9.0 s | bot_detected_generic `header_x_datadome` 9.0 s | bot_detected_generic `header_x_datadome` 9.0 s | bot_detected_generic `header_x_datadome` 9.0 s | bot_detected_generic; real Chrome: timeout | bot_detected_generic `header_x_datadome` 9.0 s | cloudflare_challenge `header_cf_mitigated` 9.0 s |
+| T071 | cloudflare_challenge `header_cf_mitigated` 9.0 s | cloudflare_challenge `header_cf_mitigated` 9.0 s | cloudflare_challenge `header_cf_mitigated` 9.0 s | cloudflare_challenge `header_cf_mitigated` 9.0 s | cloudflare_challenge `header_cf_mitigated` 9.0 s | cloudflare_challenge `header_cf_mitigated` 9.0 s | cloudflare_challenge `header_cf_mitigated` 9.0 s | cloudflare_challenge `header_cf_mitigated` 9.0 s |
+| T076 | cloudflare_challenge `header_cf_mitigated` 9.0 s | cloudflare_challenge `header_cf_mitigated` 9.0 s | verified | verified | verified | cloudflare_challenge `header_cf_mitigated` 9.0 s | verified | verified |
+| B001 | verified | verified | verified | verified | verified | verified | verified | cloudflare_challenge `header_cf_mitigated` 9.1 s |
+| B008 | verified | verified | verified | verified | empty_unverified; real Chrome: empty_unverified | verified | verified | verified |
+
+Pooled over 1 day(s): verified / reads.
+
+| Task | A | B | C | N |
+|---|---|---|---|---|
+| T001 | 0/2 | 0/2 | 0/2 | 0/2 |
+| T002 | 2/2 | 2/2 | 2/2 | 2/2 |
+| T005 | 2/2 | 2/2 | 2/2 | 2/2 |
+| T034 | 2/2 | 2/2 | 2/2 | 2/2 |
+| T038 | 2/2 | 1/2 | 2/2 | 2/2 |
+| T045 | 0/2 | 0/2 | 0/2 | 0/2 |
+| T046 | 1/2 | 2/2 | 1/2 | 0/2 |
+| T047 | 0/2 | 0/2 | 1/2 | 0/2 |
+| T048 | 0/2 | 0/2 | 1/2 | 0/2 |
+| T049 | 1/2 | 0/2 | 0/2 | 0/2 |
+| T053 | 0/2 | 0/2 | 1/2 | 0/2 |
+| T068 | 0/2 | 0/2 | 0/2 | 0/2 |
+| T071 | 0/2 | 0/2 | 0/2 | 0/2 |
+| T076 | 1/2 | 0/2 | 2/2 | 2/2 |
+| B001 | 2/2 | 2/2 | 2/2 | 1/2 |
+| B008 | 1/2 | 2/2 | 2/2 | 2/2 |
+
+Arm B: 26 reads reached the real Chrome; 4 of them ended in connection_error or timeout.

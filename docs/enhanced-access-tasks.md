@@ -257,7 +257,8 @@
 | 2026-11-10 | 合并，R1.5 跑完 | #937、#930、#928、#924、#936、#939、#940 都已合入 main（没部署、没发版）。R1.5 在 `f3f01baf` 上本地跑三组（本机出口；真实 Chrome 走机房代理；`http` 和 `browser_local` 也走机房代理），每格 1 次：crunchbase 三组都是 403、`access_denied`，`challenge_wait` 记 `not_waited`，提示是 R1.3 的新文字，旧值是 `cloudflare_challenge` 加 9 秒等待；lead411 三组都由 `http` 直接读到（200，核对通过），没遇到拦截页，新的 `blockReason` 没观察到 |
 | 2026-11-11 | M3.4 做完 | 只读探测，没读任何站点，产品没改：本机 Chrome 157 和 Chrome for Testing 157 的 User-Agent、请求头顺序、`navigator.webdriver`、WebGL、TLS 密码套件都一样；不一样的是品牌（client hints 里有没有 Google Chrome）和 field-trial 测试配置带来的一组差别（TLS 扩展 4832、Fenced Frame 等 5 个 `window` 名字、`document.browsingTopics`、335 对 28 个 variations），后一组加 `--disable-field-trial-config` 就消失；站点认哪一类没测；另记一条：Chrome for Testing 157 有约 25 分钟什么页面都打不开，原因未知 |
 | 2026-11-11 | M3.4 后续：三个 build 读 M3.2 的三页 | 没有结论：Chrome for Testing 157 读到 6/6，关掉测试配置的 3/6，本机 Chrome 4/6；只有 crunchbase 还分得开（本机 Chrome 两次都被挑战），关掉测试配置的那一档一次被拒一次读到；stackoverflow、B&H 这次两个 build 都读到，和约 11 小时前的 M3.2 不一样；crunchbase 有 2 次是无头 `browser_local` 读到的 |
+| 2026-11-11 | M3.3 / M4.2 每日运行开始 | 判定规则先写进记录再跑；第 1 天 16 页读到：本机 Chrome 8、6，走数据中心代理 7、6，Chrome for Testing 10、8，关掉测试配置 7、6；capterra 只有 Chrome for Testing 读到 1 次，cars.com 四组都没读到；还差 2 天，现在不下结论 |
 
 ## 下次从这里继续
 
-L1.1 和 R1.1–R1.5 都已做完，PR 都已合入 main，没部署。R1.5 留一处没确认：lead411 的拦截页只在托管端的 Google 出口上出现过，要等托管端部署了含 #936 的版本后补读一次（部署要 Howard 开口）。测量这边：M3.4 已做完，三页的后续读取没有结论（同一页隔天结果就变），build 之间的比较并入 M4 的多天设计，不再单独跑两轮；M3.3 和 M4.2 要分散在 3 天以上，从明天起每天跑一次基线组和代理组。
+L1.1 和 R1.1–R1.5 都已做完，PR 都已合入 main，没部署。R1.5 留一处没确认：lead411 的拦截页只在托管端的 Google 出口上出现过，要等托管端部署了含 #936 的版本后补读一次（部署要 Howard 开口）。测量这边：M3.4 已做完，三页的后续读取没有结论（同一页隔天结果就变），build 之间的比较并入 M4 的多天设计，不再单独跑两轮；M3.3 和 M4.2 要分散在 3 天以上，每天跑一次，已在跑（分支 `claude/m4-daily-runs`，记录 `research/access/runs/2026-11-11-m42-daily-exit-and-builds-8a30d4cc.md`，判定规则在第一次运行前写好）：四组（本机 Chrome、本机 Chrome 走数据中心代理、Chrome for Testing、关掉测试配置的 Chrome for Testing）各读 16 页两轮，第 1 天 11-11 已跑，跑满 3 天后按规则写结论，再勾 M3.3 和 M4.2。
