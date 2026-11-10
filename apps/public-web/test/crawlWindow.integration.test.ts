@@ -18,8 +18,11 @@ const paragraph = 'The words of the page, read by the octopus and set down the w
 const read = { status: 'success', finalUrl: 'https://example.test/', title: 'Captured page', markdown: `# Captured page\n\n${paragraph.repeat(4)}\n\n## More of it\n\n${paragraph.repeat(4)}`, reason: null }
 const loginWall = { status: 'blocked', finalUrl: 'https://example.test/login', title: null, markdown: null, reason: 'The page requires a login.', diagnostic: { code: 'login_required', stage: 'acquisition', evidence: 'observed' } }
 
-/** A page with motion allowed, so the crawl window plays; the preview answers `result` after `delay` ms. */
-async function open(result: Record<string, unknown>, delay: number): Promise<{ page: Page; errors: string[] }> {
+/** A page with motion allowed, so the crawl window plays; the preview answers `result` after `delay` ms, or once the
+ * promise given in its place settles. With `stopClock` the page's clock stands still from before the click, and the
+ * test moves it (`page.clock.runFor`), so what it sees at a moment of the animation does not depend on how fast the
+ * machine got there. */
+async function open(result: Record<string, unknown>, delay: number | Promise<void>, stopClock = false): Promise<{ page: Page; errors: string[] }> {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
   const errors: string[] = []
   page.on('pageerror', error => errors.push(error.message))
@@ -27,14 +30,18 @@ async function open(result: Record<string, unknown>, delay: number): Promise<{ p
     const url = new URL(route.request().url())
     if (url.origin !== new URL(origin).origin) return route.abort()
     if (url.pathname === '/api/preview') {
-      await new Promise(resolve => setTimeout(resolve, delay))
-      return route.fulfill({ json: { requestedUrl: 'https://example.test/', totalMs: delay, ...result } }).catch(() => {})
+      await (typeof delay === 'number' ? new Promise(resolve => setTimeout(resolve, delay)) : delay)
+      return route.fulfill({ json: { requestedUrl: 'https://example.test/', totalMs: typeof delay === 'number' ? delay : 2200, ...result } }).catch(() => {})
     }
     if (url.pathname === '/api/quota') return route.fulfill({ json: { enabled: true, remaining: 5, limit: 5 } })
     if (url.pathname === '/api/capability') return route.fulfill({ json: {} })
     return route.continue()
   })
   await page.goto(origin)
+  if (stopClock) {
+    await page.clock.install()
+    await page.clock.pauseAt(Date.now() + 1000)
+  }
   await page.locator('#url-input').fill('https://example.test/')
   await page.locator('#submit-button').click()
   return { page, errors }
@@ -63,21 +70,34 @@ const wordInk = (page: Page): Promise<number> => page.locator('.crawl-canvas').e
 
 describe('the crawl window', () => {
   it('plays while a page is read, then folds away and leaves the result', async () => {
-    const { page, errors } = await open(read, 2200)
+    // The page's clock is the test's to move up to the landing, and the result comes when the test lets it: a slow
+    // machine sees the same moments of the animation as a fast one.
+    let answer!: () => void
+    const { page, errors } = await open(read, new Promise<void>(resolve => { answer = resolve }), true)
     try {
+      await page.clock.runFor(300)
       await page.locator('.url-card.is-crawling #crawl-window').waitFor({ state: 'visible', timeout: 3000 })
       // The octopus is not there at once: it emerges, and is whole well before the result.
-      // (About 900 such pixels as the window opens, about 7,600 once the octopus and its arms are whole.)
+      // (About 900 such pixels 300 ms after the click, about 7,000 once the octopus and its arms are whole.)
       const before = await iceInk(page)
-      await expect.poll(() => iceInk(page), { timeout: 1900, interval: 100 }).toBeGreaterThan(before + 3000)
+      await page.clock.runFor(1200)
+      expect(await iceInk(page)).toBeGreaterThan(before + 3000)
       expect(await page.locator('#crawl-note').isHidden()).toBe(true)
       // Nothing of the page is set as words before its result is back.
       const unread = await wordInk(page)
       expect(unread).toBeLessThan(600)
+      await page.clock.runFor(700)
+      answer()
       await page.waitForFunction(() => document.querySelector('#crawl-status')!.textContent === 'Page read. Your result is below.', null, { timeout: 4000 })
-      // Once it has landed, the page's own Markdown stands in the window's left half.
-      // (The dive takes 2 s, then the landing's ring runs out.)
-      await expect.poll(() => wordInk(page), { timeout: 6000, interval: 80 }).toBeGreaterThan(unread + 2500)
+      // Once it has landed, the page's own Markdown stands in the window's left half, for about half a second.
+      // (The dive takes up to 2 s, then the landing's ring runs out.)
+      let words = unread
+      for (let step = 0; step < 80 && words <= unread + 2500; step++) {
+        await page.clock.runFor(100)
+        words = await wordInk(page)
+      }
+      expect(words).toBeGreaterThan(unread + 2500)
+      await page.clock.resume()
       await page.locator('#crawl-window').waitFor({ state: 'hidden', timeout: 8000 })
       expect(await page.locator('.url-card').getAttribute('class')).toBe('url-card')
       expect(await page.locator('.run-status').innerText()).toBe('Page read')
