@@ -437,6 +437,9 @@ a:hover{color:#fff}
 .receipt-copy:hover{border-color:var(--orange);color:#c4441c}
 .receipt-final{margin:-6px 0 10px;overflow:hidden;color:#6d6553;font-size:12px;text-overflow:ellipsis;white-space:nowrap}
 .pg-next{margin-top:6px;color:#ffcf6b}
+.pg-agent{margin:14px 0 0;padding:12px 14px;border:1px solid var(--rule);border-radius:10px}
+.pg-agent .pg-agent-title{margin:0;font-weight:700}
+.pg-agent .dash-small{margin:4px 0 10px}
 .pg-help{margin:0 0 14px;padding:12px 14px;border:1px solid rgba(255,207,107,.45);border-radius:10px}
 .pg-help .pg-help-title{margin:0;font-weight:700}
 .pg-help .pg-help-text{margin:4px 0 0;font-size:13.5px;line-height:1.5;opacity:.85}

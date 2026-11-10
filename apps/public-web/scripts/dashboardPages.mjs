@@ -219,7 +219,8 @@ const playgroundBody = (endpoint) => {
 <div class="pg-help" id="play-help" role="status" hidden></div>
 <div class="tabs play-views" role="tablist" aria-label="Result view">${views}</div>
 <dl class="facts play-evidence" id="play-evidence" hidden></dl>
-<div class="code"><pre class="play-output" id="play-output" tabindex="0"></pre><button class="copy" type="button" data-copy="play-output">Copy</button></div></section>
+<div class="code"><pre class="play-output" id="play-output" tabindex="0"></pre><button class="copy" type="button" data-copy="play-output">Copy</button></div>
+<div class="pg-agent" id="play-agent" hidden><p class="pg-agent-title">Have your agent do this</p><p class="dash-small">Add Octocrawl to Claude Code, run <code>/mcp</code> there and sign in: then ask it for pages in plain words, on this account's credits, without opening the Playground. <a href="/dashboard/connect/">Cursor, Codex and others →</a></p>${dashCode('play-agent-line', `claude mcp add --transport http octocrawl ${MCP_OAUTH_URL}`)}</div></section>
 <section class="pg-runs" aria-labelledby="runs-title"><pre class="pg-sea" id="pg-sea" aria-hidden="true"></pre><div class="pg-runs-head"><div><p class="pg-kicker">Receipts</p><h2 id="runs-title">Recent runs</h2></div><a href="/dashboard/activity/">Activity →</a></div><div class="receipts" id="run-cards"></div><p class="dash-small pg-runs-empty" id="runs-empty" hidden>No runs here yet. Each run leaves a receipt here and a line on Activity: what was read, what robots.txt allowed, what it cost and the SHA-256 of what came back.</p></section>
 </section>`
 }

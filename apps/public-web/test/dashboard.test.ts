@@ -507,6 +507,21 @@ describe('the Playground says what a result is', () => {
     expect(events(refused).at(-1)).toEqual({ name: 'playground_run', props: { path: '/dashboard/scrape/', view: 'scrape', outcome: 'refused', reason: 'http_429' } })
   })
 
+  it('offers the same task from the person\'s agent under a page that was read, and not under one that was not', async () => {
+    const ok = await run({ ...elsewhere, warnings: [], readiness: { state: 'ready', basis: [] }, agentHints: [], evidenceRecord: { ...record, finalUrl: 'https://docs.example/a' } })
+    expect(ok.$('play-agent').hidden).toBe(false)
+    expect(ok.$('play-agent-line').textContent).toBe('claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp-oauth')
+    expect(ok.$('play-agent').querySelector('a')!.getAttribute('href')).toBe('/dashboard/connect/')
+    Object.defineProperty(ok.window.navigator, 'clipboard', { configurable: true, value: { writeText: async () => {} } })
+    ;(ok.$('play-agent').querySelector('[data-copy]') as HTMLElement).click()
+    await settle()
+    expect(ok.events.at(-1)).toEqual({ name: 'setup_copy', props: { path: '/dashboard/scrape/', target: 'dashboard', client: 'play-agent-line' } })
+    const failed = await run({ status: 'failed', failureReason: 'timeout', requestedUrl: 'https://docs.example/a', markdown: null, agentHints: [], evidenceRecord: { ...record, status: 'failed', reason: 'timeout' } })
+    expect(failed.$('play-agent').hidden).toBe(true)
+    // A page the site answered in place of the one asked for is not a read either.
+    expect((await run(elsewhere)).$('play-agent').hidden).toBe(true)
+  })
+
   it('reports a copied setup line by its block on Connect', async () => {
     const connect = await page('/dashboard/connect/', '', OCTOBER.now, octoberAnswers())
     Object.defineProperty(connect.window.navigator, 'clipboard', { configurable: true, value: { writeText: async () => {} } })
