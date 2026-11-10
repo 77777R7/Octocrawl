@@ -7,7 +7,7 @@
  */
 
 import type { ScrapeStage, ServerActivity } from '@w2l/api'
-import { crawlCap, octopusFrame, octopusPose, SPRITE_H, SPRITE_W, stageLabel, type CrawlStage, type OctopusTone } from '@w2l/octopus'
+import { crawlCap, octopusFrame, octopusPose, SPRITE_H, SPRITE_W, stageLabel, stageText, type CrawlStage, type OctopusTone } from '@w2l/octopus'
 
 /** stderr as a terminal. */
 export interface MotionTerminal {
@@ -252,7 +252,7 @@ function scrapeTold(): { stage: (stage: ScrapeStage) => void; cap: () => number;
     refused: () => robots !== null && !robots.allowed,
     /** What the scrape is doing, from the last stage it reported; null before the first. */
     doing: () => robots === null ? (seen.has('page') ? stageLabel(seen, null) : null)
-      : robots.overridden === true && !seen.has('page') ? `${robots.unreachable === true ? 'robots.txt could not be read' : 'robots.txt disallows it'} · fetching it anyway (robots_overridden)`
+      : robots.overridden === true && !seen.has('page') ? stageText(robots)
       : stageLabel(seen, robots.allowed, robots.unreachable === true),
   }
 }

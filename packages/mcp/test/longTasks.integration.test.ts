@@ -184,6 +184,81 @@ describe('progress notifications', () => {
     await mcp.close()
   })
 
+  /** A site and a real local API on it, called in-process, with the Accept header of each request the API got. */
+  async function localApi() {
+    const site = createServer((req, res) => {
+      if (req.url === '/robots.txt') return void res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nDisallow: /private/\n')
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><html><head><title>Tides</title></head><body><main><h1>Tides</h1><p>${'The harbour office records tide height for every hour. '.repeat(12)}</p></main></body></html>`)
+    })
+    site.listen(0, '127.0.0.1'); await once(site, 'listening')
+    const taskRoot = await mkdtemp(join(tmpdir(), 'w2l-mcp-stages-'))
+    const engine = createApiEngine({ taskRoot })
+    const app = createApp(engine)
+    const accepts: Array<string | null> = []
+    const client = new W2L({ baseUrl: 'http://api.test', fetch: ((input: RequestInfo | URL, init?: RequestInit) => { accepts.push(new Headers(init?.headers).get('accept')); return app.request(String(input), init) }) as typeof fetch })
+    const close = async () => { await engine.close({ cancelActive: true }); site.closeAllConnections(); await new Promise<void>((resolve) => site.close(() => resolve())); await rm(taskRoot, { recursive: true, force: true }) }
+    return { origin: `http://127.0.0.1:${(site.address() as AddressInfo).port}`, client, accepts, close }
+  }
+
+  it('says a scrape\'s stages as they happen, in the terminal\'s words and with no total, before the answer', async () => {
+    const { origin, client, accepts, close } = await localApi()
+    try {
+      // The interval a count waits for is far longer than the scrape: a stage does not wait for it.
+      const mcp = await connect(client, { progress: { everyMs: 60_000, heartbeatMs: 60_000 } })
+      const updates: Progress[] = []
+      let answered = false
+      const result = (await mcp.callTool({ name: 'scrape', arguments: { url: `${origin}/page`, fastMode: true } }, undefined, { onprogress: (update) => { expect(answered).toBe(false); updates.push(update) } })) as ToolResult
+      answered = true
+      expect(result.structuredContent).toMatchObject({ status: 'success' })
+      expect(updates).toEqual([
+        { progress: 1, message: 'robots.txt allows it · fetching the page' },
+        { progress: 2, message: 'Page received · checking it' },
+      ])
+      expect(accepts).toEqual(['application/x-ndjson, application/json'])
+      // A page robots.txt disallows, which a local server fetches because the request names it.
+      updates.length = 0
+      await mcp.callTool({ name: 'scrape', arguments: { url: `${origin}/private/page`, fastMode: true } }, undefined, { onprogress: (update) => updates.push(update) })
+      expect(updates[0]).toEqual({ progress: 1, message: 'robots.txt disallows it · fetching it anyway (robots_overridden)' })
+      await mcp.close()
+    } finally { await close() }
+  })
+
+  it('asks for no stages and says none when the client asked for no progress, or the server sends none', async () => {
+    const { origin, client, accepts, close } = await localApi()
+    try {
+      // The client gave no progress token.
+      const quiet = await connect(client, { progress: true })
+      const first = (await quiet.callTool({ name: 'scrape', arguments: { url: `${origin}/one`, fastMode: true } })) as ToolResult
+      expect(first.structuredContent).toMatchObject({ status: 'success' })
+      await quiet.close()
+      // The server is not set to send progress (hosted Octocrawl, the 2025-era JSON path).
+      const off = await connect(client)
+      const updates: Progress[] = []
+      const second = (await off.callTool({ name: 'scrape', arguments: { url: `${origin}/two`, fastMode: true } }, undefined, { onprogress: (update) => updates.push(update) })) as ToolResult
+      expect(second.structuredContent).toMatchObject({ status: 'success' })
+      expect(updates).toEqual([])
+      // Neither call asked the API for the stage stream: the request is the one it was.
+      expect(accepts).toEqual([null, null])
+      await off.close()
+    } finally { await close() }
+  })
+
+  it('says a stage above the seconds a wait for the person has counted: progress only grows', async () => {
+    // A scrape handed to the person: the heartbeat counts while the API holds the call, then the API tells a stage and answers.
+    const client = new W2L({ baseUrl: 'http://api.test', fetch: (async () => {
+      await new Promise((resolve) => setTimeout(resolve, 350))
+      return new Response('{"type":"stage","stage":"robots","allowed":true}\n{"type":"result","http":200,"body":{"status":"success","markdown":"# Tides"}}\n', { status: 200, headers: { 'content-type': 'application/x-ndjson; charset=utf-8' } })
+    }) as typeof fetch })
+    const mcp = await connect(client, { progress: { everyMs: 60_000, heartbeatMs: 100 } })
+    const updates: Progress[] = []
+    await mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', handoff: true } }, undefined, { onprogress: (update) => updates.push(update) })
+    expect(updates.length).toBeGreaterThanOrEqual(3)
+    expect(updates.at(-1)!.message).toBe('robots.txt allows it · fetching the page')
+    expect(updates[0]!.message).toMatch(/^reading; if a check stops it, waiting for the person in their Chrome/)
+    for (let i = 1; i < updates.length; i++) expect(updates[i]!.progress).toBeGreaterThan(updates[i - 1]!.progress)
+    await mcp.close()
+  })
+
   it('sends nothing when the server is not set to, as on the 2025-era JSON path', async () => {
     const mcp = await connect(growingBatch(5))
     const updates: Progress[] = []

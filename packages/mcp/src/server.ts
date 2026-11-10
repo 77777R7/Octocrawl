@@ -176,7 +176,8 @@ function personWait(tool: string, args: unknown): string | null {
 
 /**
  * notifications/progress for one call (docs/mcp-client-ux-tasks.md W9.5): progress only grows, a wait tool's
- * updates come at most every 5 s, a wait for the person sends a heartbeat every 12 s, and nothing follows stop().
+ * updates come at most every 5 s, a scrape's stages as they happen, a wait for the person sends a heartbeat every
+ * 12 s, and nothing follows stop().
  */
 function progressReporter(tool: string, args: unknown, intervals: { everyMs?: number; heartbeatMs?: number }, send: (params: ToolProgress) => Promise<void>): ProgressReporter {
   const everyMs = intervals.everyMs ?? PROGRESS_EVERY_MS
@@ -197,7 +198,12 @@ function progressReporter(tool: string, args: unknown, intervals: { everyMs?: nu
   }, intervals.heartbeatMs ?? HEARTBEAT_EVERY_MS)
   heartbeat?.unref?.()
   return {
-    update: (update) => { if (!stopped && update.progress > sent && Date.now() - sentAt >= everyMs) emit(update) },
+    update: ({ step, ...update }) => {
+      if (stopped) return
+      // A step is said when it happens, above whatever was said last (a heartbeat counts seconds); a count waits its turn.
+      if (step === true) emit({ ...update, progress: Math.max(update.progress, sent + 1) })
+      else if (update.progress > sent && Date.now() - sentAt >= everyMs) emit(update)
+    },
     stop: () => { stopped = true; if (heartbeat !== undefined) clearInterval(heartbeat) },
   }
 }
