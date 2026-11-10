@@ -30,6 +30,8 @@ describe('classifyChallenge: the challenge a page shows, from its DOM and the ga
     expect(classifyChallenge(probe(), { reason: 'captcha', signals: ['header_x_kpsdk_ct', 'status_429'] })).toMatchObject({ type: 'unsupported', kind: 'kasada' })
     expect(classifyChallenge(probe({ hcaptcha: true }), { reason: 'captcha', signals: ['widget_hcaptcha'] })).toMatchObject({ type: 'unsupported', kind: 'hcaptcha' })
     expect(classifyChallenge(probe(), { reason: 'captcha', signals: ['amazon_validate_captcha_form'] })).toMatchObject({ type: 'unsupported', reason: 'no_challenge_parameters' })
+    // Cloudflare's block page refuses the exit and runs no challenge: no Cloudflare solve is bought for it.
+    expect(classifyChallenge(probe(), { reason: 'access_denied', signals: ['cf_attention_required', 'text_you_have_been_blocked'] })).toEqual({ type: 'unsupported', kind: 'access_denied', reason: 'no_challenge_parameters' })
   })
 
   it('buys no token for a widget whose form is sent by GET (the token would be in the URL on the record), or that has nowhere to send it', () => {

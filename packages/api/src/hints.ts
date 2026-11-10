@@ -115,7 +115,7 @@ export function fileHint(file: NonNullable<FetchResult['file']>, noFiles = false
 const QUALITY_EVENTS: ReadonlySet<string> = new Set(['quality_low_yield', 'quality_client_rendered'])
 
 /** The block reasons that are a gate on automated access, which W2L does not get past. */
-const GATES: ReadonlySet<string> = new Set(['cloudflare_challenge', 'captcha', 'bot_detected_generic'])
+const GATES: ReadonlySet<string> = new Set(['cloudflare_challenge', 'captcha', 'bot_detected_generic', 'access_denied'])
 
 /** What a hint is read from: the result's verdict, caveats, trace and json issues, and the lanes the run tried. */
 export type HintedResult = Pick<FetchResult, 'status' | 'failureReason' | 'blockReason' | 'retryAt' | 'truncated' | 'truncatedAt' | 'warnings' | 'markdown' | 'escalations' | 'trace' | 'lane' | 'requestedUrl' | 'file' | 'json'> & {

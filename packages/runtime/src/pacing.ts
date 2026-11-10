@@ -72,7 +72,7 @@ export function thinAgainst(chars: number, peers: readonly number[]): number | n
   return chars * THIN_PAGE_RATIO < median ? median : null
 }
 
-const CHALLENGE_REASONS = new Set(['cloudflare_challenge', 'captcha', 'bot_detected_generic'])
+const CHALLENGE_REASONS = new Set(['cloudflare_challenge', 'captcha', 'bot_detected_generic', 'access_denied'])
 
 /**
  * Whether `finalUrl`'s path is shorter than `requestedUrl`'s. A limit on rate sends a page up, to the home page: 14 pages of

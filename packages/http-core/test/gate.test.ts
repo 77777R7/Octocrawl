@@ -28,6 +28,7 @@ const ALL_REASONS: readonly GateBlockReason[] = [
   'login_wall',
   'geo_restricted',
   'bot_detected_generic',
+  'access_denied',
 ]
 
 function res(overrides: Partial<GateResponse> & { body?: string }): GateResponse {
@@ -748,7 +749,7 @@ Request ID: QOXfVIiYVzzlF7MhW_Mg8t4tvrxh-eGORuys3TppQeCWtDgvTkaAhQ==
   const refused = (signal: string, ...more: string[]) => ({ reason: 'bot_detected_generic', signals: [signal, ...more, 'status_403', 'short_page'] })
 
   it('names CloudFront\'s page for a request its WAF blocked a refusal, and its geographic restriction a geo block', () => {
-    expect(classifyGate(res({ status: 403, body: cloudfrontWaf }))).toEqual(refused('cloudfront_request_blocked'))
+    expect(classifyGate(res({ status: 403, body: cloudfrontWaf }))).toEqual({ ...refused('cloudfront_request_blocked'), reason: 'access_denied' })
     expect(classifyGate(res({ status: 403, body: cloudfrontGeo }))).toEqual({ reason: 'geo_restricted', signals: ['cloudfront_geo_restriction', 'status_403', 'short_page'] })
   })
 
@@ -1075,6 +1076,7 @@ describe('every declared BlockReason is reachable', () => {
     ['cloudflare_challenge', withHeaders({ 'cf-mitigated': 'challenge' }, { status: 403 })],
     ['captcha', res({ status: 403, body: '<div class="g-recaptcha"></div>' })],
     ['bot_detected_generic', res({ status: 403, body: '<h1>You have been blocked</h1>' })],
+    ['access_denied', res({ status: 403, body: 'error code: 1020' })],
   ]
 
   it.each(REACHED.map(([reason, input]) => [reason, input] as const))(

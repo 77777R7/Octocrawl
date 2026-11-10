@@ -60,7 +60,7 @@
 
 - `packages/http-core/src/gate.ts:392`（HTTP 401）、`:515`（密码框加登录意图文案）、`:627`（WebAuthn 登录页）给出 `login_wall`。`contracts/src/status.ts:68` 列它为 blockReason，`http-core/src/failureClass.ts:96` 归为 `login_required`。
 - `packages/bench/src/routing/ladder.ts:978`：用了 saved login 又被拒，记 `ladder_session_rejected`；`:2058-2068` 定义拒绝（block、跳到登录路径、页面就地要求登录）。规则见 `docs/access.md:16`。
-- `hints.ts:108`：`GATES` 只含 `cloudflare_challenge`、`captcha`、`bot_detected_generic`，所以登录墙只拿到一条 hint，不会和 gate hint 叠加。
+- `hints.ts:108`：`GATES` 只含 `cloudflare_challenge`、`captcha`、`bot_detected_generic`、`access_denied`，所以登录墙只拿到一条 hint，不会和 gate hint 叠加。
 
 提示：
 

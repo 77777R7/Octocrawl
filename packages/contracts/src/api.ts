@@ -822,6 +822,7 @@ export const HANDOFF_REASONS: Readonly<Record<string, 'captcha_required' | 'bot_
   captcha: 'captcha_required',
   cloudflare_challenge: 'bot_gate',
   bot_detected_generic: 'bot_gate',
+  access_denied: 'bot_gate',
   login_wall: 'login_required',
 }
 

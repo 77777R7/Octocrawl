@@ -73,7 +73,7 @@ function classifyResult(arm: string, result: FetchResult): ArmResult {
 
   let failureClass: string | null = null
   if (!contentful) {
-    if (result.blockReason === 'cloudflare_challenge' || result.blockReason === 'bot_detected_generic') failureClass = 'bot_gate'
+    if (result.blockReason === 'cloudflare_challenge' || result.blockReason === 'bot_detected_generic' || result.blockReason === 'access_denied') failureClass = 'bot_gate'
     else if (result.blockReason === 'captcha') failureClass = 'captcha_required'
     else if (result.blockReason === 'login_wall') failureClass = 'login_required'
     else if (result.blockReason === 'rate_limit') failureClass = 'rate_limited'

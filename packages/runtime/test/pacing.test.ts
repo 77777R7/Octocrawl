@@ -64,7 +64,7 @@ describe('softBlockSignal: what in a page\'s result says the site is pushing bac
     expect(softBlockSignal(result({ httpStatus: 429 }))).toBe('rate_limited')
   })
   it('names a challenge page: Cloudflare, a CAPTCHA or a generic bot check; a login wall and a geo block are not pacing signals', () => {
-    for (const blockReason of ['cloudflare_challenge', 'captcha', 'bot_detected_generic'] as const) expect(softBlockSignal(result({ status: 'blocked', blockReason, httpStatus: 403 }))).toBe('challenge')
+    for (const blockReason of ['cloudflare_challenge', 'captcha', 'bot_detected_generic', 'access_denied'] as const) expect(softBlockSignal(result({ status: 'blocked', blockReason, httpStatus: 403 }))).toBe('challenge')
     for (const blockReason of ['login_wall', 'geo_restricted'] as const) expect(softBlockSignal(result({ status: 'blocked', blockReason, httpStatus: 200 }))).toBeNull()
   })
   it('names a page delivered in place of the one asked for, and a failed task contract', () => {

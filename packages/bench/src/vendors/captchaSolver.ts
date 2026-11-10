@@ -227,8 +227,12 @@ export interface SolveTraceDetail {
   hint?: string
 }
 
-/** The gates a solve may answer: the ones a rung would otherwise return as blocked by a check. */
-const SOLVE_GATES: ReadonlySet<string> = new Set(['captcha', 'cloudflare_challenge', 'bot_detected_generic'])
+/**
+ * The gates a solve may answer: the ones a rung would otherwise return as blocked by a check. A page that refuses the
+ * exit (`access_denied`) is looked at for a widget like the others, but Cloudflare's own challenge is not bought for it:
+ * its block page runs no challenge, so a solve has nothing to answer.
+ */
+const SOLVE_GATES: ReadonlySet<string> = new Set(['captcha', 'cloudflare_challenge', 'bot_detected_generic', 'access_denied'])
 
 /**
  * The verdict a rung passes for a page that answered as content but fails the request's task contract on the live page

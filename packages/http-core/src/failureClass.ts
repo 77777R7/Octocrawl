@@ -90,6 +90,8 @@ export function classifyFetchFailure(result: RoutableFetchResult): RoutingFailur
   switch (result.blockReason) {
     case 'cloudflare_challenge':
     case 'bot_detected_generic':
+    // A refusal routes like a bot check: a real browser, or another exit, may be let in where this request was not.
+    case 'access_denied':
       return 'bot_gate'
     case 'captcha':
       return 'captcha_required'

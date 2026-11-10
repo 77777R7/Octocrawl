@@ -211,6 +211,7 @@ describe('classifier vocabulary matches the contract', () => {
       { status: 403, body: '<script src="/cdn-cgi/challenge-platform/x"></script>' },
       { status: 403, body: '<div class="g-recaptcha"></div>' },
       { status: 403, body: '<h1>You have been blocked</h1>' },
+      { status: 403, body: 'error code: 1020' },
     ]
     for (const shape of shapes) {
       const v = classifyGate({ ...shape, header: () => null })

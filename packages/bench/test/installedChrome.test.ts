@@ -109,7 +109,7 @@ describe('installed_chrome: the wait for a check that clears itself (ADR 0005, r
 
   it("waits 10 s at most for a Cloudflare challenge or a bot check that does not clear, and never into the capture's reserve", async () => {
     vi.useFakeTimers()
-    for (const reason of ['cloudflare_challenge', 'bot_detected_generic']) {
+    for (const reason of ['cloudflare_challenge', 'bot_detected_generic', 'access_denied']) {
       const held = page(reason)
       const waiting = waitOutGate(held.gateNow, {}, undefined)
       await vi.advanceTimersByTimeAsync(30_000)
