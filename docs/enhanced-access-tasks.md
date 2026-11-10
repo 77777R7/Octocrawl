@@ -114,8 +114,8 @@
 
 问题：`hosted_chrome` 和本地同时差了出口（Webshare 机房代理对 Clash 出口）和环境（Cloud Run 上 Linux + Xvfb 的 Chrome 155 对 Mac 上的 Chrome 156）。能分开两者的一组从没跑过：Mac 上的 `installed_chrome` 走同一批 Webshare 机房代理。
 
-- [ ] **M1.1** 核对走法：`W2L_EGRESS_PROXIES` 加授权里的 `egress_sessions` 是否让 `installed_chrome` 这一档也走代理（`docs/access.md:156` 写 "every fetch"，这一档待核）；不走的话用 `research/access/probe-forward.mjs` 的本地转发加 Chrome 的代理参数。确认本机的代理清单和托管用的是同一批（清单在 `.w2l/access/`，不提交、不打印）。
-- [ ] **M1.2** 跑之前把判定规则写进记录的开头，跑完不改：
+- [x] **M1.1** 核对走法：`W2L_EGRESS_PROXIES` 加授权里的 `egress_sessions` 是否让 `installed_chrome` 这一档也走代理（`docs/access.md:156` 写 "every fetch"，这一档待核）；不走的话用 `research/access/probe-forward.mjs` 的本地转发加 Chrome 的代理参数。确认本机的代理清单和托管用的是同一批（清单在 `.w2l/access/`，不提交、不打印）。
+- [x] **M1.2** 跑之前把判定规则写进记录的开头，跑完不改：
   - 两组：A = Mac `installed_chrome` 走现在的 Clash 出口（当天基线）；B = 同一台 Mac、同一个 Chrome，走 Webshare 机房代理，每次读取一个代理（和托管一样）。
   - 任务：`challenge16` 全部 16 页，每组 3 轮，A 和 B 交替跑。
   - 一页"通过"= 3 轮里至少 2 轮读到并通过校验。
@@ -124,8 +124,21 @@
   - B 上两页都不通过、拿到的仍是挑战页、A 当天通过：差距在出口，H1（ISP 出口对照）是解冻后的第一项。
   - B 上拿到的变成拦截页：出口被拒，同样指向 H1。
   - 其余情况，或 B 组超过四分之一的尝试死在连接错误上：写"没有结论"，不下判断。
-- [ ] **M1.3** 运行并记录：`research/access/runs/<日期>-exit-vs-environment-<commit>.md`，写明命令、commit、A/B 各自的出口类型、每页每轮的状态、`blockReason`、gate 信号和等待结束时刻、连接错误数。
-- [ ] **M1.4** 把结论和对 D8 的建议交给 Howard。
+- [x] **M1.3** 运行并记录：`research/access/runs/<日期>-exit-vs-environment-<commit>.md`，写明命令、commit、A/B 各自的出口类型、每页每轮的状态、`blockReason`、gate 信号和等待结束时刻、连接错误数。
+- [x] **M1.4** 把结论和对 D8 的建议交给 Howard。
+
+结果（2026-11-10，[记录](../research/access/runs/2026-11-10-exit-vs-environment-1949dc97.md)）：
+- 走法：`installed_chrome` 拒绝带登录的代理，`W2L_EGRESS_PROXIES` 用不上；改用 `W2L_CHROME_PATH` 包装脚本（`research/access/exit-split/`），只换真实 Chrome 的出口，每次启动一个代理。本机清单和托管的 secret 是同一批 100 个。
+- 判定：**没有结论**（规则 4）。A 组当天也读不到 capterra、cars.com、crunchbase，两组都卡在约 9 s 仍未通过的 Cloudflare 挑战上。
+- 规则外：A 组只读到 7–9 页，昨天的周跑（Chrome 156）是 13 页；今天 Chrome 自动升到了 157。原因没分开，见 M3。
+
+### M3 本地基线在 Chrome 157 上掉了　M
+
+2026-11-09 Chrome 156 读到 13/16，2026-11-10 Chrome 157 读到 7–9/16（同一授权、同一个 Clash 出口）。期间 Chrome 版本、日期、引擎 commit 都变了，原因还没分开。
+
+- [ ] **M3.1** 用 Chrome for Testing 156.0.8078.81 和本机的 157，在同一时段同一出口各跑 2 轮 `challenge16`（需要下载 Chrome for Testing，先问 Howard）。
+- [ ] **M3.2** 157 确实是原因的话，查它在挑战页上和 156 有什么不同，再决定改不改检测参数（ADR 0005 决定八）。
+- [ ] **M3.3** 156 也掉了的话，就是站点那边变了：M1 在两组都能读到这三页的那天重跑。
 
 范围说明：这次只回答三页的出口/环境问题。一台 Mac、一批代理，不代表别的机器。
 
@@ -215,7 +228,8 @@
 | 日期 | 事项 | 结果 |
 | --- | --- | --- |
 | 2026-11-10 | 评估完成，清单写好 | 产品代码未动 |
+| 2026-11-10 | M1 跑完 | 没有结论：当天基线也读不到三页；本地基线 13 → 7–9，与 Chrome 157 同一天，开 M3 |
 
 ## 下次从这里继续
 
-M1.1：核对 `installed_chrome` 走代理的方式，然后写 M1.2 的判定规则并开跑。M1 跑的时候可以并行做 R1.1（fixture 和失败的测试）。
+M3.1：Chrome 156 对 157 的本地基线对照（要先问 Howard 能否下载 Chrome for Testing 156）。M3 找到原因、本地基线回到 11 页以上之后，再重跑 M1。R1.1（fixture 和失败的测试）可以并行做。
