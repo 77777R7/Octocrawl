@@ -26,7 +26,7 @@ import { login } from './login.js'
 import { motionColor, motionWanted, startBoard, startMotion, type Board, type JobCount, type Motion, type MotionTerminal } from './motion.js'
 import { nativeModuleHelp } from './nativeModule.js'
 
-export const CLI_VERSION = '0.8.11'
+export const CLI_VERSION = '0.8.12'
 
 export interface CliIo {
   env: NodeJS.ProcessEnv
