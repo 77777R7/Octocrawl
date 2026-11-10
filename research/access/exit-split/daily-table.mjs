@@ -2,7 +2,7 @@
 //   node research/access/exit-split/daily-table.mjs [runs directory, default .w2l/access/runs]
 // A run belongs here when its arm is `<A|B|C|N>-<YYYY-MM-DD>-r<round>`. Prints Markdown: verified per run, one table per
 // day (each cell the run's verdict; for a page not verified, the final blockReason or failure and the real-Chrome
-// attempt's gate signals), the pooled verified/reads per page and arm, and arm B's connection failures.
+// attempt's gate signals, or its failure when it got no page), the pooled verified/reads per page and arm, and arm B's connection failures.
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -35,7 +35,7 @@ for (const name of readdirSync(root).sort()) {
         if (waited) wait = ` ${waited.detail.outcome === 'not_waited' ? 'not waited' : `${(waited.detail.ms / 1000).toFixed(1)} s`}`
         chromeFailure = chrome?.result?.failureReason ?? null
       }
-      cell = `${attempt.observed.reason ?? attempt.observed.status}${signals}${wait}`
+      cell = `${attempt.observed.reason ?? attempt.observed.status}${signals}${wait}${chromeFailure ? `; real Chrome: ${chromeFailure}` : ''}`
     }
     cells.set(attempt.taskId, { cell, verified: attempt.outcome.verified, chrome: tried.includes('installed_chrome'), chromeFailure })
   }
