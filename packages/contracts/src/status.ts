@@ -68,6 +68,7 @@ export const BLOCK_REASON = [
   'login_wall',
   'geo_restricted',
   'bot_detected_generic',
+  'access_denied',
 ] as const
 
 export type BlockReason = (typeof BLOCK_REASON)[number]

@@ -204,9 +204,11 @@ function contextCookie(c: { name: string; value: string; domain: string; path: s
  * How long installed_chrome waits for each check, by its gate (ADR 0005, revision of 2026-10-26). Cloudflare's managed
  * challenge and a bot check run their own script and load the page: the longest of 63 that cleared took 9.1 s. A
  * captcha waits for someone, or a solver, to answer it, and none of 29 cleared by waiting: it is not waited on, and
- * goes to the grant's solver where there is one. A gate not named here is no check to wait out.
+ * goes to the grant's solver where there is one. A gate not named here is no check to wait out. A page that refuses the
+ * exit (`access_denied`) runs no script, so nothing clears it; it keeps the wait it had while it was reported as a
+ * challenge or a bot check, until that wait is taken away on purpose.
  */
-export const CHALLENGE_WAIT_CAP_MS: ReadonlyMap<string, number> = new Map([['cloudflare_challenge', 10_000], ['bot_detected_generic', 10_000], ['captcha', 0]])
+export const CHALLENGE_WAIT_CAP_MS: ReadonlyMap<string, number> = new Map([['cloudflare_challenge', 10_000], ['bot_detected_generic', 10_000], ['access_denied', 10_000], ['captcha', 0]])
 const CHALLENGE_POLL_MS = 1_000
 
 /** What installed_chrome's wait for a check ended with, as the trace's `challenge_wait` records it, with the cap its gate had. */

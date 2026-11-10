@@ -176,7 +176,7 @@ describe('agent hints', () => {
       expect(failureGroupOf(facts({ failureReason: 'policy_denied', robots: 'unreachable' }))).toBe('robots_unreachable')
       expect(failureGroupOf(facts({ failureReason: 'policy_denied', robots: 'disallowed' }))).toBe('robots_disallowed')
       expect(failureGroupOf(facts({ failureReason: 'policy_denied' }))).toBe('policy_denied')
-      for (const gate of ['cloudflare_challenge', 'captcha', 'bot_detected_generic']) expect(failureGroupOf(facts({ status: 'blocked', blockReason: gate }))).toBe('gated')
+      for (const gate of ['cloudflare_challenge', 'captcha', 'bot_detected_generic', 'access_denied']) expect(failureGroupOf(facts({ status: 'blocked', blockReason: gate }))).toBe('gated')
       expect(failureGroupOf(facts({ status: 'blocked', blockReason: 'rate_limited' }))).toBe('rate_limited')
       expect(failureGroupOf(facts({ failureReason: 'timeout' }))).toBe('timeout')
       expect(failureGroupOf(facts({ failureReason: 'http_error', browserDeclined: true }))).toBe('http_error')

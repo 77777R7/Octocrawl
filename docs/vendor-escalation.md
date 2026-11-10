@@ -50,7 +50,7 @@
 
 ### 差距 5:失败分类没有统一为七类
 
-**现状**:契约已有 `BlockReason`(cloudflare_challenge / captcha / rate_limit / login_wall / geo_restricted / bot_detected_generic)与 `FailureReason`(含 provider_error),但身份不一致只存在于 trace 事件里,没有一个跨通道的统一分类函数,路由层无法用它做决策。
+**现状**:契约已有 `BlockReason`(cloudflare_challenge / captcha / rate_limit / login_wall / geo_restricted / bot_detected_generic / access_denied)与 `FailureReason`(含 provider_error),但身份不一致只存在于 trace 事件里,没有一个跨通道的统一分类函数,路由层无法用它做决策。
 
 **改造**:`packages/http-core/src/failureClass.ts`(新):`RoutingFailureClass = bot_gate | captcha_required | login_required | rate_limited | geo_blocked | provider_error | identity_mismatch` + `classifyFetchFailure(result)`,把所有通道的结果(包括 trace 里的 `identity_mismatch` 事件)映射到这七个类。契约里已有的细粒度原因保留(它们是记录的一部分);七类分类是**路由维度的标准**,`BlockReason` 的细分不影响升级决策。
 

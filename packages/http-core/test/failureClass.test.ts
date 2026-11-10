@@ -34,7 +34,8 @@ describe('classifyFetchFailure — the seven routing classes', () => {
     expect(classifyFetchFailure(result({ status: 'empty_verified' }))).toBeNull()
   })
 
-  it('maps both detection-gate reasons to bot_gate', () => {
+  it('maps the detection-gate reasons and a refused exit to bot_gate', () => {
+    expect(classifyFetchFailure(result({ blockReason: 'access_denied' }))).toBe('bot_gate')
     expect(classifyFetchFailure(result({ blockReason: 'cloudflare_challenge' }))).toBe('bot_gate')
     expect(classifyFetchFailure(result({ blockReason: 'bot_detected_generic' }))).toBe('bot_gate')
   })

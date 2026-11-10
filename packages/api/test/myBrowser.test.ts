@@ -316,7 +316,7 @@ describe('the my-browser lane', () => {
     const blocking = fakeChrome([{ answer: 'allowed', active: true }], { href: 'https://site.test/a', html: CF_BLOCK, documentStatus: 403 })
     let app = await setup(blocking)
     const blocked = await scrape(app, { url: 'https://site.test/a', lane: 'my-browser', handoff: { waitMs: 10_000 }, debug: true })
-    expect(blocked.body).toMatchObject({ status: 'blocked', blockReason: 'cloudflare_challenge', lane: 'my_browser' })
+    expect(blocked.body).toMatchObject({ status: 'blocked', blockReason: 'access_denied', lane: 'my_browser' })
     await engine!.close(); engine = null; await rm(root, { recursive: true, force: true })
     // Chrome refuses to open the page's tab: not a wait that ran out.
     const refusing = fakeChrome([{ answer: 'allowed', active: true }], { href: 'https://site.test/a', html: PAGE, refuseTabs: true })

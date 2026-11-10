@@ -126,7 +126,7 @@
     },
     "cancel_monitor_run": {
       "inputBytes": 136,
-      "descriptionChars": 50
+      "descriptionChars": 39
     },
     "create_delivery_destination": {
       "inputBytes": 287,
@@ -154,7 +154,7 @@
     },
     "retry_dead_letter": {
       "inputBytes": 102,
-      "descriptionChars": 62
+      "descriptionChars": 51
     }
   },
   "hosted-keyless": {

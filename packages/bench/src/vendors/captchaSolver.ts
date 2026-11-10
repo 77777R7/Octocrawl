@@ -228,7 +228,7 @@ export interface SolveTraceDetail {
 }
 
 /** The gates a solve may answer: the ones a rung would otherwise return as blocked by a check. */
-const SOLVE_GATES: ReadonlySet<string> = new Set(['captcha', 'cloudflare_challenge', 'bot_detected_generic'])
+const SOLVE_GATES: ReadonlySet<string> = new Set(['captcha', 'cloudflare_challenge', 'bot_detected_generic', 'access_denied'])
 
 /**
  * The verdict a rung passes for a page that answered as content but fails the request's task contract on the live page

@@ -49,6 +49,8 @@ export type GateBlockReason =
   | 'login_wall'
   | 'geo_restricted'
   | 'bot_detected_generic'
+  /** The site, or the firewall in front of it, refused the request outright: the page is no check, and waiting does not clear it. */
+  | 'access_denied'
 
 /** Structural subset of the contract's `Lane`. */
 export type GateLane = 'http' | 'browser_local' | 'browser_local_authed' | 'browser_proxy' | 'provider' | 'my_browser'
@@ -104,14 +106,32 @@ const CHALLENGE_429_HEADERS: readonly (readonly [name: string, value: string | n
   ['x-page-id', 'wildcard-challenge-handler', 'captcha', 'header_expedia_challenge_handler'],
 ]
 
-/** Cloudflare's managed-challenge plumbing. Any one of these is decisive. */
+/**
+ * Cloudflare's managed-challenge plumbing. Any one of these is decisive. "Attention Required! | Cloudflare" is the title
+ * of two pages: the older captcha page, a challenge, and the block page, which is not one (CF_BLOCK_PAGE_TEXT).
+ */
+const CF_ATTENTION_REQUIRED = 'cf_attention_required'
 const CF_STRONG_MARKERS: readonly (readonly [marker: string, signal: string])[] = [
   ['/cdn-cgi/challenge-platform', 'cf_challenge_platform_script'],
   ['__cf_chl', 'cf_challenge_var'],
   ['cf_chl_opt', 'cf_challenge_opt'],
   ['cf-browser-verification', 'cf_browser_verification'],
-  ['attention required! | cloudflare', 'cf_attention_required'],
+  ['attention required! | cloudflare', CF_ATTENTION_REQUIRED],
 ]
+/**
+ * What Cloudflare's block page says under that title ("Sorry, you have been blocked"). The page offers no check: the
+ * site's firewall refused the request, and the same request from the same network gets the same page.
+ */
+const CF_BLOCK_PAGE_TEXT = 'you have been blocked'
+/**
+ * Cloudflare's error 1020, "Access denied": a firewall rule of the site refused the request. A browser gets Cloudflare's
+ * error page, which prints the code in its own markup and names itself in the title; any other client gets one line.
+ */
+const CF_ERROR_1020_PAGE = /\bclass\s*=\s*["']?cf-error-code["']?\s*>\s*1020\s*</i
+const CF_ERROR_PAGE_TITLE = 'used cloudflare to restrict access'
+const CF_ERROR_1020_LINE = /^\s*error code: 1020\s*$/i
+/** The body an AWS load balancer answers with by itself. With its 403, that is a request AWS WAF blocked. */
+const AWS_ELB_403_BODY = /^\s*<html>\s*<head><title>403 Forbidden<\/title><\/head>\s*<body>\s*<center><h1>403 Forbidden<\/h1><\/center>\s*<\/body>\s*<\/html>\s*$/i
 
 /**
  * Cloudflare's managed-challenge interstitial copy. The pair is distinctive
@@ -427,6 +447,11 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
   // --- Cloudflare managed challenge --------------------------------------
   const cfStrong = matched(lower, CF_STRONG_MARKERS).filter((signal) => signal !== 'cf_challenge_platform_script' || challengePlatformBeyondJsd(lower))
   if (cfStrong.length > 0) {
+    // The block page shares the old captcha page's title and carries no challenge of its own: under that title alone,
+    // "you have been blocked" names a refusal. With any of the challenge's own plumbing on the page it stays a challenge.
+    if (cfStrong.length === 1 && cfStrong[0] === CF_ATTENTION_REQUIRED && lower.includes(CF_BLOCK_PAGE_TEXT)) {
+      return { reason: 'access_denied', signals: [CF_ATTENTION_REQUIRED, 'text_you_have_been_blocked'] }
+    }
     return { reason: 'cloudflare_challenge', signals: cfStrong }
   }
   const [cfA, cfB] = CF_INTERSTITIAL_PAIR
@@ -523,6 +548,14 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
   const geo = matched(lower, GEO_MARKERS)
   if (geo.length > 0) {
     return { reason: 'geo_restricted', signals: geo }
+  }
+
+  // --- Cloudflare's error 1020 --------------------------------------------
+  // Before the generic gate, which would name its "Access denied" a bot check. Served with 403; a page that quotes the
+  // code under another status, or in prose, is not it.
+  if (res.status === 403) {
+    if (CF_ERROR_1020_LINE.test(res.body)) return { reason: 'access_denied', signals: ['cf_error_1020', 'status_403'] }
+    if (CF_ERROR_1020_PAGE.test(head) && lower.includes(CF_ERROR_PAGE_TITLE)) return { reason: 'access_denied', signals: ['cf_error_1020', 'cf_error_page', 'status_403'] }
   }
 
   // --- generic bot gate ---------------------------------------------------
@@ -853,7 +886,8 @@ const REFUSAL_403_TRIGGER = /block|验证解封/i
  * A refusal served with 403 that names itself in one vendor's terms, or null. The bundled Chromium got these in the
  * Firecrawl scrape-content run (2026-10-30), each reported as http_error:
  *  - CloudFront's error page, signed by CloudFront, for a request AWS WAF blocked ("Request blocked."; abcauto.com,
- *    jcsc.org, oc.eco.br, similarweb.com, soundpure.com) and for its geographic restriction (soundpure.com, direct). Its
+ *    jcsc.org, oc.eco.br, similarweb.com, soundpure.com), an access_denied like the bare 403 a load balancer answers for
+ *    the same block, and for its geographic restriction (soundpure.com, direct). Its
  *    page for a host it is not set up to serve ("Bad request.") is a configuration error and stays null.
  *  - Vercel's deny (superatv.com): its firewall's header, or its page's heading with Vercel's request id.
  *  - Real Geeks' page (fbrealestateco.com): the heading with "blocked this request on purpose". It names the visitor's
@@ -865,6 +899,8 @@ const REFUSAL_403_TRIGGER = /block|验证解封/i
  */
 function vendorRefusal403(res: GateResponse): GateVerdict | null {
   if (res.header('x-vercel-mitigated')?.trim().toLowerCase() === 'deny') return { reason: 'bot_detected_generic', signals: ['header_x_vercel_mitigated_deny', 'status_403'] }
+  // A load balancer signs only the answers it writes itself (`server: awselb/2.0`), never its target's.
+  if (/^awselb\//i.test(res.header('server')?.trim() ?? '') && AWS_ELB_403_BODY.test(res.body)) return { reason: 'access_denied', signals: ['header_server_awselb', 'status_403', 'short_page'] }
   if (!REFUSAL_403_TRIGGER.test(res.body)) return null
   const page = pageText(res.body)
   if (page === null) return null
@@ -872,7 +908,7 @@ function vendorRefusal403(res: GateResponse): GateVerdict | null {
   const verdict = (reason: GateBlockReason, ...signals: string[]): GateVerdict => ({ reason, signals: [...signals, 'status_403', 'short_page'] })
   if (shown.includes(CLOUDFRONT_SIGNATURE)) {
     if (shown.includes('configured to block access from your country')) return verdict('geo_restricted', 'cloudfront_geo_restriction')
-    if (/\brequest blocked\./.test(shown)) return verdict('bot_detected_generic', 'cloudfront_request_blocked')
+    if (/\brequest blocked\./.test(shown)) return verdict('access_denied', 'cloudfront_request_blocked')
     return null
   }
   if (page.primaryHeadings.some((heading) => /^this request was blocked$/i.test(heading))) {
@@ -920,8 +956,11 @@ function nextLane(reason: GateBlockReason, from: GateLane): GateLane | null {
 
     // A JS interstitial can be cleared by actually running the JS, and failing
     // that by arriving from an IP with reputation the user owns.
+    // A refusal is of this client from this network: a real browser, then the user's own exit, may be let in where
+    // this request was not. The same request again is not.
     case 'cloudflare_challenge':
     case 'bot_detected_generic':
+    case 'access_denied':
       if (from === 'http') return 'browser_local'
       if (from === 'browser_local') return 'browser_proxy'
       return null
