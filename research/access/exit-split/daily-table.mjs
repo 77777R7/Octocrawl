@@ -45,7 +45,7 @@ const days = [...new Set(runs.map((run) => run.day))].sort()
 const tasks = [...new Set(runs.flatMap((run) => [...run.cells.keys()]))]
 
 console.log('Verified per run (of 16):\n')
-console.log('| Day (UTC) | ' + ARMS.flatMap((arm) => [`${arm} r1`, `${arm} r2`]).join(' | ') + ' | commit |')
+console.log('| Day (local) | ' + ARMS.flatMap((arm) => [`${arm} r1`, `${arm} r2`]).join(' | ') + ' | commit |')
 console.log('|---|' + '---|'.repeat(ARMS.length * 2 + 1))
 for (const day of days) {
   const of = (arm, round) => runs.find((run) => run.day === day && run.arm === arm && run.round === round)

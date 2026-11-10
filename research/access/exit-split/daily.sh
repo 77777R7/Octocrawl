@@ -5,7 +5,7 @@
 #   B  installed Chrome, one datacenter proxy per launch (forward.mjs); the launch counter carries over between days
 #   C  Chrome for Testing ($EXIT_SPLIT_CFT), same exit as A
 #   N  the same binary with --disable-field-trial-config (chrome-noftc.sh), same exit as A
-# Two rounds a day, A B C N in each, the 16 challenge16 tasks per run. One session per UTC day: a second one is refused.
+# Two rounds a day, A B C N in each, the 16 challenge16 tasks per run. One session per day (this machine's local date): a second one is refused.
 # Run from the repository root, with the shell's proxy variables as the API should see them.
 state=${EXIT_SPLIT_STATE:?the state directory, kept across days}
 grant=${EXIT_SPLIT_GRANT:?the installed_chrome grant file}
@@ -13,9 +13,9 @@ proxies=${EXIT_SPLIT_PROXIES:?the datacenter proxy list}
 cft=${EXIT_SPLIT_CFT:?the Chrome for Testing binary}
 installed=${EXIT_SPLIT_REAL_CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}
 port=${W2L_API_PORT:-8787}
-day=$(date -u +%Y-%m-%d)
+day=$(date +%Y-%m-%d)
 dir="$state/day-$day"
-[ -e "$dir" ] && { echo "daily.sh: $dir exists, this UTC day already has a session" >&2; exit 2; }
+[ -e "$dir" ] && { echo "daily.sh: $dir exists, this day already has a session" >&2; exit 2; }
 if lsof -nP -iTCP:"$port" -iTCP:18900 -sTCP:LISTEN >/dev/null 2>&1; then echo "daily.sh: port $port or 18900 is in use" >&2; exit 2; fi
 mkdir -p "$dir" || exit 2
 npx tsc --build || { echo "daily.sh: the build failed" >&2; exit 2; }

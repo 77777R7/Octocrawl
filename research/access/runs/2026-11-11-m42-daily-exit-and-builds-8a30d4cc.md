@@ -13,7 +13,7 @@ Label: `research`. Task list: [docs/enhanced-access-tasks.md](../../docs/enhance
   - **N**: the same binary with `--disable-field-trial-config` (`research/access/exit-split/chrome-noftc.sh`), same exit as A.
   - The `http`, `http_compat` and `browser_local` rungs leave by the API's own route in every arm.
 - **Pages:** all 16 of `challenge16` (`research/access/subsets.v1.json`), none dropped or replaced.
-- **Sessions:** one a day (UTC), two rounds, order A, B, C, N in each round, by `research/access/exit-split/daily.sh`. At least 3 days, so every page has at least 6 reads per arm. A day without a session is said as such; the run goes on until 3 days have one. Every read counts, including those of a day whose baseline is low.
+- **Sessions:** one a day (the local date of this Mac, UTC+8), two rounds, order A, B, C, N in each round, by `research/access/exit-split/daily.sh`. At least 3 days, so every page has at least 6 reads per arm. A day without a session is said as such; the run goes on until 3 days have one. Every read counts, including those of a day whose baseline is low.
 - **Product code:** `8a30d4cc` (origin/main on 2026-11-11) for every day. Later commits on this branch add only this record, the scripts under `research/access/exit-split/` and the task list.
 - **Pooled verdict of a page in an arm**, over all reads of all days: **reads** when at least two thirds are verified (run-set's `verified`), **does not read** when at most one third are, **mixed** otherwise.
 - **Rule 1, exit or environment (M4.2; focus pages capterra T047, cars.com T071, crunchbase T048):**
