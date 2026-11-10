@@ -28,6 +28,7 @@ document.addEventListener('click', event => {
   track('link_click', { target, href: (url.host === location.host ? url.pathname : url.hostname + url.pathname).slice(0, 120) })
 })
 
+const SETUP_LINE = /mcp add|mcp\.octocrawl\.dev|@octocrawl\/mcp|octocrawl serve|"mcpServers"/
 document.addEventListener('click', async event => {
   const button = event.target.closest('.copy-code')
   if (!button) return
@@ -38,6 +39,8 @@ document.addEventListener('click', async event => {
   try {
     await navigator.clipboard.writeText(code)
     track('docs_code_copy', { path: location.pathname })
+    // A line that sets Octocrawl up (an MCP server, the local server) counts again as a setup copy, as on the home page.
+    if (SETUP_LINE.test(code)) track('setup_copy', { target: 'docs' })
     button.textContent = 'Copied'
     if (announcement) announcement.textContent = 'Code copied to clipboard.'
   } catch {

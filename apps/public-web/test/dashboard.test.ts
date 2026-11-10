@@ -41,7 +41,8 @@ const account = (resetsAt: string, usage: ReturnType<typeof usageOf>) => ({
 })
 
 interface Call { method: string; path: string; body: unknown }
-interface Page { window: Window; $: (id: string) => HTMLElement; calls: Call[] }
+interface WebEvent { name: string; props: Record<string, unknown> }
+interface Page { window: Window; $: (id: string) => HTMLElement; calls: Call[]; events: WebEvent[] }
 const open: Window[] = []
 afterEach(async () => { await Promise.all(open.splice(0).map(window => window.happyDOM.close())) })
 
@@ -66,13 +67,16 @@ async function page(path: string, search: string, now: string, answers: Record<s
     const [status, answer] = answers[`${method} ${url}`] ?? [404, { error: 'not_found' }]
     return { ok: status >= 200 && status < 300, status, json: async () => answer, headers: { get: () => null } }
   }
+  // The page's events go out by beacon to /api/events; each is kept apart from the API calls, in `events`.
+  const events: WebEvent[] = []
+  ;(window.navigator as unknown as { sendBeacon: unknown }).sendBeacon = (_url: string, blob: Blob) => { void blob.text().then(text => events.push(JSON.parse(text))); return true }
   // Still, as with reduced motion: no animation frames or timers left running.
   scope.matchMedia = (media: string) => ({ matches: true, media, addEventListener() {}, removeEventListener() {} })
   scope.Option = function Option(text: string, value: string) { const option = window.document.createElement('option'); option.textContent = text; option.value = value; return option }
   window.eval(`(() => { const Real = Date; const NOW = Date.parse(${JSON.stringify(now)}); window.Date = class extends Real { constructor(...a) { super(...(a.length ? a : [NOW])) } static now() { return NOW } } })()`)
   for (const source of [SCRIPTS.charts, SCRIPTS.rules, SCRIPTS.dashboard]) window.eval(source)
   await settle()
-  return { window, calls, $: (id: string) => window.document.getElementById(id) as unknown as HTMLElement }
+  return { window, calls, events, $: (id: string) => window.document.getElementById(id) as unknown as HTMLElement }
 }
 const settle = async () => { for (let i = 0; i < 6; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
 const rowsOf = (body: HTMLElement) => [...body.querySelectorAll('tr')].map(row => [...row.querySelectorAll('td')].map(cell => cell.textContent))
@@ -485,6 +489,31 @@ describe('the Playground says what a result is', () => {
     expect(failed.$('play-status').textContent).toBe('failed · timeout')
     expect(failed.$('play-status').className).toBe('status bad')
     expect(failed.$('play-next').textContent).toBe('Next: no lane answered within the request\'s deadline; raise timeout (up to 300000 ms over REST, 180000 ms from an MCP tool)')
+  })
+
+  it('reports the page view and each run\'s outcome to /api/events, by status and reason, never with the URL', async () => {
+    const events = (opened: Page) => opened.events
+    const ok = await run({ ...elsewhere, warnings: [], readiness: { state: 'ready', basis: [] }, agentHints: [], evidenceRecord: { ...record, finalUrl: 'https://docs.example/a' } })
+    expect(events(ok)).toEqual([{ name: 'page_view', props: { path: '/dashboard/scrape/' } }, { name: 'playground_run', props: { path: '/dashboard/scrape/', view: 'scrape', outcome: 'ok' } }])
+    expect(JSON.stringify(events(ok))).not.toContain('docs.example')
+    expect(events(await run(elsewhere)).at(-1)!.props).toMatchObject({ outcome: 'failed', reason: 'off_page' })
+    const blocked = await run({ status: 'blocked', blockReason: 'cloudflare_challenge', requestedUrl: 'https://docs.example/a', markdown: null, agentHints: [], evidenceRecord: { ...record, status: 'blocked', reason: 'cloudflare_challenge' } })
+    expect(events(blocked).at(-1)!.props).toMatchObject({ outcome: 'failed', reason: 'cloudflare_challenge' })
+    // A refused call says its HTTP status; a copied setup line names its block, never its text.
+    const refused = await page('/dashboard/scrape/', '', OCTOBER.now, { ...octoberAnswers(), 'POST /api/account/run': [429, { error: 'daily limit' }] })
+    ;(refused.$('play-form').querySelector('input[name="url"]') as HTMLInputElement).value = 'https://docs.example/a'
+    refused.$('play-form').dispatchEvent(new refused.window.Event('submit', { bubbles: true, cancelable: true }))
+    await settle()
+    expect(events(refused).at(-1)).toEqual({ name: 'playground_run', props: { path: '/dashboard/scrape/', view: 'scrape', outcome: 'refused', reason: 'http_429' } })
+  })
+
+  it('reports a copied setup line by its block on Connect', async () => {
+    const connect = await page('/dashboard/connect/', '', OCTOBER.now, octoberAnswers())
+    Object.defineProperty(connect.window.navigator, 'clipboard', { configurable: true, value: { writeText: async () => {} } })
+    const button = connect.window.document.querySelector('[data-copy="signin-claude"]') as unknown as HTMLElement
+    button.click()
+    await settle()
+    expect(connect.events.at(-1)).toEqual({ name: 'setup_copy', props: { path: '/dashboard/connect/', target: 'dashboard', client: 'signin-claude' } })
   })
 
   it('says in plain words why a page was not read and offers a page that reads; a page that was read gets none', async () => {

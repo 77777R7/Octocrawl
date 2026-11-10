@@ -2,6 +2,8 @@
  * and what moves is a mark being re-typed through · : + × # until it lands. Without motion the prerendered marks stay
  * as they are, and every control still works. */
 
+import { track } from './analytics'
+
 const MARKS = '·:+×#'
 /** Spaces and box-drawing lines are the art's frame: they never flicker. */
 const FRAME = /[\s─│┌┐└┘├┤┬┴┼]/
@@ -119,6 +121,7 @@ function mountClients(): void {
     }
     if (!navigator.clipboard) { failed(); return }
     void navigator.clipboard.writeText(text).then(() => {
+      track('setup_copy', { target: 'home', client: current.id.replace('use-tab-', '') })
       copy.textContent = 'Copied ✓'
       if (status) status.textContent = `${current.textContent} code copied.`
       clearTimeout(reset)
