@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ARMS, MANTLE, SPRITE_H, SPRITE_W, SQUASH, crawlCap, octopusFrame, octopusPose, stageLabel, stepsDone, type CrawlStage } from '../src/index.js'
+import { ARMS, MANTLE, SPRITE_H, SPRITE_W, SQUASH, crawlCap, octopusFrame, octopusPose, stageLabel, stepsDone, type CrawlStage, stageText } from '../src/index.js'
 
 const stages = (...names: CrawlStage[]) => new Set<CrawlStage>(names)
 const text = (input: Parameters<typeof octopusPose>[0]) => octopusFrame(octopusPose(input)).map(row => row.map(cell => cell?.char ?? ' ').join(''))
@@ -91,5 +91,16 @@ describe('the octopus frame', () => {
     expect(text({ now: 600, failed: true }).slice(5)).toEqual([...ARMS[1]!])
     expect(octopusPose({ now: 100, failed: true }).eyes).toBe('blink')
     expect(octopusPose({ now: 800, failed: true }).eyes).toBe('open')
+  })
+})
+
+describe('what one stage says', () => {
+  it('says each stage a scrape tells in one line', () => {
+    expect(stageText({ stage: 'robots', allowed: true })).toBe('robots.txt allows it · fetching the page')
+    expect(stageText({ stage: 'robots', allowed: false })).toBe('robots.txt disallows this page')
+    expect(stageText({ stage: 'robots', allowed: false, unreachable: true })).toBe('robots.txt could not be read · not fetching')
+    expect(stageText({ stage: 'robots', allowed: true, overridden: true })).toBe('robots.txt disallows it · fetching it anyway (robots_overridden)')
+    expect(stageText({ stage: 'robots', allowed: true, unreachable: true, overridden: true })).toBe('robots.txt could not be read · fetching it anyway (robots_overridden)')
+    expect(stageText({ stage: 'page' })).toBe('Page received · checking it')
   })
 })

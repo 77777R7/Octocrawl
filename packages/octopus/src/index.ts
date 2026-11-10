@@ -40,6 +40,16 @@ export function stageLabel(seen: ReadonlySet<CrawlStage>, robotsAllowed: boolean
   return 'Sending the link'
 }
 
+/** A stage of a scrape as a local server tells it (ScrapeStage, @w2l/contracts), in the fields a line reads. */
+export type ToldStage = { stage: 'robots'; allowed: boolean; unreachable?: true; overridden?: true } | { stage: 'page' }
+
+/** What one stage says, as a line for whoever watches the scrape: on a terminal, or in an agent's client. */
+export function stageText(stage: ToldStage): string {
+  if (stage.stage === 'page') return stageLabel(new Set<CrawlStage>(['page']), null)
+  if (stage.overridden === true) return `${stage.unreachable === true ? 'robots.txt could not be read' : 'robots.txt disallows it'} · fetching it anyway (robots_overridden)`
+  return stageLabel(new Set<CrawlStage>(['robots']), stage.allowed, stage.unreachable === true)
+}
+
 // The octopus: its mantle, eyes (O) and two strides of arms.
 export const MANTLE: readonly string[] = [
   '    ,=####=,    ',

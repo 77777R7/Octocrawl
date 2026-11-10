@@ -4,7 +4,8 @@
  */
 
 import { BATCH_ERRORS_MAX_LIMIT, BLOCK_REASON, FAILURE_REASON, RESULT_STATUS, TASK_STATUS, MAX_VERIFY_CHECKS, MAX_VERIFY_TEXT, VERIFY_CHECK_TYPES, MAX_ACTIONS, PDF_PAPER_FORMATS, DEFAULT_MAP_LIMIT, DEFAULT_MAP_TIMEOUT_MS, MAP_SEARCH_MAX_CHARS, MAX_CACHE_AGE_MS, MAX_FILE_BYTES_CEILING, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, parseBatchHandoffRequest, parseBatchStartRequest, parseCrawlPageFields, parseLoginImportRequest, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, RequestError, type CacheOptions, type CrawlPageField, type CrawlStartRequest, type MapResponse, type PageOptions, type RequestAttribution } from '@w2l/contracts'
-import { W2LError, type RequestOptions, type W2L } from '@w2l/sdk'
+import { W2LError, type RequestOptions, type ScrapeRequestOptions, type W2L } from '@w2l/sdk'
+import { stageText } from '@w2l/octopus'
 import type { CrawlReport } from '@w2l/contracts'
 import { hostedAmazonUrl } from './hostedToolPolicy.js'
 import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
@@ -658,10 +659,26 @@ export const TOOLS = TOOL_NAMES.map((name) => present(DEFINITIONS.find((definiti
  * server records the call under. A caller the API rate-limits (HTTP 429)
  * hears how long to wait, not the raw response.
  */
-/** A tool's progress while it waits (docs/mcp-client-ux-tasks.md W9.5): progress grows as the task does; total when it is known. */
-export interface ToolProgress { progress: number; total?: number; message: string }
-/** callTool's options: the API request's, and onProgress, called while wait_crawl and wait_batch poll. */
+/**
+ * A tool's progress while it waits (docs/mcp-client-ux-tasks.md W9.5): progress grows as the task does; total when it is
+ * known. `step` marks a thing that happened once (a scrape's stage) and is said when it happens, where a count read at
+ * each poll is said at most every few seconds.
+ */
+export interface ToolProgress { progress: number; total?: number; message: string; step?: true }
+/** callTool's options: the API request's, and onProgress, called while wait_crawl and wait_batch poll and with each stage a scrape tells. */
 export interface ToolCallOptions extends RequestOptions { onProgress?: (update: ToolProgress) => void }
+
+/**
+ * A scrape's request options when the client asked for progress: the stages a local server tells (robots.txt read, the
+ * page received) become progress messages as they happen, in the words the terminal uses. They carry no total: a
+ * stage is not a share of the work, and any of them may not come. Without `onProgress` the stages are not asked for.
+ */
+function scrapeProgress(request: ToolCallOptions): ToolCallOptions & ScrapeRequestOptions {
+  const onProgress = request.onProgress
+  if (onProgress === undefined) return request
+  let told = 0
+  return { ...request, onStage: (stage) => onProgress({ progress: ++told, message: stageText(stage), step: true }) }
+}
 
 export async function callTool(client: W2L, name: string, args: unknown, request: ToolCallOptions = {}): Promise<unknown> {
   try {
@@ -717,7 +734,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: T
       ...(req.access === undefined ? {} : { access: req.access }),
       ...(req.verify === undefined ? {} : { verify: req.verify }),
       ...integrationOf(req),
-    }, request)
+    }, scrapeProgress(request))
   }
   if (name === 'get_scrape') {
     const rec = readRecord(args)
