@@ -65,12 +65,14 @@ describe('rendered task completion', () => {
 })
 
 describe('Try an example', () => {
-  it('reads the example page at once, clearing an earlier hint without sending one for the example', async () => {
+  it('reads the example page at once, dropping an earlier hint still on its way without sending one for the example', async () => {
     const page = await browser.newPage({ reducedMotion: 'reduce' })
     const errors: string[] = []
     page.on('pageerror', error => errors.push(error.message))
     const previews: unknown[] = []
     const hints: string[] = []
+    let release = (): void => {}
+    const held = new Promise<void>(resolve => { release = resolve })
     try {
       await page.route('**/*', async route => {
         const url = new URL(route.request().url())
@@ -81,24 +83,28 @@ describe('Try an example', () => {
         }
         if (url.pathname === '/api/capability') {
           hints.push(url.pathname)
-          return route.fulfill({ json: { capability: { task: 'readable_page', support: 'unsupported' } } })
+          await held
+          // The page has dropped the request by then.
+          return route.fulfill({ json: { capability: { task: 'readable_page', support: 'unsupported' } } }).catch(() => {})
         }
         if (url.pathname === '/api/quota') return route.fulfill({ json: { enabled: true, remaining: 5, limit: 5 } })
         return route.continue()
       })
       await page.goto(origin)
-      // A hint for an address typed before must not stay beside the example's run.
+      // A hint for an address typed before must not land beside the example's run. The example sits in the note
+      // under the card, which a hint already shown replaces, so the hint here is still on its way.
       await page.locator('#url-input').fill('https://example.test/other')
-      await page.waitForFunction(() => document.querySelector('#capability-message')!.textContent !== '')
+      await expect.poll(() => hints.length, { timeout: 10_000 }).toBe(1)
       await page.locator('#example-button').click()
       await page.waitForFunction(() => document.querySelector('.run-status') && !document.querySelector('.run-status')!.classList.contains('tone-loading'))
       expect(previews).toEqual([{ url: 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview' }])
       expect(await page.locator('.run-status').innerText()).toBe('Page read')
+      release()
       await page.waitForTimeout(400)
       expect(hints).toEqual(['/api/capability'])
       expect(await page.locator('#capability-message').textContent()).toBe('')
       expect(await page.locator('#url-help').isHidden()).toBe(false)
       expect(errors).toEqual([])
-    } finally { await page.close() }
+    } finally { release(); await page.close() }
   })
 })

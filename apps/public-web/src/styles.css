@@ -208,28 +208,26 @@ a { color: inherit; }
 .url-card:focus-within { box-shadow: 0 18px 65px rgba(3, 23, 71, .28), 0 0 0 5px rgba(255, 159, 111, .4); }
 .url-card.is-invalid, .url-card.is-invalid:focus-within { box-shadow: 0 18px 65px rgba(3, 23, 71, .28), 0 0 0 5px rgba(255, 112, 88, .8); }
 .url-entry { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
-.url-chip { flex: none; padding: 6px 8px; border: 1px solid #dde5ef; border-radius: 6px; color: #2f6ba8; font: 650 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; }
 .url-entry input { width: 100%; min-width: 0; flex: 1; padding: 12px 2px; border: 0; outline: none; color: var(--text); font-size: 16px; background: transparent; }
 .url-entry input::placeholder { color: #66758e; }
 .url-entry input:disabled { color: #8190a9; }
 .url-toolbar { display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 18px; border-top: 1px solid #e6edf5; background: #fbfcfe; }
 .url-tools { display: flex; align-items: center; gap: 8px; margin-right: auto; }
-/* Format and Get code: quieter than the example and the primary action. */
+/* Format and Options: quieter than the primary action. Get code is quieter still, a button without a frame. */
 .tool-button { display: inline-flex; flex: none; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border: 1px solid #dbe3ee; border-radius: 10px; color: #28476f; background: #fff; font-size: 13px; font-weight: 700; white-space: nowrap; }
 .tool-button:hover, .tool-button.is-open { border-color: #8db9e8; background: #eaf4ff; }
 .tool-button:disabled { cursor: not-allowed; opacity: .55; }
-.tool-icon-format { width: 13px; height: 13px; background: linear-gradient(#2f6ba8, #2f6ba8) 0 0 / 5px 5px no-repeat, linear-gradient(#2f6ba8, #2f6ba8) 100% 0 / 5px 5px no-repeat, linear-gradient(#2f6ba8, #2f6ba8) 0 100% / 5px 5px no-repeat, linear-gradient(#f3683d, #f3683d) 100% 100% / 5px 5px no-repeat; }
+.tool-button-quiet:not(:hover) { border-color: transparent; background: transparent; }
+.tool-icon-format { width: 13px; height: 13px; background: linear-gradient(#2f6ba8, #2f6ba8) 0 0 / 5px 5px no-repeat, linear-gradient(#2f6ba8, #2f6ba8) 100% 0 / 5px 5px no-repeat, linear-gradient(#2f6ba8, #2f6ba8) 0 100% / 5px 5px no-repeat, linear-gradient(#2f6ba8, #2f6ba8) 100% 100% / 5px 5px no-repeat; }
 .tool-icon-code { color: #2f6ba8; font: 650 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .tool-icon-options { width: 14px; height: 12px; background:
-  linear-gradient(#2f6ba8, #2f6ba8) 3px 0 / 4px 4px no-repeat, linear-gradient(#f3683d, #f3683d) 8px 8px / 4px 4px no-repeat,
+  linear-gradient(#2f6ba8, #2f6ba8) 3px 0 / 4px 4px no-repeat, linear-gradient(#2f6ba8, #2f6ba8) 8px 8px / 4px 4px no-repeat,
   linear-gradient(#2f6ba8, #2f6ba8) 0 1.25px / 14px 1.5px no-repeat, linear-gradient(#2f6ba8, #2f6ba8) 0 9.25px / 14px 1.5px no-repeat; }
 /* Anything but the defaults: the number of fields, or a dot for the whole page. */
 .tool-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: -2px; padding: 0 5px; border-radius: 9px; color: #081b42; background: var(--orange); font-size: 11px; font-weight: 760; }
 .tool-badge:empty { min-width: 8px; width: 8px; height: 8px; padding: 0; }
 .tool-badge[hidden] { display: none; }
 .tool-caret { width: 6px; height: 6px; margin: -3px 0 0 2px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; opacity: .65; transform: rotate(45deg); }
-.example-button { flex: none; min-height: 44px; padding: 0 14px; border: 1px solid #cfdae9; border-radius: 10px; color: #28588e; background: #fff; font-size: 13px; font-weight: 700; }
-.example-button:hover { border-color: #8db9e8; background: #eaf4ff; }
 .submit-button { display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 18px; min-width: 150px; min-height: 44px; padding: 0 18px; border: 0; border-radius: 10px; color: #081b42; background: var(--orange); font-size: 14px; font-weight: 760; white-space: nowrap; transition: background .18s ease, transform .18s ease; }
 .submit-button:hover:not(:disabled) { background: #ff9365; transform: translateY(-1px); }
 .submit-button:disabled { cursor: progress; opacity: .74; }
@@ -245,6 +243,8 @@ a { color: inherit; }
 /* The quota note keeps the capability hint's line while there is no hint, so the hero's height never changes. */
 .url-help-link { color: #fff; font-weight: 650; text-decoration: underline dotted; text-underline-offset: 3px; }
 .url-help-link:hover { color: #ffc2a4; }
+/* Try an example: a link in the note under the card. The padding gives a finger more to hit than the 12px line. */
+.example-button { margin: -8px 0; padding: 8px 0; border: 0; background: none; font: inherit; font-weight: 650; cursor: pointer; }
 .url-help { width: fit-content; max-width: 100%; min-height: 1.4em; margin: 10px 0 0; padding: 4px 8px; color: rgba(232, 240, 255, .82); font-size: 12px; line-height: 1.5; }
 
 /* The crawl window (crawlView.ts): while a preview runs the card loses its input and toolbar, its white and its
@@ -759,16 +759,14 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 }
 
 /* Below 820px one row cannot hold every control, so the toolbar always takes two: Format, Options and Get code
-   together, then the example and the primary action. A zero-height break, ordered between them, makes the second
+   together, then the primary action. A zero-height break, ordered between them, makes the second
    row regardless of font metrics; the halved row gap keeps the space between the rows at 10px. */
 @media (max-width: 820px) {
   .url-toolbar { flex-wrap: wrap; row-gap: 5px; }
   .url-toolbar::after { content: ""; order: 1; flex-basis: 100%; height: 0; }
   .url-tools { margin-right: 0; }
   #code-button { margin-right: auto; }
-  .example-button, .submit-button { order: 2; }
-  .example-button { flex: 1; }
-  .submit-button { flex: 1.4; min-width: 0; gap: 12px; }
+  .submit-button { order: 2; flex: 1; min-width: 0; gap: 12px; }
 }
 
 @media (max-width: 600px) {
@@ -1274,7 +1272,6 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 @supports (corner-shape: squircle) {
   .url-card { border-radius: 29px; corner-shape: squircle; }
   .tool-button { border-radius: 18px; corner-shape: squircle; }
-  .example-button { border-radius: 18px; corner-shape: squircle; }
   .submit-button { border-radius: 18px; corner-shape: squircle; }
   .run-card { border-radius: 25px; corner-shape: squircle; }
   .loading-panel { border-radius: 25px; corner-shape: squircle; }
