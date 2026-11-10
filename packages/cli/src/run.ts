@@ -15,6 +15,7 @@ import {
   parseMapRequest,
   parseScrapeRequest,
   RequestError,
+  type BatchStatusResponse,
   type CrawlPage,
   type CrawlReport,
   withPoolProxy,
@@ -22,7 +23,7 @@ import {
 import { COMMANDS, parseCommandLine, UsageError, usage, type Command, type CliOptions } from './flags.js'
 import { accessGrant } from './accessGrant.js'
 import { login } from './login.js'
-import { motionColor, motionWanted, startMotion, type Motion, type MotionTerminal } from './motion.js'
+import { motionColor, motionWanted, startMotion, type JobCount, type Motion, type MotionTerminal } from './motion.js'
 import { nativeModuleHelp } from './nativeModule.js'
 
 export const CLI_VERSION = '0.8.11'
@@ -40,7 +41,7 @@ export interface CliIo {
    * at a terminal to type the answer; a command that needs their own answer (`access-grant`) refuses without it.
    */
   ask?: (question: string) => Promise<string | null>
-  /** stderr, when it is a terminal: the octopus is drawn there while a scrape or a map runs (motion.ts). Left out, nothing is drawn. Lines written to that terminal meanwhile, `stderr`'s among them, are the terminal's to keep above the drawing (motionTerminal). */
+  /** stderr, when it is a terminal: the octopus is drawn there while a scrape, a map, a crawl or a batch runs (motion.ts). Left out, nothing is drawn. Lines written to that terminal meanwhile, `stderr`'s among them, are the terminal's to keep above the drawing (motionTerminal). */
   motion?: MotionTerminal
 }
 
@@ -213,7 +214,8 @@ async function runCommand(engine: ApiEngine, command: Command, urls: string[], b
         taskId = (await engine.startCrawl(parseCrawlStartRequest({ ...body, url: one(), origin: ORIGIN }))).taskId
       }
       io.stderr(`octocrawl crawl: task ${taskId}`)
-      return finish(engine, 'crawl', taskId, cli, io)
+      // A resumed crawl names no URL: its drawing says no host.
+      return finish(engine, 'crawl', taskId, cli, io, urls[0])
     }
     case 'batch': {
       // --login-walls-of <id> takes its URLs from that batch of this task root (login UX A4): none of its own.
@@ -226,18 +228,22 @@ async function runCommand(engine: ApiEngine, command: Command, urls: string[], b
   }
 }
 
-/** The octopus for this scrape or map, or null when none is drawn: stderr is no terminal, or the drawing is switched off (motionWanted). */
-function motionFor(command: 'scrape' | 'map', url: string, cli: CliOptions, io: CliIo): Motion | null {
+/** The octopus for this command, or null when none is drawn: stderr is no terminal, or the drawing is switched off (motionWanted). `url` gives the host it names: a batch and a resumed crawl have none. */
+function motionFor(command: Command, url: string | undefined, cli: CliOptions, io: CliIo): Motion | null {
   if (io.motion === undefined || !motionWanted(io.env, cli.noMotion === true)) return null
-  return startMotion(io.motion, { command, host: new URL(url).host, color: motionColor(io.env) })
+  // The engine has taken the URL by now; one it read otherwise than URL does is drawn without its host.
+  const host = url === undefined || !URL.canParse(url) ? undefined : new URL(url).host
+  return startMotion(io.motion, { command, ...(host === undefined ? {} : { host }), color: motionColor(io.env) })
 }
 
 /** A page as `--out` writes it: a crawl page or batch item (`url`), or a scrape response (`requestedUrl`). */
 type Page = ResultPage
 
 /** Wait for a crawl or batch to end, then answer with its report and every page it recorded. */
-async function finish(engine: ApiEngine, kind: 'crawl' | 'batch', taskId: string, cli: CliOptions, io: CliIo): Promise<number> {
-  let report = await settled(engine, kind, taskId, io.signal)
+async function finish(engine: ApiEngine, kind: 'crawl' | 'batch', taskId: string, cli: CliOptions, io: CliIo, url?: string): Promise<number> {
+  // The octopus is up while the job runs, with its count from each status read, and gone before anything is said of how it ended.
+  const motion = motionFor(kind, url, cli, io)
+  let report = await settled(engine, kind, taskId, io.signal, motion === null ? undefined : (status) => motion.count(jobCount(status))).finally(() => motion?.stop())
   if (report === null) {
     io.stderr(`octocrawl ${kind}: interrupted; the task is paused${kind === 'crawl' ? `, and octocrawl crawl --resume ${taskId} continues it` : ' and resumes when the API starts on this task root'}`)
     return 130
@@ -311,9 +317,16 @@ async function handOff(engine: ApiEngine, taskId: string, io: CliIo): Promise<Cr
   return engine.getBatch(taskId)
 }
 
-async function settled(engine: ApiEngine, kind: 'crawl' | 'batch', taskId: string, signal: AbortSignal | undefined): Promise<CrawlReport | null> {
+/** A job's count for the drawing: a batch's pages done of those asked for, a crawl's pages fetched so far (it has no total). */
+function jobCount(status: CrawlReport & Partial<Pick<BatchStatusResponse, 'completed' | 'requested' | 'waitingForApproval'>>): JobCount {
+  return status.completed === undefined || status.requested === undefined ? { done: status.pagesFetched, total: null }
+    : { done: status.completed, total: status.requested, ...(status.waitingForApproval === true ? { waitingForPerson: true } : {}) }
+}
+
+async function settled(engine: ApiEngine, kind: 'crawl' | 'batch', taskId: string, signal: AbortSignal | undefined, onStatus?: (status: CrawlReport) => void): Promise<CrawlReport | null> {
   for (;;) {
     const report = kind === 'batch' ? await engine.getBatch(taskId) : await engine.getCrawl(taskId)
+    if (report !== null) onStatus?.(report)
     if (report !== null && (report.status === 'completed' || report.status === 'failed' || report.status === 'cancelled')) return report
     if (signal?.aborted) return null
     await new Promise((resolve) => setTimeout(resolve, 200))

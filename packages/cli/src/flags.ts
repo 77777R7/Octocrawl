@@ -83,7 +83,7 @@ export interface CliOptions {
   resume?: string
   /** The task root (default `W2L_TASK_ROOT`, else `.w2l/cli`). */
   taskRoot?: string
-  /** Draw no octopus on the terminal while a scrape or a map runs (OCTOCRAWL_NO_MOTION does the same). */
+  /** Draw no octopus on the terminal while the command runs (OCTOCRAWL_NO_MOTION does the same). */
   noMotion?: boolean
   help?: boolean
 }
@@ -260,5 +260,5 @@ export function usage(command: Command | null): string {
     }
     return `  --${flagName(key)}${hint[kind]}${kind === 'boolean' ? ` (or --no-${flagName(key)})` : ''}   ${key}`
   })
-  return [synopsis[command], '', 'Options (the API option each sets is on the right; the API reference describes them):', ...lines, '', 'The command line\'s own:', ...CLI_FLAG_LINES[command], '  --task-root <dir>   where tasks, files and the page cache live (default W2L_TASK_ROOT, else .w2l/cli)', '  --no-motion   draw no octopus on the terminal while a scrape or a map runs (or set OCTOCRAWL_NO_MOTION=1)', '  --help'].join('\n')
+  return [synopsis[command], '', 'Options (the API option each sets is on the right; the API reference describes them):', ...lines, '', 'The command line\'s own:', ...CLI_FLAG_LINES[command], '  --task-root <dir>   where tasks, files and the page cache live (default W2L_TASK_ROOT, else .w2l/cli)', '  --no-motion   draw no octopus on the terminal while it runs (or set OCTOCRAWL_NO_MOTION=1)', '  --help'].join('\n')
 }
