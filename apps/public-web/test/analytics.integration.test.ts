@@ -78,12 +78,15 @@ describe('first-party event sender and actual receiver', () => {
     trackLinkClicks(window.document.body as unknown as HTMLElement)
     window.document.body.addEventListener('click', event => event.preventDefault())
     for (const link of links) link.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }) as unknown as Event)
-    expect((await Promise.all(deliveries)).map(response => response.status)).toEqual([204, 204, 204, 204])
+    // The agent's line has no Copy button: copying it by hand reports a setup copy, without the line.
+    box.querySelector('.tool-next-code')!.dispatchEvent(new window.Event('copy', { bubbles: true }) as unknown as Event)
+    expect((await Promise.all(deliveries)).map(response => response.status)).toEqual([204, 204, 204, 204, 204])
     expect(lines.map(line => [line.name, line.props])).toEqual([
       ['next_step_view', { path: '/tools/link-extractor/', view: 'map' }],
       ['next_step_view', { path: '/tools/link-extractor/', view: 'map' }],
       ['link_click', { path: '/tools/link-extractor/', target: 'docs', href: '/docs/connect-mcp/', trigger: 'next-step' }],
       ['link_click', { path: '/tools/link-extractor/', target: 'site', href: '/signin/', trigger: 'next-step' }],
+      ['setup_copy', { path: '/tools/link-extractor/', target: 'tool-next' }],
     ])
     expect(JSON.stringify(lines)).not.toContain('private.example')
     await window.happyDOM.close()

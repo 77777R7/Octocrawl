@@ -3,6 +3,13 @@
 (() => {
   const $ = (selector) => document.querySelector(selector)
   const params = new URLSearchParams(location.search)
+  // The page view, as on the docs (docs.js) and the dashboard: the path only, never the query (it can carry a sign-in
+  // link's code or a return address), and nothing for a visitor who asks not to be tracked.
+  if (!(navigator.doNotTrack === '1' || navigator.globalPrivacyControl === true)) {
+    const body = JSON.stringify({ name: 'page_view', props: { path: location.pathname } })
+    try { if (!navigator.sendBeacon?.('/api/events', new Blob([body], { type: 'application/json' }))) throw new Error('beacon') }
+    catch { fetch('/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true, credentials: 'same-origin' }).catch(() => {}) }
+  }
   const safeNext = (value) => (typeof value === 'string' && /^\/(?![/\\])[\x21-\x5b\x5d-\x7e]{0,2000}$/.test(value) ? value : '/dashboard/')
   const say = (element, text, error = false) => { element.textContent = text; element.classList.toggle('is-error', error) }
 

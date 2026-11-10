@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url'
 import { DeliveryStore, DeliveryWorker } from '@w2l/runtime'
 import { BROWSER_INSTALL_COMMAND, playwrightChromiumInstalled } from '@w2l/bench'
 import { createApp, injectJobWebSockets, isLoopbackAuthority } from './app.js'
+import type { ServerActivityListener } from './activity.js'
 import { listSavedLogins } from './chromeLogin.js'
 import { listRememberedSites, rememberedSitesFile } from './rememberedSites.js'
 import { createApiEngine, defaultSessionsFile } from './engine.js'
@@ -26,7 +27,7 @@ export { parseListen, parsePort }
  * `close` that stops it as SIGINT does; `signals: false` leaves the process
  * signals to the caller (tests).
  */
-export async function runApiServer(argv: readonly string[], env: NodeJS.ProcessEnv = process.env, options: { signals?: boolean; log?: (line: string) => void; chromiumInstalled?: () => boolean } = {}): Promise<{ url: string; close: () => Promise<void> }> {
+export async function runApiServer(argv: readonly string[], env: NodeJS.ProcessEnv = process.env, options: { signals?: boolean; log?: (line: string) => void; chromiumInstalled?: () => boolean; onActivity?: ServerActivityListener } = {}): Promise<{ url: string; close: () => Promise<void> }> {
   const log = options.log ?? ((line: string) => console.log(line))
   const listen = parseListen([...argv], env)
   // Patchright (an optional install) and impit (a native module) are checked to load before the server listens, not on the first page.
@@ -59,7 +60,18 @@ export async function runApiServer(argv: readonly string[], env: NodeJS.ProcessE
     egressEchoUrl: listen.egressEchoUrl,
     ...(solver === null ? {} : { captchaSolving: solver.solving }),
   })
-  const app = createApp(engine, { loopbackOnly: servesLogins, tokens: listen.tokens, exposeInternalErrors: listen.mode === 'local', jobStreams: listen.jobStreams, ...(listen.rateLimit === undefined ? {} : { rateLimit: listen.rateLimit }) })
+  const app = createApp(engine, { loopbackOnly: servesLogins, tokens: listen.tokens, exposeInternalErrors: listen.mode === 'local', jobStreams: listen.jobStreams, ...(listen.rateLimit === undefined ? {} : { rateLimit: listen.rateLimit }), ...(options.onActivity === undefined ? {} : { onActivity: options.onActivity }) })
+  // A crawl or batch runs on after its start call has answered: what it does is told from the engine's job events.
+  const onActivity = options.onActivity
+  if (onActivity !== undefined) {
+    engine.jobEvents.on((event) => {
+      try {
+        onActivity(event.type === 'started' ? { type: 'job_started', taskId: event.taskId, kind: event.jobKind }
+          : event.type === 'page' ? { type: 'job_page', taskId: event.taskId, kind: event.jobKind }
+          : { type: 'job_ended', taskId: event.taskId })
+      } catch { /* What is shown is advisory. */ }
+    })
+  }
   // Job webhooks are delivered by this process: the same control database and worker the MCP runtime runs, under the delivery policy (not the crawler's).
   const deliveryStore = DeliveryStore.open(join(taskRoot, 'section-b-control.sqlite'))
   const worker = new DeliveryWorker(deliveryStore, {

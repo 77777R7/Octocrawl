@@ -459,6 +459,63 @@ describe('octocrawl against a local site', () => {
     expect(served.err).toContain('Ctrl-C stops the server')
     expect(served.err).not.toContain('w2l-api')
   })
+
+  it('draws under its log what the server is doing, on a terminal: a line while idle, the octopus and a line a call while it works', async () => {
+    const host = new URL(origin).host
+    // octocrawl serve with stderr as cli.ts gives it: one terminal, the server's lines and the drawing both written to it.
+    const serve = async (flags: string[], terminal: boolean, work: (base: string, written: string[]) => Promise<void>) => {
+      const port = await freePort()
+      const controller = new AbortController()
+      const written: string[] = []
+      const stream = { write: (text: string): boolean => { written.push(text); return true }, columns: 100, rows: 30 }
+      const motion = terminal ? motionTerminal(stream) : undefined
+      const serving = runCli(['serve', '--port', String(port), '--task-root', join(root, `serve-${port}`), ...flags], {
+        env: {}, stdout: () => {}, stderr: (text) => { stream.write(`${text}\n`) }, signal: controller.signal, ...(motion === undefined ? {} : { motion }),
+      })
+      const base = `http://127.0.0.1:${port}`
+      try {
+        await expect.poll(() => fetch(`${base}/v1/crawl/active`).then((res) => res.status, () => 0), { timeout: 10_000 }).toBe(200)
+        await work(base, written)
+      } finally { controller.abort() }
+      return { code: await serving, written }
+    }
+    const post = (base: string, path: string, body: unknown) => fetch(`${base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    /** A scrape and a map at once, as two callers. */
+    const twoCalls = async (base: string): Promise<void> => {
+      const [scraped, mapped] = await Promise.all([
+        post(base, '/v1/scrape', { url: `${origin}/pause/serve`, origin: 'mcp-claude-code@2.1.301' }),
+        post(base, '/v1/map', { url: `${origin}/pause/`, sitemap: 'skip' }),
+      ])
+      expect([scraped.status, mapped.status]).toEqual([200, 200])
+    }
+
+    const watched = await serve([], true, async (base, written) => {
+      // Idle: one line under what the server said as it started.
+      await expect.poll(() => screen(written).at(-1)).toBe('  Waiting for calls')
+      await twoCalls(base)
+      await expect.poll(() => screen(written).at(-1)).toBe('  Waiting for calls · 2 answered so far')
+    })
+    expect(watched.code).toBe(0)
+    const drawn = watched.written.join('')
+    // Each call had its own line: who called and what, the site, and the scrape's own stage.
+    expect(drawn).toContain(`claude-code · scrape ${host} · robots.txt allows it · fetching the page`)
+    expect(drawn).toContain(`  map ${host}`)
+    expect(drawn).toContain(',=####=,')
+    // Stopped, the terminal holds what the server said and nothing of the drawing, and has its cursor back.
+    expect(watched.written.at(-1)).toBe('\x1b[?25h')
+    const left = screen(watched.written)
+    expect(left.some((line) => line.startsWith('  '))).toBe(false)
+
+    // stderr that is no terminal gets the server's lines alone, byte for byte what a terminal is left with.
+    const piped = await serve([], false, (base) => twoCalls(base))
+    expect(piped.written.join('')).not.toContain('\x1b')
+    const portless = (lines: readonly string[]): string[] => lines.map((line) => line.replace(/127\.0\.0\.1:\d+/g, '127.0.0.1:PORT'))
+    expect(portless(left)).toEqual(portless(piped.written.join('').split('\n').slice(0, -1)))
+    // Switched off, a terminal gets the same; the server does not see the flag.
+    const off = await serve(['--no-motion'], true, (base) => twoCalls(base))
+    expect(off.code).toBe(0)
+    expect(off.written.join('')).not.toContain('\x1b')
+  })
 })
 
 async function freePort(): Promise<number> {

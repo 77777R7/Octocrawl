@@ -24,6 +24,7 @@ const TIMED = [
   'packages/*/test/**/*.integration.test.ts',
   'apps/public-web/test/taskCompletion.integration.test.ts',
   'apps/public-web/test/capabilityHint.integration.test.ts',
+  'apps/public-web/test/crawlWindow.integration.test.ts',
   'packages/api/test/chromeHandoff.test.ts',
   'packages/api/test/chromeLogin.test.ts',
   'packages/api/test/egressPool.test.ts',
