@@ -490,6 +490,13 @@ describe('W2L SDK', () => {
     for await (const item of client.listBatchItems('batch-1', { maxResults: 3 })) items.push(item.id)
     expect(items).toEqual(['p1', 'p2', 'p3'])
     expect(calls.at(-1)).toBe('/v1/batches/batch-1/items?limit=3')
+    // Following every cursor with no page size named asks for the largest page the server gives, not its default of 10.
+    calls.length = 0
+    expect((await client.collectBatchItems('batch-1')).items).toHaveLength(8)
+    expect(calls).toEqual(['/v1/batches/batch-1/items?limit=50'])
+    // One page asked for by hand is left to the server's default.
+    await client.getBatchItems('batch-1')
+    expect(calls.at(-1)).toBe('/v1/batches/batch-1/items')
     await client.getBatchItems('batch-1', { limit: 2, fields: ['url', 'json'] })
     expect(calls.at(-1)).toBe('/v1/batches/batch-1/items?limit=2&fields=url%2Cjson')
     await client.collectBatchItems('batch-1', { limit: 5, fields: ['status'] })
@@ -565,6 +572,18 @@ describe('W2L SDK', () => {
     // A body without hints and a response without the header: empty and null, never invented.
     const bare = await new W2L({ baseUrl: 'http://localhost', fetch: (async () => new Response('{"error":"conflict","code":"conflict"}', { status: 409 })) as typeof fetch }).runMonitor('catalog').catch((reason: unknown) => reason)
     expect(bare).toMatchObject({ status: 409, code: 'conflict', retryAfterMs: null, agentHints: [] })
+  })
+
+  it('keeps a code the SDK does not list, as hosted Octocrawl sends, and drops one that is not a code', async () => {
+    const answer = (status: number, body: unknown) => new W2L({ baseUrl: 'http://localhost', fetch: (async () => new Response(JSON.stringify(body), { status })) as typeof fetch })
+    const quota = await answer(429, { error: 'this account\'s credits are used up (0 left)', code: 'quota_exhausted' }).scrape('https://example.com/').catch((reason: unknown) => reason)
+    expect(quota).toMatchObject({ name: 'W2LError', status: 429, code: 'quota_exhausted' })
+    const busy = await answer(409, { error: 'a job is running', code: 'job_running' }).batchScrape(['https://example.com/']).catch((reason: unknown) => reason)
+    expect(busy).toMatchObject({ status: 409, code: 'job_running' })
+    for (const code of [42, '', 'Not A Code', '<b>x</b>']) {
+      const error = await answer(500, { error: 'x', code }).scrape('https://example.com/').catch((reason: unknown) => reason)
+      expect((error as W2LError).code).toBeUndefined()
+    }
   })
 
   it('leaves the code undefined when the error body carries none', async () => {

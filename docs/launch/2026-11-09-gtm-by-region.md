@@ -33,7 +33,7 @@
 
 **1. 一扇门，两个信息。**
 - 门：T3，在编码 agent 里读 Context7 和 `llms.txt` 覆盖不到的页面。
-- 第一个信息（既定措辞，Howard 此前的决定）：Markdown，省 token。
+- 第一个信息（既定措辞，Howard 此前的决定）：Markdown，省 token。**但方案第 2 节（2026-10-23）写明"在实测出来之前，不说'省 token'"，而 `docs/seo/core-seo-framework.md:36`、`:294`（2026-10-27）写"Markdown 与省 token 在前，不写未测的百分比"；[任务清单](../outside-users-tasks.md)的 OD5 已由 Howard 在 2026-11-10 定为按较晚的那条：可以说定性的"更少 token"，不写没测过的百分比或具体数字。**
 - 第二个信息：Evidence Record，页面读不到时如实说，不当成功交付。
 - **不要把"失败不计费"当第一卖点。** Crawl4AI Cloud 官方写明被拦、登录墙、无应答都不收费，ZenRows、Jina、Tavily、Spider 也有类似说法（多数是研究员读取、未复核）；Firecrawl 对返回了文档的 403 和 404 页仍收费，但**没有说** HTTP 200 的拦截页怎么算（调研 §4.5）。差别在于**记录里有什么**，不在计不计费。
 - **不要说"能读任何站"。** ROADMAP 记录：50 个冻结任务上，Octocrawl 最强路线验证了 25 和 31 个（两个窗口），Firecrawl Cloud 是 33 和 34 个。

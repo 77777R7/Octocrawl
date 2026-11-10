@@ -41,7 +41,7 @@ import type {
   ScrapeRequest,
   ScrapeResponse,
 } from '@w2l/contracts'
-import { DEFAULT_MAP_TIMEOUT_MS, DEFAULT_SCRAPE_TIMEOUT_MS, isApiErrorCode, RATE_LIMITED_CODE, type ApiErrorCode } from '@w2l/contracts'
+import { DEFAULT_MAP_TIMEOUT_MS, DEFAULT_SCRAPE_TIMEOUT_MS, RATE_LIMITED_CODE, type ApiErrorCode } from '@w2l/contracts'
 import { SDK_VERSION } from './version.js'
 import { JobWatcher, type WatchOptions, type WatcherClient } from './watcher.js'
 
@@ -267,17 +267,19 @@ function checkPaginationLimits(options: PaginationLimits): void {
 }
 
 /**
- * The API answered with an error status. `code` is the API error code when the
- * body carried one (`rate_limited` for HTTP 429); `body` is the parsed JSON
- * body, or its text if it was not JSON. The SDK retries no 429 itself: a
- * caller waits `retryAfterMs` and asks again.
+ * The API answered with an error status. `code` is the error code the body
+ * carried (`rate_limited` for HTTP 429), also one this SDK does not list:
+ * hosted Octocrawl has its own, such as `quota_exhausted`, `browser_busy` and
+ * `job_running`. `body` is the parsed JSON body, or its text if it was not
+ * JSON. The SDK retries no 429 itself: a caller waits `retryAfterMs` and asks
+ * again.
  */
 export class W2LError extends Error {
   override readonly name = 'W2LError'
   constructor(
     message: string,
     readonly status: number,
-    readonly code: ApiErrorCode | typeof RATE_LIMITED_CODE | undefined,
+    readonly code: ApiErrorCode | typeof RATE_LIMITED_CODE | (string & {}) | undefined,
     readonly method: 'GET' | 'POST' | 'DELETE',
     readonly path: string,
     readonly body: unknown,
@@ -296,7 +298,8 @@ async function responseError(method: 'GET' | 'POST' | 'DELETE', path: string, re
   let body: unknown = text
   try { body = JSON.parse(text) } catch {}
   const fields = body !== null && typeof body === 'object' ? (body as { code?: unknown; agentHints?: unknown }) : {}
-  const code = isApiErrorCode(fields.code) || fields.code === RATE_LIMITED_CODE ? fields.code : undefined
+  // Any code the server names, in the shape every Octocrawl code has: a server newer than this SDK, or hosted Octocrawl, has codes it does not list.
+  const code = typeof fields.code === 'string' && /^[a-z_]+$/.test(fields.code) ? fields.code : undefined
   const agentHints = Array.isArray(fields.agentHints) ? fields.agentHints.filter((hint): hint is string => typeof hint === 'string') : []
   return new W2LError(message ?? `${method} ${path} failed: ${res.status} ${text}`, res.status, code, method, path, body, retryAfterMs(res.headers.get('retry-after')), agentHints)
 }
@@ -466,9 +469,9 @@ export class W2L {
     return this.getPageList<ListedPage<O>>(`/v1/batches/${encodeURIComponent(id)}/items`, options, request, `batch not found: ${id}`)
   }
 
-  /** Every item of a batch, page by page (at most 50 per request), or as many as the PaginationLimits allow; the generator's return value says where it stopped. */
+  /** Every item of a batch, page by page (50 per request, the most the API gives, unless `limit` names fewer), or as many as the PaginationLimits allow; the generator's return value says where it stopped. */
   listBatchItems<O extends PagedListOptions = PagedListOptions>(id: string, options: O = {} as O, request: RequestOptions = {}): AsyncGenerator<ListedPage<O>, PaginationEnd> {
-    return this.paginate<ListedPage<O>>((query) => this.getBatchItems(id, query, request) as Promise<CrawlPageList<ListedPage<O>>>, options, request, BATCH_ITEM_MAX_LIMIT, 'batch items')
+    return this.paginate<ListedPage<O>>((query) => this.getBatchItems(id, query, request) as Promise<CrawlPageList<ListedPage<O>>>, options.limit === undefined ? { ...options, limit: BATCH_ITEM_MAX_LIMIT } : options, request, BATCH_ITEM_MAX_LIMIT, 'batch items')
   }
 
   /** The items listBatchItems would yield under the same options, collected, with where the listing stopped. */
