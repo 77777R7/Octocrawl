@@ -160,7 +160,7 @@
 
 ### R1 "出口被拒"和"挑战没通过"分开报告　M
 
-- [ ] **R1.1** fixture：Cloudflare 拦截页（`cf_attention_required`）、1020、1015、AWS WAF 的 403 各一份，清理后放进测试目录。先写失败的测试：今天它们报 `cloudflare_challenge` 或不被识别。
+- [x] **R1.1**（2026-11-10，PR #930，待合并）fixture：Cloudflare 拦截页（`cf_attention_required`）、1020、1015、AWS WAF 的 403 各一份，清理后放进测试目录。先写失败的测试：今天它们报 `cloudflare_challenge` 或不被识别。
 - [ ] **R1.2** `GateBlockReason` 加一个值（名字按 D5），`gate.ts` 把拦截页、1020、AWS WAF 的拒绝归到它；1015 归 `rate_limit`。跟着改：`contracts/src/status.ts` 的 blockReason 列表、`http-core/src/failureClass.ts`、SDK 的类型（JS 和 Python）、`docs/` 里列 blockReason 的地方、CHANGELOG 的 Unreleased。
 - [ ] **R1.3** 新值的提示：说清站点拒绝的是这个出口，等待和重试没有用；本地的下一步是换网络，或在用户自己的 Chrome 里读；托管的下一步是在自己的机器上跑。提示只说这台服务器真有的路。
 - [ ] **R1.4** 拦截页不进挑战等待（`browserLocal.ts:209` 附近）。本地先做；`hosted_chrome` 那一档按 D6。
@@ -250,7 +250,8 @@
 | 2026-11-10 | M3.2 跑完 | 是正式版 Chrome 和 Chrome for Testing 的差别，不是 157 这个版本；差别双向（B&H 相反）；基线仍是 6–8 页 |
 | 2026-11-10 | 清单补三处 | 加 M4（实验设计）、L6（Chrome 升级掉页）；D3 定为同意，L1 提到 Phase 1 |
 | 2026-11-10 | L1.1 做完 | PR #928（待合并）：`octocrawl access-grant` 只在终端里回答本人，不覆盖已有文件，没有东西自动加载它；能挂伪终端的程序仍可替人输入，ADR 0005 修订里写明 |
+| 2026-11-10 | R1.1 做完 | PR #930（待合并）：5 份 fixture（1 份真实抓取清理后，1 份取自 10-30 的记录，1020、1015、负载均衡器 403 三份照厂商公开页面写成，没对过线上页面）；今天的报法 6 条测试，应有的报法 5 条 `it.fails`，暂用名 `access_denied`（D5 未定）；1015 今天已报 `rate_limit` |
 
 ## 下次从这里继续
 
-L1.1 已在 PR #928；R1.1 接着做（自己的分支和 PR）。测量这边：M3.4（只读探测，查本机 Chrome 和同版本 Chrome for Testing 差在哪）；M3.3 和 M4.2 要分散在 3 天以上，从明天起每天跑一次基线组和代理组。
+L1.1 已在 PR #928，R1.1 已在 PR #930；R1.2 接着做（先定 D5 的名字，改名后要同步改 R1.1 测试里的 `REFUSED`）。测量这边：M3.4（只读探测，查本机 Chrome 和同版本 Chrome for Testing 差在哪）；M3.3 和 M4.2 要分散在 3 天以上，从明天起每天跑一次基线组和代理组。
