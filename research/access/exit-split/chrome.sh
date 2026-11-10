@@ -7,12 +7,14 @@
 #                              B: --proxy-server is replaced by the next forwarder port (forward.mjs), one per launch.
 #   $EXIT_SPLIT_STATE/counter  how many arm-B launches so far; the list never wraps (a launch past its end is refused).
 #   $EXIT_SPLIT_STATE/launches.jsonl  one line per launch: time, arm, forwarder port.
-real=${EXIT_SPLIT_REAL_CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}
 state=${EXIT_SPLIT_STATE:?the state directory}
+# $EXIT_SPLIT_STATE/chrome, when present, names the Chrome to launch (M3: one build against another, same exit).
+real=$(cat "$state/chrome" 2>/dev/null)
+[ -n "$real" ] || real=${EXIT_SPLIT_REAL_CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}
 [ "$1" = --version ] && exec "$real" "$@"
 arm=$(cat "$state/arm" 2>/dev/null)
 case $arm in
-  A) echo "{\"at\":$(date +%s),\"arm\":\"A\",\"port\":null}" >> "$state/launches.jsonl"; exec "$real" "$@" ;;
+  A) echo "{\"at\":$(date +%s),\"arm\":\"A\",\"port\":null,\"chrome\":\"$(basename "$real")\"}" >> "$state/launches.jsonl"; exec "$real" "$@" ;;
   B) ;;
   *) echo "exit-split chrome.sh: $state/arm must hold A or B" >&2; exit 2 ;;
 esac
