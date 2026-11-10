@@ -405,7 +405,7 @@ export function mapPreviewResult(requestedUrl: string, normalized: NormalizedPre
     : robotsUnreachable ? { code: 'robots_unreachable', stage: 'policy', evidence: 'observed' }
     : robotsDenied ? { code: 'robots_disallowed', stage: 'policy', evidence: 'observed' }
       : result.blockReason === 'login_wall' ? { code: 'login_required', stage: 'acquisition', evidence: 'observed' }
-        : result.blockReason === 'bot_detected_generic' || result.blockReason === 'captcha' ? { code: 'challenge', stage: 'acquisition', evidence: 'observed' }
+        : result.blockReason === 'bot_detected_generic' || result.blockReason === 'captcha' || result.blockReason === 'access_denied' ? { code: 'challenge', stage: 'acquisition', evidence: 'observed' }
           : result.failureReason === 'policy_denied' ? { code: 'policy_denied', stage: 'policy', evidence: 'observed' }
             : status === 'timeout' ? { code: 'timeout', stage: 'acquisition', evidence: 'unobserved' }
               : status === 'failed' ? { code: 'capture_failed', stage: 'acquisition', evidence: 'unobserved' }

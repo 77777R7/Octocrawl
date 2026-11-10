@@ -320,6 +320,9 @@ describe('anonymous preview contract', () => {
     expect(mapPreviewResult(url, normalizePreviewUrl(url), outcome, 10)).toMatchObject({ status: 'blocked', diagnostic: { code: 'login_required' } })
     outcome.result.blockReason = 'bot_detected_generic'
     expect(mapPreviewResult(url, normalizePreviewUrl(url), outcome, 10)).toMatchObject({ status: 'blocked', diagnostic: { code: 'challenge' } })
+    // A page that refused the exit was observed too: it is not a capture that failed unseen.
+    outcome.result.blockReason = 'access_denied'
+    expect(mapPreviewResult(url, normalizePreviewUrl(url), outcome, 10)).toMatchObject({ status: 'blocked', reason: 'The website blocked this request.', diagnostic: { code: 'challenge', evidence: 'observed' } })
     outcome.result.status = 'failed'
     outcome.result.blockReason = null
     outcome.result.failureReason = 'timeout'
