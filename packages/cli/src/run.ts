@@ -7,7 +7,7 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createApiEngine, csvField, defaultSessionsFile, evidenceRow, markdownFileName, parseListen, preloadEngineModules, RESULT_FILE_COLUMNS, runApiServer, startCaptchaSolving, type ApiEngine, type HandoffHooks, type ResultPage } from '@w2l/api'
+import { createApiEngine, csvField, defaultSessionsFile, evidenceRow, markdownFileName, parseListen, preloadEngineModules, RESULT_FILE_COLUMNS, runApiServer, scrapeStages, startCaptchaSolving, type ApiEngine, type HandoffHooks, type ResultPage } from '@w2l/api'
 import {
   CONTENTFUL_STATUS,
   parseBatchStartRequest,
@@ -22,6 +22,7 @@ import {
 import { COMMANDS, parseCommandLine, UsageError, usage, type Command, type CliOptions } from './flags.js'
 import { accessGrant } from './accessGrant.js'
 import { login } from './login.js'
+import { motionColor, motionWanted, startMotion, type Motion, type MotionTerminal } from './motion.js'
 import { nativeModuleHelp } from './nativeModule.js'
 
 export const CLI_VERSION = '0.8.11'
@@ -39,6 +40,8 @@ export interface CliIo {
    * at a terminal to type the answer; a command that needs their own answer (`access-grant`) refuses without it.
    */
   ask?: (question: string) => Promise<string | null>
+  /** stderr, when it is a terminal: the octopus is drawn there while a scrape or a map runs (motion.ts). Left out, nothing is drawn. Lines written to that terminal meanwhile, `stderr`'s among them, are the terminal's to keep above the drawing (motionTerminal). */
+  motion?: MotionTerminal
 }
 
 /** Exit codes: 0 a contentful page or a completed job, 1 anything else W2L answered, 2 a refused command line, 130 interrupted. */
@@ -162,7 +165,10 @@ async function runCommand(engine: ApiEngine, command: Command, urls: string[], b
   switch (command) {
     case 'scrape': {
       const req = parseScrapeRequest({ debug: false, ...body, url: one(), origin: ORIGIN })
-      const response = await engine.scrape(req, io.signal === undefined ? {} : { signal: io.signal }, handoffPrompts('scrape', io))
+      const motion = motionFor('scrape', req.url, cli, io)
+      // The stages are listened to only for the drawing: without it the call is the one it was.
+      const context = { ...(io.signal === undefined ? {} : { signal: io.signal }), ...(motion === null ? {} : { onTrace: scrapeStages(motion.stage) }) }
+      const response = await engine.scrape(req, context, handoffPrompts('scrape', io)).finally(() => motion?.stop())
       if (req.handoff !== undefined && response.handoff !== undefined) {
         const missed = response.warnings?.find((warning) => warning.code === 'handoff_not_through')
         io.stderr(`octocrawl scrape: ${missed?.message ?? 'not handed over'}`)
@@ -182,7 +188,9 @@ async function runCommand(engine: ApiEngine, command: Command, urls: string[], b
       return CONTENTFUL_STATUS.has(response.status) ? 0 : 1
     }
     case 'map': {
-      const response = await engine.map(parseMapRequest({ ...body, url: one(), origin: ORIGIN }), io.signal === undefined ? {} : { signal: io.signal })
+      const req = parseMapRequest({ ...body, url: one(), origin: ORIGIN })
+      const motion = motionFor('map', req.url, cli, io)
+      const response = await engine.map(req, io.signal === undefined ? {} : { signal: io.signal }).finally(() => motion?.stop())
       io.stdout(JSON.stringify(response, null, 2))
       const hint = response.agentHints?.[0]
       if (response.status === 'failed') io.stderr(`octocrawl map: failed${hint === undefined ? '' : `; ${hint}`}`)
@@ -216,6 +224,12 @@ async function runCommand(engine: ApiEngine, command: Command, urls: string[], b
       return finish(engine, 'batch', accepted.taskId, cli, io)
     }
   }
+}
+
+/** The octopus for this scrape or map, or null when none is drawn: stderr is no terminal, or the drawing is switched off (motionWanted). */
+function motionFor(command: 'scrape' | 'map', url: string, cli: CliOptions, io: CliIo): Motion | null {
+  if (io.motion === undefined || !motionWanted(io.env, cli.noMotion === true)) return null
+  return startMotion(io.motion, { command, host: new URL(url).host, color: motionColor(io.env) })
 }
 
 /** A page as `--out` writes it: a crawl page or batch item (`url`), or a scrape response (`requestedUrl`). */

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createInterface } from 'node:readline'
+import { motionTerminal, stopMotion } from './motion.js'
 import { runCli } from './run.js'
 
 // SIGINT (Ctrl-C) stops a running command; a crawl or batch is left paused and resumable. A second one exits at once.
@@ -9,6 +10,8 @@ process.on('SIGINT', () => {
   controller.abort(new Error('SIGINT'))
 })
 process.on('SIGTERM', () => controller.abort(new Error('SIGTERM')))
+// However the process leaves (a second Ctrl-C, an error nothing caught), the terminal gets its cursor back.
+process.on('exit', stopMotion)
 
 /** One question to the person at the terminal; null when they closed the input (Ctrl-D) or pressed Ctrl-C. */
 const ask = (question: string): Promise<string | null> => new Promise((resolve) => {
@@ -27,6 +30,7 @@ runCli(process.argv.slice(2), {
   tty: process.stdout.isTTY === true,
   // Only a person typing at a terminal can answer: a pipe, a script or an agent's shell gets no `ask`.
   ...(process.stdin.isTTY === true && process.stdout.isTTY === true ? { ask } : {}),
+  ...(process.stderr.isTTY === true ? { motion: motionTerminal(process.stderr) } : {}),
 }).then((code) => { process.exitCode = code }, (error: unknown) => {
   process.stderr.write(`octocrawl: ${error instanceof Error ? error.message : String(error)}\n`)
   process.exitCode = 1
