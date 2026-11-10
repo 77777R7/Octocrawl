@@ -450,10 +450,11 @@ export interface ApiEngineOptions {
    * (local): the person running the server decides that for their own
    * fetches: a URL a scrape or batch names is fetched whatever robots.txt
    * says, on the record, and a request may carry a recorded override
-   * (`robotsOverride`, `robotsOverrides`). False (hosted): robots.txt is
-   * obeyed for every URL, and the field is refused by name with HTTP 400, so
-   * no token holder can make the operator's service set a publisher's rule
-   * aside. A hosted engine (`hosted`) obeys it whatever this says.
+   * (`robotsOverride`, `robotsOverrides`). False: robots.txt is obeyed for
+   * every URL, and the field is refused by name with HTTP 400, so no token
+   * holder can make the operator's service set a publisher's rule aside. A
+   * hosted engine (`hosted`) obeys it whatever this says, but for a scrape's
+   * recorded `robotsOverride` from an account (decided 2026-11-11).
    */
   allowRobotsOverride?: boolean
   /**
@@ -1024,8 +1025,25 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   /** A server that sets robots.txt aside for no caller refuses the fields that ask it to by name, before anything is fetched or stored. */
   const checkRobotsOverride = (parameter: 'robotsOverride' | 'robotsOverrides' | 'ignoreRobotsTxt', value: unknown): void => {
     if (!robotsSetAside && value !== undefined && value !== false) {
-      throw new RequestError(`unsupported parameter: ${parameter} (this server obeys robots.txt for every URL; setting it aside is for a local Octocrawl server)`, 'unsupported_parameter', { parameters: [parameter] })
+      throw new RequestError(hosted
+        ? `unsupported parameter: ${parameter} (a hosted server obeys robots.txt for every URL but the one a scrape names with a robotsOverride; setting it aside for more is for a local Octocrawl server)`
+        : `unsupported parameter: ${parameter} (this server obeys robots.txt for every URL; setting it aside is for a local Octocrawl server)`, 'unsupported_parameter', { parameters: [parameter] })
     }
+  }
+  /**
+   * A scrape's recorded robotsOverride. A hosted server takes it too, from a caller with an account, for the one URL the
+   * scrape names: it sets aside a rule robots.txt wrote for every crawler, on the record, and never one written for
+   * Octocrawl itself (everyCrawlerRulesOnly). A crawl, a map and a batch on a hosted server obey robots.txt as before.
+   */
+  const scrapeRobotsOverride = (req: ScrapeRequest, account: string | undefined): AppliedRobotsOverride | undefined => {
+    if (req.robotsOverride === undefined || !hosted) {
+      checkRobotsOverride('robotsOverride', req.robotsOverride)
+      return req.robotsOverride
+    }
+    if (account === undefined) {
+      throw new RequestError('robotsOverride on a hosted server needs an account, so the decision is recorded against it: on hosted Octocrawl, connect with an account\'s key from https://octocrawl.dev/dashboard/ or sign in', 'unsupported_parameter', { parameters: ['robotsOverride'] })
+    }
+    return { ...req.robotsOverride, everyCrawlerRulesOnly: true }
   }
   /**
    * robots.txt addresses crawlers that discover links. On a local server a
@@ -2266,7 +2284,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     checkAttributeSelectors(req.formats)
     checkListSelectors(req.formats)
     checkVerificationFormats(req)
-    checkRobotsOverride('robotsOverride', req.robotsOverride)
+    const callerRobotsOverride = scrapeRobotsOverride(req, context.account)
     checkHostedOptions(req)
     checkFastModeLane(req)
     const overallStart = performance.now()
@@ -2296,7 +2314,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const runner = new LadderRunner(channels, policy, historyFor(mode, scrapeEgress, req.access === 'enhanced'), null, sessionsFor(mode), { channelsFiltered: rungs.filtered, httpFallback: unproxied(scrapeEgress), ...(req.verify === undefined ? {} : { verify: req.verify }) })
     // A Monitor's capture (no record) neither reads nor fills the cache: a preview persists nothing.
     // The URL a scrape names; a Monitor's capture (no record) re-reads its URL on a schedule, as a crawler does.
-    const robotsOverride = req.robotsOverride ?? (record ? namedUrlOverride : undefined)
+    const robotsOverride = callerRobotsOverride ?? (record ? namedUrlOverride : undefined)
     const plan = record ? cachePlanFor(req.url, mode, req, req.formats, rungs.channels, req.robotsOverride, robotsOverride !== undefined) : null
     /** The shaped response and, for an API call, the scrape record, written before the response is sent. */
     const deliver = async (run: ScrapeRun, shapeScope: ReturnType<typeof createExecutionScope>, fetched: boolean): Promise<ScrapeResponse | CompactScrapeResponse> => {

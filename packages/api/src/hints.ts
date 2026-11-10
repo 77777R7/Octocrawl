@@ -527,7 +527,7 @@ function dnsHint(result: HintedResult, host: string): string | null {
 }
 
 /** Where robots.txt is set aside, on the record: a robots refusal now comes from a crawl's or map's link, a Monitor, or a hosted server. */
-const ROBOTS_ROUTE = 'A local Octocrawl server fetches a URL a scrape or batch names whatever robots.txt says, and a crawl or map started there with ignoreRobotsTxt fetches the links it disallows, each on the record; a hosted server obeys robots.txt for every URL'
+const ROBOTS_ROUTE = 'A local Octocrawl server fetches a URL a scrape or batch names whatever robots.txt says, and a crawl or map started there with ignoreRobotsTxt fetches the links it disallows, each on the record; a hosted server obeys robots.txt for every URL but one a scrape names with a robotsOverride giving your reason, from an account'
 
 /**
  * The hints of one scrape, in the order they apply; empty when there is

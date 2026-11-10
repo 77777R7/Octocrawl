@@ -188,8 +188,9 @@ export interface ScrapeRequest extends PageOptions, RequestAttribution {
    * A recorded decision to fetch this URL although its host's robots.txt
    * disallows it. The reason is required; robots.txt is still read, and the
    * override is reported in the trace, the warnings and, in the browser lane,
-   * the compliance record. A hosted server refuses the field
-   * (`unsupported_parameter`).
+   * the compliance record. A hosted server takes it from a caller with an
+   * account and refuses it otherwise (`unsupported_parameter`); there it sets
+   * aside no rule robots.txt wrote for Octocrawl itself.
    */
   robotsOverride?: RobotsOverride
   /**

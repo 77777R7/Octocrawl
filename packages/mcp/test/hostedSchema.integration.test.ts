@@ -38,7 +38,7 @@ type Schema = { properties: Record<string, { description?: string; enum?: unknow
 const schemaOf = (tools: readonly { name: string; inputSchema: unknown }[], name: string) => tools.find((tool) => tool.name === name)!.inputSchema as Schema
 
 /** Options a hosted server refuses, or takes and cannot honour (2026-10-17, measured against createHostedApi). */
-const NEVER_HOSTED = ['actions', 'robotsOverride', 'lane', 'handoff', 'skipTlsVerification', 'access', 'lockdown', 'storeInCache', 'maxAge', 'minAge']
+const NEVER_HOSTED = ['actions', 'lane', 'handoff', 'skipTlsVerification', 'access', 'lockdown', 'storeInCache', 'maxAge', 'minAge']
 
 describe('hosted tool schemas', () => {
   it('lists, on every hosted connection, none of the options hosted Octocrawl refuses or cannot honour', () => {
@@ -62,8 +62,13 @@ describe('hosted tool schemas', () => {
     expect(formats.flatMap((variant) => variant.enum ?? [variant.properties?.type?.const])).not.toEqual(expect.arrayContaining(['screenshot']))
     expect(formats.some((variant) => (variant.enum ?? []).some((value) => String(value).startsWith('screenshot')))).toBe(false)
     expect('waitFor' in keyless.properties).toBe(false)
+    // A robots override is recorded against an account: only an account's connection is offered one.
+    expect('robotsOverride' in keyless.properties).toBe(false)
     const keyed = schemaOf(hostedTools(true), 'scrape')
     expect('waitFor' in keyed.properties).toBe(true)
+    expect('robotsOverride' in keyed.properties).toBe(false)
+    expect('robotsOverride' in schemaOf(hostedTools(true, true), 'scrape').properties).toBe(true)
+    expect('robotsOverride' in schemaOf(oauthTools(true, true), 'scrape').properties).toBe(true)
     expect((keyed.properties.formats?.items?.anyOf ?? []).some((variant) => (variant.enum ?? []).includes('screenshot'))).toBe(true)
   })
 

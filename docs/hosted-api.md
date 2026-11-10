@@ -1,6 +1,6 @@
 # Hosted Octocrawl: the API and the remote MCP endpoint
 
-Phase 1 of the roadmap's [PH · Hosted Octocrawl](../ROADMAP.md#ph--hosted-octocrawl): one Cloud Run service, `octocrawl-api`, serves `https://api.octocrawl.dev` (REST) and `https://mcp.octocrawl.dev/mcp` (MCP over Streamable HTTP) from the same process, `packages/mcp/src/hostedApiCli.ts`. It is the API's hosted mode (`packages/api/src/listen.ts`: private addresses, robots overrides, saved logins, handoff, local proxies and non-HTTPS webhooks refused) behind a gate that serves scrape and map to every caller and batch and crawl jobs to accounts ([Batch and crawl jobs](#batch-and-crawl-jobs)), counts every caller, and pins callers without a key to the HTTP lane (`packages/mcp/src/hostedApi.ts`).
+Phase 1 of the roadmap's [PH · Hosted Octocrawl](../ROADMAP.md#ph--hosted-octocrawl): one Cloud Run service, `octocrawl-api`, serves `https://api.octocrawl.dev` (REST) and `https://mcp.octocrawl.dev/mcp` (MCP over Streamable HTTP) from the same process, `packages/mcp/src/hostedApiCli.ts`. It is the API's hosted mode (`packages/api/src/listen.ts`: private addresses, saved logins, handoff, local proxies and non-HTTPS webhooks refused, and robots overrides but an account's on a scrape, see [Scrape options](scrape-options.md#overriding-robotstxt-for-one-url)) behind a gate that serves scrape and map to every caller and batch and crawl jobs to accounts ([Batch and crawl jobs](#batch-and-crawl-jobs)), counts every caller, and pins callers without a key to the HTTP lane (`packages/mcp/src/hostedApi.ts`).
 
 | | Keyless | With a key | Signed in (`/mcp-oauth`) |
 | --- | --- | --- | --- |
@@ -604,7 +604,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 <!-- hosted-parity:start -->
 **Tools.** Of the local server's 39 MCP tools, hosted serves 17: 2 as locally and 15 limited. 21 are planned and 1 is different on purpose.
 
-**Options.** Of the 121 local options of scrape, map, crawl and batch_scrape, hosted lists 87: 75 as locally and 12 limited. 23 are planned and 11 different on purpose. Below the options, 7 option values that hosted leaves out or limits.
+**Options.** Of the 121 local options of scrape, map, crawl and batch_scrape, hosted lists 88: 75 as locally and 13 limited. 23 are planned and 10 different on purpose. Below the options, 7 option values that hosted leaves out or limits.
 
 **Planned, by stage H item** (tools, options and values): item 2, hosted access: 3; item 3, actions and waitFor: 2; item 4, monitors and delivery: 18; item 5, identity-bound features: 5; item 7, the json model fallback: 1; item 8, beyond local: 13; no item yet: 5.
 
@@ -680,7 +680,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `scrape` `storeInCache` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Taken, and nothing is stored. Sent anyway: taken, not honoured. |
 | `scrape` `lockdown` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Taken, and always failed/cache_miss. Sent anyway: taken, not honoured. |
 | `scrape` `actions` | Planned: stage H item 3, actions and waitFor | A step runs the caller's clicks and scripts in the operator's browser; hosted takes none until that isolation is reviewed, and stage H item 3 brings actions to keyed callers. Sent anyway: refused by name. |
-| `scrape` `robotsOverride` | Different on purpose | Hosted fetches from the operator's addresses and obeys robots.txt for every URL (ROADMAP Direction). Sent anyway: refused by name. |
+| `scrape` `robotsOverride` | Limited | From an account, for the one URL a scrape names: it sets aside a rule robots.txt wrote for every crawler, on the record; a rule written for Octocrawl itself holds, and a call without an account is refused. |
 | `scrape` `integration` | Supported |  |
 | `map` `url` | Supported |  |
 | `map` `search` | Supported |  |

@@ -611,3 +611,13 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 - 梯子在这一级之后试哪一档、`my-browser` 交给本人 Chrome 时等人的时间（`access_denied` 页面上仍等满），本修订都不改。
 - 识别错了的代价：一个其实会自己放行的页面如果被判成 `access_denied`，现在不再等它，直接报 blocked。判定规则只认拦截页自己的标记（见 `packages/http-core/test/fixtures/gate/` 的样本），这种误判在真实站点上出现过没有，unknown。
 - 真实站点上的确认（crunchbase、lead411）是任务清单 R1.5，尚未运行。
+
+## 修订 2026-11-11：托管的单页 scrape 接受账户写明理由的 robots 覆盖（决定七）
+
+**背景。** 2026-11-11 讨论 Reddit 时，Howard 定了这个折中：托管照旧遵守 robots.txt，只放开一种情况，就是使用者明确为一个 URL 写下理由。决定七原文是"托管对每个 URL 都遵守 robots.txt"，本修订改它。
+
+- **放开的。** 托管的 `scrape` 接受 `robotsOverride`（`{ reason, recordedBy? }`），只对这次 scrape 指名的那一个 URL 生效。调用方必须有账户（账户的 key 或登录）；没有账户的调用按名字拒绝，HTTP 400 `unsupported_parameter`，什么都不发。覆盖照本地的方式记录：trace 里有 `robots_disallowed` 和 `robots_overridden`，警告写明规则、理由和记录人，Evidence Record 的 `robotsDecision` 保持 `disallowed`，`userOverride: true`，`overrideBasis: "robots_override"`。读不到的 robots.txt 同样可以被这个覆盖跳过，原因留在记录里。
+- **不放开的。** robots.txt 写给 Octocrawl 本身的规则（`User-agent: Octocrawl` 一组）是站点的定向退出，托管上即使带了覆盖也照旧遵守（`AppliedRobotsOverride.everyCrawlerRulesOnly`）。托管的 batch（`robotsOverrides`）、crawl 和 map（`ignoreRobotsTxt`）照旧拒绝。`hosted_chrome` 这一级不接受覆盖，在自己的路线上照旧遵守 robots.txt。
+- **为什么只到这里。** 托管从运营方的地址发请求，以 Octocrawl 声明的身份出现；一次覆盖是一个账户为一个 URL 写下的决定，有据可查。批量和发现链接的抓取不在这个范围里。
+- **没有核实的。** 这个改动的法律风险没有经过审查；它不帮到在网络层拦数据中心地址的站点（2026-11-11 从代理出口访问 Reddit 得到 "blocked due to a network policy"）。
+- **决定七从今天起读作：** 托管对每个 URL 都遵守 robots.txt，账户在 scrape 上为指名的 URL 写下的 `robotsOverride` 除外；写给 Octocrawl 本身的规则没有例外。
