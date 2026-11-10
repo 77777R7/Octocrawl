@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { INSTALLED_CHROME_INSTALL } from '@w2l/bench'
-import { batchExtractionHints, batchFailureHints, batchLoginWallHint, failureGroupOf, withFailure, agentHintsFor, mapAgentHints, offPageHint, SIGN_IN_PROMPT_HINT, THIN_PAGE_HINT, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, HOSTED_LOGIN_WALL_HINT, hostedFileNotKeptHint, hostedGateHint, INSTALLED_CHROME_MISSING_HINT, renderedLowYieldHint, renderedNotLoadedHint, INSTALLED_CHROME_RECOMMENDED_HINT, lowContentYieldHint, MAX_AGENT_HINTS, pinnedFastModeHints, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
+import { batchExtractionHints, batchFailureHints, batchLoginWallHint, failureGroupOf, withFailure, agentHintsFor, mapAgentHints, offPageHint, SIGN_IN_PROMPT_HINT, THIN_PAGE_HINT, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, HOSTED_LOGIN_WALL_HINT, hostedFileNotKeptHint, hostedGateHint, hostedRefusedHint, INSTALLED_CHROME_MISSING_HINT, renderedLowYieldHint, renderedNotLoadedHint, INSTALLED_CHROME_RECOMMENDED_HINT, lowContentYieldHint, MAX_AGENT_HINTS, pinnedFastModeHints, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
 import { UNSOURCED_FIELD_MESSAGE } from '../src/structured.js'
 
 const URL_ = 'https://example.test/report'
@@ -176,7 +176,9 @@ describe('agent hints', () => {
       expect(failureGroupOf(facts({ failureReason: 'policy_denied', robots: 'unreachable' }))).toBe('robots_unreachable')
       expect(failureGroupOf(facts({ failureReason: 'policy_denied', robots: 'disallowed' }))).toBe('robots_disallowed')
       expect(failureGroupOf(facts({ failureReason: 'policy_denied' }))).toBe('policy_denied')
-      for (const gate of ['cloudflare_challenge', 'captcha', 'bot_detected_generic', 'access_denied']) expect(failureGroupOf(facts({ status: 'blocked', blockReason: gate }))).toBe('gated')
+      for (const gate of ['cloudflare_challenge', 'captcha', 'bot_detected_generic']) expect(failureGroupOf(facts({ status: 'blocked', blockReason: gate }))).toBe('gated')
+      // A block page is not a check: its line says another next step, so it is its own group.
+      expect(failureGroupOf(facts({ status: 'blocked', blockReason: 'access_denied' }))).toBe('access_denied')
       expect(failureGroupOf(facts({ status: 'blocked', blockReason: 'rate_limited' }))).toBe('rate_limited')
       expect(failureGroupOf(facts({ failureReason: 'timeout' }))).toBe('timeout')
       expect(failureGroupOf(facts({ failureReason: 'http_error', browserDeclined: true }))).toBe('http_error')
@@ -213,6 +215,18 @@ describe('agent hints', () => {
       expect(batchFailureHints({ robots_disallowed: { count: 1, hosts: ['r.test'] } }, { hosted: true })[0]).toBe('1 page of r.test is disallowed by its robots.txt for Octocrawl: the site owner\'s rule, which hosted Octocrawl obeys for every URL; on your computer a URL you name is read on the record (npx octocrawl serve)')
     })
 
+    it('says of pages that refused the exit that waiting does not help, and names only the routes this server has', () => {
+      const refused = { access_denied: { count: 3, hosts: ['b.test'] } }
+      const same = '3 pages of b.test refused this exit with a block page, which has no check to pass: waiting or a new batch from the same network does not help'
+      expect(batchFailureHints(refused, { handoff: true })).toEqual([`${same}; another network may be let in (a proxy or session you own), or read them in your own Chrome: a batch handoff (hand_off_batch, POST /v1/batches/:id/handoff, octocrawl batch --handoff) opens them there and Octocrawl reads the page`])
+      expect(batchFailureHints(refused, {})).toEqual([`${same}; another network may be let in (a proxy or session you own); this server has no Chrome of the person's to hand them to; on their own computer Octocrawl can (npx octocrawl serve, then the batch with a handoff)`])
+      const hosted = batchFailureHints({ access_denied: { count: 1, hosts: ['b.test'] } }, { hosted: true, handoff: true })
+      expect(hosted).toEqual(['1 page of b.test refused hosted Octocrawl\'s exit with a block page, which has no check to pass: waiting or a new batch from here does not help, and hosted Octocrawl has no proxy or session of yours; on your computer Octocrawl asks from your own network (npx octocrawl serve), and can hand it to you in your own Chrome (the batch with a handoff)'])
+      for (const line of [...batchFailureHints(refused, { handoff: true }), ...batchFailureHints(refused, {}), ...hosted]) for (const absent of ['gate', 'challenge', 'solve']) expect(line).not.toContain(absent)
+      // Beside real checks it keeps its own line.
+      expect(batchFailureHints({ gated: { count: 2, hosts: ['g.test'] }, access_denied: { count: 1, hosts: ['b.test'] } }, {}).map((line) => line.split(' ').slice(0, 5).join(' '))).toEqual(['2 pages of g.test gate', '1 page of b.test refused'])
+    })
+
     it('puts every other reason in one line that points at the items, and a timeout at the ceiling offers no longer one', () => {
       expect(batchFailureHints({ dns_error: { count: 1, hosts: ['d.test'] }, http_error: { count: 2, hosts: ['h.test'] }, tls_error: { count: 1, hosts: ['t.test'] } }, {})).toEqual([
         '4 pages failed for other reasons (http_error 2, dns_error 1, tls_error 1): get_batch_errors (GET /v1/batches/:id/errors) lists them, each with its own agentHints',
@@ -232,6 +246,24 @@ describe('agent hints', () => {
       ])
     }
     expect(hints(result({ status: 'blocked', blockReason: 'geo_restricted', markdown: null }))).toEqual([])
+  })
+
+  it('says of a block page that the site refused this exit and waiting does not help, with the routes this server has (R1.3)', () => {
+    const refused = result({ status: 'blocked', blockReason: 'access_denied', markdown: null, evidence: { finalUrl: URL_, httpStatus: 403 } })
+    const local = hints(refused, ['http', 'browser_local'])
+    expect(local).toEqual(['example.test refused this exit with a block page on the lanes tried (http, browser_local): the page has no check to pass, so waiting or asking again from the same network does not help; another network may be let in (a proxy or session you own), or, on your own machine, read the page in your own Chrome: handoff: true on a scrape (octocrawl scrape --handoff), or a batch handoff (octocrawl batch --handoff, POST /v1/batches/:id/handoff)'])
+    // The person's own Chrome was refused too: it is not offered again.
+    const own = agentHintsFor({}, { channelsTried: ['my_browser'], result: { ...refused, lane: 'my_browser' } })
+    expect(own).toEqual(['example.test refused this exit with a block page on the lanes tried (my_browser): the page has no check to pass, so waiting or asking again from the same network does not help; another network may be let in (a proxy or session you own)'])
+    // Hosted: no proxy or session of the person's, and no handoff; the route is their own computer.
+    const hosted = agentHintsFor({}, { channelsTried: ['http', 'browser_local'], result: refused }, { hosted: true })
+    expect(hosted).toEqual([hostedRefusedHint('example.test', ['http', 'browser_local'])])
+    expect(hosted[0]).toBe('example.test refused hosted Octocrawl\'s exit with a block page on the lanes tried (http, browser_local): the page has no check to pass, so waiting or asking again from here does not help, and hosted Octocrawl has no proxy or session of yours; on your computer Octocrawl asks from your own network (npx octocrawl serve), and can hand the page to you in your own Chrome (the scrape with handoff: true)')
+    for (const absent of ['--access-grant', 'octocrawl scrape --handoff', 'POST /v1/batches/:id/handoff', 'a proxy or session you own']) expect(hosted[0]).not.toContain(absent)
+    // None of them speaks of a check to get through, a challenge to solve or a gate.
+    for (const line of [...local, ...own, ...hosted]) for (const absent of ['gates automated access', 'solve challenges', 'getting through the check']) expect(line).not.toContain(absent)
+    // The installed_chrome route is recommended for a check it waits out; a block page has none, and what the route does with one was not measured.
+    expect(agentHintsFor({}, { channelsTried: ['http', 'browser_local'], result: refused }, { installedChrome: true })).toEqual(local)
   })
 
   it('on hosted Octocrawl names only what a server on the person\'s computer has: no authed mode, handoff, actions, grant or 300 s there', () => {
