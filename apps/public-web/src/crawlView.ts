@@ -1,18 +1,22 @@
-import { crawlCap, fillWords, hashText, layoutPage, mayRead, PROGRESS_STEPS, stageLabel, stepsDone, Cell, type CrawlStage, type PageLayout, type StageEvent } from './crawlModel'
-import { octopusPose, SPRITE_H, SPRITE_W } from '@w2l/octopus'
+import { closePage, crawlCap, DIVE_FROM, gateOpen as gateOpenFor, hashText, isWide, layoutPage, mayRead, PROGRESS_STEPS, stageLabel, stepsDone, typesetPage, Cell, WIDE_TAIL, type CrawlStage, type PageLayout, type PageWords, type StageEvent } from './crawlModel'
+import { createOctopus, SLAP_MS, type Eyes, type Mode, type Octopus, type Point, type Tone } from './crawlOctopus'
 
-/** While a preview runs, the URL card grows down into a frameless navy window: an octopus of glyphs crawls a page
- * drawn as a grid, the page scrolling under it. It never goes further down than the server's reported stages allow
- * (crawlModel.ts), and nothing dissolves until the result says the page was read; then it drops to the foot within
- * 1.5 s and lands with a thud, the cells of the main content it passes dissolve into glyphs, the read page's own words
- * settle into the lines, the page's chrome dims, and the window folds back into the card. A page that was not read
- * keeps the octopus at the door with the reason. Along the foot runs a bar of glyphs: each stage the server reports
+/** While a preview runs, the URL card grows down into a frameless navy window: an octopus of glyphs (crawlOctopus.ts)
+ * blooms out of one cell, unfurls eight arms and walks a page drawn as a grid, the page scrolling under it and the
+ * lines near it lit by it. It waits with its arms on a gate that stands for robots.txt, which opens only when the
+ * server says the file allows the page, and it never goes further down than the server's reported stages allow
+ * (crawlModel.ts). Nothing dissolves until the result says the page was read; then the rows it has reached dissolve
+ * into glyphs from under it outward, it gathers itself and dives to the page's foot, its arms streaming above it, and
+ * lands with a thud: the arms slap out along the ground, rays shoot up, and a ring runs out through every cell. Where
+ * the ring has passed, the glyphs are the page's own Markdown, set as text beside the octopus, which throws up its
+ * arms and hops; then the window folds back into the card. A page that was not read brings the octopus back to the
+ * door, shaking its head, to hold the reason. Along the foot runs a bar of glyphs: each stage the server reports
  * sweeps its segment alight, while the awaited segment only shows a spark running to and fro, never filling.
  *
  * Opening (about 0.9 s, while the request is already out): the white card dissolves into cells from the button out,
  * the address's letters turn into glyphs and drop, an orange scan line pushes the window open with the rows weaving in
  * behind it while two glyph arms hook the card's lower corners and pull, and the letters land as the window's address
- * as the octopus peeks in. Closing (0.5 s) runs it back: the scan line rises, the rows unweave, and cells gather into
+ * as the octopus emerges. Closing (0.5 s) runs it back: the scan line rises, the rows unweave, and cells gather into
  * the white card. Every cell keeps its place on its grid: only its glyph, brightness and colour change. Escape or Skip
  * closes it at once; the run goes on. Nothing plays with reduced motion or once the visitor chose to always skip. */
 
@@ -36,10 +40,22 @@ export interface CrawlView {
 }
 
 const SKIP_KEY = 'octocrawl.crawl.skip'
-/** Once the result is back the octopus finishes the page within this, however far it had to go. */
-const FINISH_MS = 1500
-/** After it lands: the thud, then the window folds. */
-const SETTLE_MS = 850
+/** Once the result is back the octopus dives to the page's foot within this, however far it has to go. */
+const DIVE_MS = 1400
+/** The page's silhouette is this many windows tall. Before the result the octopus walks as if it were WALK_WINDOWS
+ * tall, so the rest is always there for its dive. */
+const PAGE_WINDOWS = 5
+const WALK_WINDOWS = 3
+/** At the result the page is ended this many windows below the top of what the window shows: the dive crosses the
+ * rest of the window and two more. */
+const DIVE_WINDOWS = 3
+/** It does not dive before it is whole, arms and all: a result that comes sooner after the click waits until then. */
+const DIVE_AFTER_MS = 1300
+/** After it lands: the thud, its arms thrown up, a hop, then the window folds. */
+const SETTLE_MS = 1000
+/** The hop it gives as its arms go up: how long, and how many rows high. */
+const HOP_MS = 340
+const HOP_ROWS = 1.2
 const FAILURE_MS = 2200
 /** A cell runs down the density ramp as it is read. */
 const READ_MS = 280
@@ -47,7 +63,8 @@ const RAMP = ['X', 'x', '+', ':']
 /** A read cell settles into one of these, picked by its place, so the read content reads as a glyph texture. */
 const TEXTURE = ['x', '+', ':', '*', '/', '\\', '=', 'x', '+', '#']
 const HOT = ['#fff1e0', '#ffc59a', '#ff9a66', '#fb7b4c']
-const NAVY = '#081b42'
+/** The window's own navy (--navy-deep in the styles): a cell painted with it shows nothing of what is under it. */
+const NAVY = '#061634'
 const HALO = 'rgba(4, 18, 58, .7)'
 const FRAME_MS = 33
 // The page's grid sits between the window's top line (the address, Skip) and its foot (the bar, what the server said).
@@ -72,6 +89,31 @@ const CELL_MS = 80
 /** The effects layer reaches this far past the card, for the arms and the falling letters. */
 const FX_MARGIN = 110
 
+// The octopus emerges EMERGE_AT after the click, growing from one cell to its size (and a little past) in EMERGE_MS,
+// warm at first; its eyes open once it is whole.
+const EMERGE_AT = 430
+const EMERGE_MS = 460
+/** The page row its mantle's top waits on, at the door, and how far down the window it rides while the page scrolls. */
+const DOOR = 4
+const ANCHOR = 0.24
+/** The gate opens outward from the octopus, a cell every GATE_STEP_MS, each running down the ramp in GATE_MS; the page
+ * behind it then comes up to its own brightness row by row. */
+const GATE_STEP_MS = 7
+const GATE_MS = 260
+const GATE_LABEL = ' robots.txt '
+/** The ring that runs out from the landing through every cell: its speed (px a ms), width (px) and life. */
+const RING_SPEED = 2.6
+const RING_WIDTH = 18
+const RING_MS = 500
+/** How far the octopus's light reaches over the page, in rows from its mantle's centre. */
+const LIGHT = 12
+/** While it waits for the page, a ring of that light runs out from it once in PING_MS, PING_REACH px far and
+ * PING_WIDTH px wide. */
+const PING_MS = 2600
+const PING_REACH = 560
+const PING_WIDTH = 30
+/** How the octopus's cells are inked (crawlOctopus.ts Tone); a warm cell takes the hot colours instead. */
+const INK: Record<Tone, string> = { lit: '#f4f8ff', body: '#d6e6ff', shade: '#b6cef7', sheen: '#ffffff', arm: '#a8c9fa', far: '#7fa3de', tip: '#ffc59a', eye: '#ffffff', lid: '#f4f8ff' }
 /** The thud's flying bits: column speed, upward row speed and glyph, fixed so every landing looks alike. */
 const DEBRIS: ReadonlyArray<readonly [number, number, string]> = [
   [-22, 14, '.'], [-17, 20, "'"], [-13, 26, '*'], [-9, 17, ','], [-6, 29, '.'], [-3, 22, "'"], [-1, 31, '*'],
@@ -136,8 +178,11 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
 
   let phase: Phase = 'idle'
   let layout: PageLayout | null = null
-  let words: Uint16Array | null = null
-  let wordsAt = 0
+  let words: PageWords | null = null
+  /** When the page was ended early for the last dive (-Infinity when it was not). */
+  let floorAt = -Infinity
+  /** When a read page's dive may start, while it waits for the octopus to be whole (Infinity when none waits). */
+  let diveAt = Infinity
   let seen = new Set<CrawlStage>()
   let robotsAllowed: boolean | null = null
   let robotsUnreachable = false
@@ -148,14 +193,33 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
   let phaseAt = 0
   let depth = 0
   let finishFrom = 0
-  let finishMs = FINISH_MS
-  let readAt = new Float64Array(0)
-  let reached: boolean[] = []
-  let reach: { x: number; y: number; at: number } | null = null
+  let finishMs = DIVE_MS
+  // Reading: when each row of the page began to dissolve (Infinity until it has), the column that spread from, and
+  // the last row begun.
+  let rowAt = new Float64Array(0)
+  let rowFrom = new Float32Array(0)
+  let readTo = -1
+  // The octopus: its mantle's height in rows, the column its centre is on and the one it leans toward, the pose it
+  // was last given, and where the failure note's top edge is (stage px) for it to hold.
+  let octo: Octopus | null = null
+  let mantleRows = 0
+  let octoCol = 0
+  let octoGoal = 0
+  // The dive glides from the column it starts on to the one it lands on; and where the mantle's centre last was
+  // (page px), for the light it casts on the page.
+  let diveFrom = 0
+  let landCol = 0
+  let poseAt: Point = { x: 0, y: 0 }
+  let poseScale = 0
+  let mode: Mode = 'crawl'
+  let noteTop: { x: number; y: number } | null = null
+  // The gate: its page row, when it opened, and where its label starts.
+  let gateRow = 0
+  let gateAt = Infinity
+  let gateLabel = 0
   /** When each of the bar's steps was reported (performance.now), Infinity until then. */
   let stepAt: number[] = []
   let slamAt = -Infinity
-  let octoX = 0
   let raf = 0
   let lastFrame = 0
   let pitchX = 8
@@ -202,7 +266,11 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     ratio = r
     canvas.width = Math.round(w * r)
     canvas.height = Math.round(h * r)
-    if (layout) pitchX = width / layout.cols
+    if (layout) {
+      pitchX = width / layout.cols
+      // The window was resized while it played: the octopus keeps its column.
+      octo?.setPitch(pitchX)
+    }
   }
 
   /** Where each visible letter of the address sits in the input, relative to the card. */
@@ -247,8 +315,13 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     done = false
     result = null
     words = null
+    floorAt = -Infinity
+    diveAt = Infinity
+    poseScale = 0
     depth = 0
-    reach = null
+    mode = 'crawl'
+    noteTop = null
+    gateAt = Infinity
     slamAt = -Infinity
     stepAt = PROGRESS_STEPS.map(() => Infinity)
     note.hidden = true
@@ -265,6 +338,8 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     h1 = card.offsetHeight
     pitchX = coarse.matches ? 9 : 8
     pitchY = coarse.matches ? 16 : 14
+    // The last run's page is let go first: fit() would size this window's cells to its columns.
+    layout = null
     width = height = 0
     fit()
     card.classList.remove('is-crawling')
@@ -273,11 +348,11 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     if (width === 0 || height === 0) return false
     const cols = Math.max(24, Math.floor(width / pitchX))
     visibleRows = Math.max(10, Math.floor((height - GRID_TOP - GRID_FOOT) / pitchY))
-    layout = layoutPage(cols, visibleRows * 3, hashText(url))
+    layout = layoutPage(cols, visibleRows * PAGE_WINDOWS, hashText(url))
     pitchX = width / cols
-    readAt = new Float64Array(cols * layout.rows).fill(Infinity)
-    reached = layout.blocks.map(() => false)
-    octoX = Math.round(layout.blocks[0]!.left + 2)
+    rowAt = new Float64Array(layout.rows).fill(Infinity)
+    rowFrom = new Float32Array(layout.rows)
+    readTo = -1
     const active = document.activeElement
     focusInside = active instanceof HTMLElement && form.contains(active)
     card.style.transition = 'none'
@@ -285,6 +360,14 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     startedAt = phaseAt = introAt = performance.now()
     outroAt = -Infinity
     phase = 'crawling'
+    // Full size in a wide, tall window; smaller on a phone or in a short one, so it and its arms still fit.
+    octo = createOctopus({ pitchX, pitchY, size: Math.max(0.62, Math.min(1, cols / 84, visibleRows / 24)), seed: hashText(url) })
+    mantleRows = (octo.ry + octo.belly) / pitchY
+    octoCol = octoGoal = homeCol(layout.blocks[0]!)
+    gateRow = Math.round(DOOR + mantleRows + 6 * octo.ry / (3.7 * pitchY))
+    // The gate's label keeps clear of the octopus, at the door and in the middle where it holds a failure's note.
+    gateLabel = Math.max(2, Math.min(cols - GATE_LABEL.length - 2, Math.round(Math.max(cols * 0.62, cols / 2 + octo.rx / pitchX + 5))))
+    octo.place(octoCol * pitchX, DOOR * pitchY + octo.ry, startedAt + EMERGE_AT)
     hero.classList.add('is-crawling')
     updateFoot(startedAt)
     status.textContent = 'Extracting the page. Press Escape to skip the animation.'
@@ -321,11 +404,9 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     markSteps(now)
     if (outcome.skipScene) return close().then(() => focusInside)
     if (outcome.read) {
-      words = fillWords(layout!, outcome.title, outcome.markdown)
-      wordsAt = now
-      finishFrom = depth
-      finishMs = 400 + (FINISH_MS - 400) * (1 - depth)
-      phase = 'finishing'
+      // The dive starts at once, or as soon as the octopus is whole.
+      if (now >= introAt + DIVE_AFTER_MS) startDive(now)
+      else diveAt = introAt + DIVE_AFTER_MS
     } else {
       phase = 'failed'
       note.replaceChildren(text('strong', outcome.label), ...(outcome.reason ? [text('span', outcome.reason)] : []))
@@ -335,6 +416,35 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     status.textContent = outcome.read ? 'Page read. Your result is below.' : `${outcome.label}. ${outcome.reason ?? ''}`.trim()
     updateFoot(now)
     return new Promise<void>(resolve => { closed = resolve }).then(() => focusInside)
+  }
+
+  /** A read page's last dive begins: the page is ended below, its Markdown set, and the octopus lets go. */
+  function startDive(now: number): void {
+    // The page ends DIVE_WINDOWS below the top of what the window shows now (the silhouette always reaches that far,
+    // since the walk keeps to its first WALK_WINDOWS), so the last dive is as long whenever the result comes: about
+    // three windows of page pass under the octopus. The last screen is where the page's own Markdown is
+    // set: down the main column beside the octopus where the page has a sidebar for it to land in, else in the
+    // rows above where it lands. (The row at the very top of the window is under its fade.)
+    const head = headAt()
+    const outcome = result!
+    const foot = Math.max(Math.round(scrollAt()) + Math.round(DIVE_WINDOWS * visibleRows) - 2, Math.ceil(head + mantleRows) + 4)
+    if (foot < layout!.floor) {
+      closePage(layout!, foot)
+      floorAt = now
+      depth = clamp01((head - DOOR) / (layout!.floor - mantleRows - DOOR))
+    }
+    const ground = layout!.floor
+    // (The rows it takes up once its arms are up, at the top of its hop.)
+    const cheer = Math.ceil((octo!.belly + octo!.rise) / pitchY + HOP_ROWS)
+    words = typesetPage(layout!, outcome.title, outcome.markdown, { from: Math.max(0, layout!.rows - visibleRows) + 1, to: layout!.aside ? ground - 2 : ground - cheer - 1 })
+    finishFrom = depth
+    // The longer the drop, the longer it takes.
+    finishMs = Math.max(520, Math.min(DIVE_MS, 320 + (ground - mantleRows - head) * 26))
+    diveFrom = octoCol
+    landCol = landingCol()
+    phase = 'finishing'
+    phaseAt = now
+    diveAt = Infinity
   }
 
   function skip(): void {
@@ -407,73 +517,142 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
   /** The window's height while it closes. */
   const shrinkEdge = (t: number): number => shrinkFrom - (shrinkFrom - h0) * easeIn(clamp01(t / SHRINK_MS))
 
-  /** The row the octopus's mantle starts on, from how far down the page it is; while the window opens it peeks in. */
-  function headRow(now: number): number {
-    const door = 4
-    // At the foot the octopus stands on the footer's rule, near the window's bottom.
-    const last = layout!.floor - SPRITE_H
-    const peek = Math.round((1 - easeOut(clamp01((now - introAt - 550) / 350))) * (SPRITE_H + 6))
-    return Math.round(door + depth * (last - door)) - peek
+  /** The page row the mantle's top is on (between rows while it moves), from how far down the page it is. */
+  const headAt = (): number => DOOR + depth * (layout!.floor - mantleRows - DOOR)
+  /** How far the page has scrolled under it, in rows: the mantle rides ANCHOR of the way down the window. */
+  const scrollAt = (): number => Math.max(0, Math.min(layout!.rows - visibleRows, headAt() - visibleRows * ANCHOR))
+  /** Whether the octopus may pass the gate (crawlModel.ts). */
+  const gateOpen = (): boolean => gateOpenFor(seen, robotsAllowed, result?.read === true)
+  /** The column the mantle's centre keeps to beside a block of the page. */
+  function homeCol(block: PageLayout['blocks'][number]): number {
+    const half = octo ? octo.rx / pitchX + 2 : 10
+    const at = block.left + (block.right - block.left) * (0.36 + 0.14 * ((block.top * 37) % 7) / 6)
+    return Math.max(half, Math.min(layout!.cols - half, at))
+  }
+
+  /** The column it lands on when the page was read: in the sidebar where the page has one, so the words set down
+   * the main column stand clear of it; else in the middle, under them. */
+  function landingCol(): number {
+    const { cols, aside } = layout!
+    // Room for its arms once they are thrown up.
+    const half = octo!.span / pitchX + 1
+    return Math.max(half, Math.min(cols - half, aside ? (aside.left + aside.right + 1) / 2 : cols / 2))
+  }
+
+  /** Where the failure note's top edge is on the stage, for the octopus to hold; measured once the note is laid out. */
+  function measureNote(): void {
+    if (noteTop || note.hidden || !switched || note.offsetWidth === 0) return
+    const stage = stageEl.getBoundingClientRect()
+    const box = note.getBoundingClientRect()
+    noteTop = { x: box.left + box.width / 2 - stage.left, y: box.top - stage.top }
+  }
+
+  /** The octopus's pose this frame: its size while it emerges, its stretch while it dives and its squash when it
+   * lands, what its eyes do, and how its arms behave. */
+  function pose(now: number, dt: number): void {
+    const rig = octo!
+    const born = now - introAt - EMERGE_AT
+    const grow = clamp01(born / EMERGE_MS)
+    // Past its size and back: it blooms.
+    const scale = born <= 0 ? 0 : 1 + 2.70158 * (grow - 1) ** 3 + 1.70158 * (grow - 1) ** 2
+    // At rest the mantle keeps its shape exactly (it is a stamp, typed the same every frame): only the dive's
+    // stretch and the landing's squash change it.
+    let sx = 1
+    let sy = 1
+    let heat = born > 0 ? clamp01(1 - (born - 140) / 420) : 0
+    const drop = phase === 'finishing' ? clamp01((now - phaseAt) / finishMs) : 0
+    // It gathers itself for a moment before it dives, then stretches as it falls.
+    const crouch = phase === 'finishing' ? Math.sin(Math.PI * clamp01((now - phaseAt) / 170)) : 0
+    sx *= (1 - 0.1 * drop * drop) * (1 + 0.07 * crouch)
+    sy *= (1 + 0.24 * drop * drop) * (1 - 0.13 * crouch)
+    // -1 until it has landed.
+    const since = Number.isFinite(slamAt) ? now - slamAt : -1
+    if (since >= 0) {
+      // Flat on landing, then it springs back past its shape and settles.
+      const squash = 0.4 * (since < 80 ? since / 80 : Math.exp(-(since - 80) / 140) * Math.cos((since - 80) / 55))
+      sx *= 1 + 0.75 * squash
+      sy *= 1 - squash
+      heat = Math.max(heat, clamp01(1 - since / 280))
+    }
+    const settledNow = phase === 'settled' || (phase === 'closing' && since >= 0)
+    if (phase === 'finishing') mode = 'dive'
+    else if (settledNow) mode = 'land'
+    else if (phase === 'failed') mode = 'hold'
+    const eyes: Eyes = born < EMERGE_MS + 90 ? 'shut' : since >= 0 && since < SLAP_MS ? 'squint' : settledNow ? 'happy'
+      : phase === 'failed' ? (Math.floor(now / 700) % 3 === 0 ? 'shut' : 'open') : now % 2900 < 140 ? 'shut' : 'open'
+    const look = phase === 'failed' ? 0 : octoGoal > octoCol + 0.6 || Math.floor(now / 2300) % 4 === 3 ? 1 : 0
+    const top = scrollAt()
+    // Landed, it stands on the ground; as it throws its arms up it hops.
+    const hop = since > SLAP_MS ? Math.sin(Math.PI * clamp01((since - SLAP_MS) / HOP_MS)) * pitchY * HOP_ROWS : 0
+    let y = settledNow ? layout!.floor * pitchY - rig.belly * sy - hop : headAt() * pitchY + rig.ry
+    // A page that was not read: it shakes its head.
+    const no = phase === 'failed' ? Math.sin((now - phaseAt) / 58) * Math.exp(-(now - phaseAt) / 190) * pitchX * 1.2 : 0
+    let grip: [Point, Point] | undefined
+    if (phase === 'failed' && noteTop) {
+      // It comes to rest just above the note and lays two arms on the note's top edge.
+      const edge = noteTop.y - GRID_TOP + Math.round(top) * pitchY
+      const k = easeOut(clamp01((now - phaseAt) / 500))
+      // In a short window the note sits high: the mantle then stays whole at the window's top, the note over its foot.
+      y += (Math.max(Math.round(top) * pitchY + rig.ry, Math.min(y, edge - pitchY * 1.6 - rig.belly)) - y) * k
+      const half = rig.rx * 1.05
+      grip = [{ x: octoCol * pitchX - half, y: edge + 2 }, { x: octoCol * pitchX + half, y: edge + 2 }]
+    }
+    // Until the gate opens no arm reaches past it: the tips rest on the row above. A gate that robots.txt keeps shut
+    // stays one when the run has ended (the arms then hold on to it, not to the note below); any other end lets it go.
+    const bar = gateOpen() || (phase === 'failed' && robotsAllowed !== false) ? {} : { bar: gateRow * pitchY - pitchY / 2 }
+    poseAt = { x: octoCol * pitchX + no, y }
+    poseScale = Math.min(1, scale)
+    rig.update({ now, dt, x: poseAt.x, y, scale, sx, sy, mode, eyes, look, heat, ground: layout!.floor * pitchY, ...bar, ...(grip ? { grip } : {}) })
   }
 
   function advance(now: number, dt: number): void {
+    if (phase === 'crawling' && now >= diveAt) startDive(now)
     if (phase === 'crawling') {
-      const cap = crawlCap(seen, robotsAllowed, false)
-      // Toward the cap, slower as it nears it: never past what the server has reported.
+      // Never past what the server has reported, nor, before the result, past where the window keeps the rest of the
+      // page for the last dive: the walk's share is of the page's first WALK_WINDOWS. Toward that, slower as it nears.
+      const cap = Math.min(crawlCap(seen, robotsAllowed, false), DIVE_FROM) * WALK_WINDOWS / PAGE_WINDOWS
       depth += (cap - depth) * (1 - Math.exp(-dt / (cap < depth ? 300 : 1400)))
     } else if (phase === 'finishing') {
       // It drops faster and faster, so it lands with a thud.
       const t = Math.min(1, (now - phaseAt) / finishMs)
       depth = finishFrom + (1 - finishFrom) * t * t
-      if (t >= 1) { phase = 'settled'; phaseAt = now; slamAt = now; markAll(now) }
+      // It glides across to where it will land as it falls.
+      octoCol = octoGoal = diveFrom + (landCol - diveFrom) * t * t * (3 - 2 * t)
+      if (t >= 1) { phase = 'settled'; phaseAt = now; slamAt = now; readRows(layout!.rows - 1, layout!.floor, now) }
     } else if (phase === 'failed') {
       depth += (0 - depth) * (1 - Math.exp(-dt / 160))
       if (now - phaseAt > FAILURE_MS) void close()
     } else if (phase === 'settled' && now - phaseAt > SETTLE_MS) void close()
-    // Once the result says the page was read, the blocks the mantle has reached dissolve, from where an arm touched
-    // them outward; the ones it passed before then dissolve together.
-    const head = headRow(now)
-    const reading = phase !== 'failed' && mayRead(result?.read === true)
-    layout!.blocks.forEach((block, index) => {
-      if (reached[index] || !reading || head + SPRITE_H < block.top) return
-      reached[index] = true
-      const x = Math.min(block.right, Math.max(block.left, octoX + Math.floor(SPRITE_W / 2)))
-      const y = block.top
-      reach = { x, y, at: now }
-      spread(block, x, y, now)
-    })
-    // The octopus leans toward the next block it will reach.
-    const next = layout!.blocks.find((block) => block.top > head + SPRITE_H)
-    if (next) {
-      const goal = Math.round(next.left + (next.right - next.left) * 0.3 - SPRITE_W / 2)
-      if (Math.abs(goal - octoX) > 1) octoX += Math.sign(goal - octoX)
-    }
-    octoX = Math.max(0, Math.min(layout!.cols - SPRITE_W, octoX))
+    // Once the result says the page was read, the rows the octopus has reached dissolve, from under its mantle
+    // outward: all it had passed by then together, the rest as it dives past them.
+    const head = headAt()
+    if (phase !== 'failed' && mayRead(result?.read === true)) readRows(Math.floor(head + mantleRows + 3), head + mantleRows / 2, now)
+    if (gateAt === Infinity && gateOpen()) gateAt = now
+    // The octopus leans toward the next block it will reach; a page that was not read brings it to the middle, where
+    // the note is.
+    const next = layout!.blocks.find((block) => block.top > head + mantleRows)
+    if (phase === 'failed') octoGoal = layout!.cols / 2
+    else if (next && phase === 'crawling') octoGoal = homeCol(next)
+    if (phase === 'crawling' || phase === 'failed') octoCol += (octoGoal - octoCol) * (1 - Math.exp(-dt / 520))
+    measureNote()
+    pose(now, dt)
   }
 
-  function spread(block: PageLayout['blocks'][number], x: number, y: number, now: number): void {
-    const { cols } = layout!
-    for (let row = block.top; row <= block.bottom; row++) {
-      for (let col = block.left; col <= block.right; col++) {
-        const i = row * cols + col
-        if (layout!.kind[i] === Cell.Empty || readAt[i] !== Infinity) continue
-        readAt[i] = now + (Math.abs(col - x) * 0.6 + Math.abs(row - y) * 2) * 9
-      }
+  /** Starts the dissolve of every row down to `to` that has not begun it, each a little later the further it is
+   * from row `from`. */
+  function readRows(to: number, from: number, now: number): void {
+    const last = Math.min(layout!.rows - 1, to)
+    for (let row = readTo + 1; row <= last; row++) {
+      rowAt[row] = now + Math.abs(row - from) * 14
+      rowFrom[row] = octoCol
     }
-  }
-
-  function markAll(now: number): void {
-    layout!.blocks.forEach((block, index) => {
-      if (reached[index]) return
-      reached[index] = true
-      spread(block, block.left, block.top, now)
-    })
+    readTo = Math.max(readTo, last)
   }
 
   function frame(now: number): void {
     raf = requestAnimationFrame(frame)
-    // Opening and closing run every frame; the crawl itself at about 30 fps.
-    const moving = now - introAt < INTRO_MS + WEAVE_MS || phase === 'closing'
+    // Opening, the dive, the landing and closing run every frame; the crawl itself at about 30 fps.
+    const moving = now - introAt < INTRO_MS + WEAVE_MS || phase === 'closing' || phase === 'finishing' || phase === 'settled'
     if ((!moving && now - lastFrame < FRAME_MS) || !layout || !context) return
     const dt = Math.min(100, now - (lastFrame || now))
     lastFrame = now
@@ -535,11 +714,26 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     ctx.font = `${pitchY - 3}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    const head = headRow(now)
     // After the landing the page jumps a row up and down a few times: the cells stay put, what they show shifts.
     const shakeStep = Math.floor((now - slamAt) / SHAKE_STEP_MS)
     const shake = now >= slamAt && shakeStep < SHAKE.length ? SHAKE[shakeStep]! : 0
-    const top = Math.max(0, Math.min(rows - visibleRows, head - Math.floor(visibleRows * 0.35))) - shake
+    const scroll = scrollAt()
+    const top = Math.round(scroll) - shake
+    // The cells the arms' tips hold show a little brighter: touched, not read.
+    const held = new Set<number>()
+    for (const point of octo!.holds()) {
+      const at = Math.floor(point.y / pitchY) * cols + Math.floor(point.x / pitchX)
+      held.add(at - 1).add(at).add(at + 1)
+    }
+    // The octopus lights the page around it: cells near its mantle show brighter, fading out over LIGHT rows.
+    const light = { x: poseAt.x, y: GRID_TOP + poseAt.y - top * pitchY, reach: (LIGHT * pitchY) ** 2, power: poseScale }
+    // Let in and waiting for the page, it sends a ring of that light out over the page now and then.
+    const ping = phase === 'crawling' && gateAt !== Infinity && poseScale >= 1 ? ((now - gateAt) % PING_MS) / PING_MS : -1
+    // Landed on a page with words: the ring that runs out from where it hit turns the grid into them.
+    const ground = layout!.floor
+    const turning = Number.isFinite(slamAt) && words !== null && words.lastRow >= 0
+    const ringX = octoCol * pitchX
+    const ringY = rowY(ground, top)
     const ending = phase === 'settled' ? Math.min(1, (now - phaseAt) / 300) : 0
     const failing = phase === 'failed' ? Math.min(1, (now - phaseAt) / 300) : 0
     const chromeAlpha = 0.32 - 0.2 * ending - 0.14 * failing
@@ -552,10 +746,14 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     ctx.beginPath()
     ctx.rect(0, GRID_TOP - pitchY / 2, width, height - GRID_TOP - GRID_FOOT + pitchY)
     ctx.clip()
-    for (let row = top; row < Math.min(rows, top + visibleRows + 1); row++) {
+    for (let row = Math.max(0, top); row < Math.min(rows, top + visibleRows + 1); row++) {
       const y = rowY(row, top)
-      const woven = weaving ? sinceOpen - revealedAt(y + pitchY / 2) : Infinity
+      // Behind the gate the page waits dim; once the gate has opened it comes up row by row.
+      const lit = row <= gateRow ? 1 : 0.45 + 0.55 * clamp01((now - gateAt - (row - gateRow) * 16) / 320)
+      // A row weaves in as the opening window reaches it; so does the footer of a page that was ended early.
+      const woven = Math.min(weaving ? sinceOpen - revealedAt(y + pitchY / 2) : Infinity, row >= layout!.floor ? now - floorAt : Infinity)
       if (woven < 0) continue
+      const lightRow = (y - light.y) ** 2
       const unwoven = edge - y
       for (let col = 0; col < cols; col++) {
         const i = row * cols + col
@@ -572,40 +770,50 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
           ctx.globalAlpha = 1
           continue
         }
+        // Where the landing's ring has passed, the page is its own Markdown: a cell shows its character of it, or
+        // nothing; the silhouette and its chrome are gone, all but the ground. (A page read with no words keeps the
+        // texture, so it still shows as read.)
+        if (turning && row < ground && now >= slamAt + Math.hypot(x - ringX, y - ringY) / RING_SPEED + ((i * 37) % 11) * 14) {
+          const point = words!.chars[i]!
+          if (point === 0 || point === WIDE_TAIL) continue
+          ctx.fillStyle = words!.heading[i] ? '#ffc59a' : '#f4f8ff'
+          ctx.fillText(String.fromCodePoint(point), isWide(point) ? x + pitchX / 2 : x, y)
+          continue
+        }
         if (k === Cell.Empty) continue
+        const away = (x - light.x) ** 2 + lightRow
+        const near = Math.max(0, 1 - away / light.reach)
+        const ring = ping < 0 ? 0 : Math.max(0, 1 - Math.abs(Math.sqrt(away) - ping * PING_REACH) / PING_WIDTH) * (1 - ping)
+        const glow = 1 + 1.25 * light.power * near * near + 1.5 * ring
         if (k === Cell.Chrome) {
-          ctx.fillStyle = `rgba(168, 201, 250, ${chromeAlpha})`
+          ctx.fillStyle = `rgba(168, 201, 250, ${chromeAlpha * lit * glow})`
           ctx.fillText(String.fromCharCode(glyph[i]!), x, y)
           continue
         }
-        const age = now - readAt[i]!
-        if (age < 0 || readAt[i] === Infinity) {
-          ctx.fillStyle = `rgba(168, 201, 250, ${(k === Cell.Title ? 0.5 : 0.34) - 0.2 * failing})`
+        const age = now - rowAt[row]! - Math.abs(col - rowFrom[row]!) * 5.4
+        if (!(age >= 0)) {
+          ctx.fillStyle = `rgba(168, 201, 250, ${held.has(i) ? 0.9 : Math.min(0.9, ((k === Cell.Title ? 0.5 : 0.34) - 0.2 * failing) * lit * glow)})`
           ctx.fillText(String.fromCharCode(glyph[i]!), x, y)
         } else if (age < READ_MS) {
           const step = Math.min(RAMP.length - 1, Math.floor(age / READ_MS * RAMP.length))
           ctx.fillStyle = HOT[step]!
           ctx.fillText(RAMP[step]!, x, y)
         } else {
-          // A read cell shows the page's own word once the result has it, decoding in a short stagger.
-          const word = words?.[i] ?? 0
-          const decoded = word !== 0 && now > Math.max(readAt[i]! + READ_MS, wordsAt) + ((i * 37) % 11) * 40
-          if (decoded && word === 32) continue
-          // The texture stays below the octopus's own brightness; the page's words, once decoded, are the brightest.
-          ctx.fillStyle = decoded ? (k === Cell.Title ? '#ffc59a' : '#f4f8ff') : k === Cell.Title ? 'rgba(251, 154, 108, .8)' : k === Cell.Image ? 'rgba(127, 166, 230, .6)' : 'rgba(150, 180, 235, .62)'
-          ctx.fillText(decoded ? String.fromCharCode(word) : TEXTURE[(i * 7 + (i >> 3)) % TEXTURE.length]!, x, y)
+          // Read, the cell is one glyph of a texture, kept below the octopus's own brightness.
+          ctx.fillStyle = k === Cell.Title ? 'rgba(251, 154, 108, .8)' : k === Cell.Image ? 'rgba(127, 166, 230, .6)' : 'rgba(150, 180, 235, .62)'
+          ctx.fillText(TEXTURE[(i * 7 + (i >> 3)) % TEXTURE.length]!, x, y)
         }
       }
     }
-    drawReach(now, top)
-    drawThud(now, head, top)
-    drawOctopus(now, head, top)
+    drawGate(now, top)
+    drawThud(now, top)
+    drawOctopus(scroll - shake, top)
     ctx.restore()
     // The page fades into the window's navy at its top and foot.
     const fade = (y: number, h: number, down: boolean): void => {
       const gradient = ctx.createLinearGradient(0, y, 0, y + h)
       gradient.addColorStop(down ? 0 : 1, NAVY)
-      gradient.addColorStop(down ? 1 : 0, 'rgba(8, 27, 66, 0)')
+      gradient.addColorStop(down ? 1 : 0, 'rgba(6, 22, 52, 0)')
       ctx.fillStyle = gradient
       ctx.fillRect(0, y, width, h)
     }
@@ -614,15 +822,15 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     drawBar(now)
   }
 
-  /** The landing: the ground row takes the shock both ways, a dome-shaped wave runs out from where it hit, dust rolls
-   * away along the ground, bits fly up and fall back, and the ground keeps a dent. */
-  function drawThud(now: number, head: number, top: number): void {
+  /** The landing: the ground row takes the shock both ways, rays shoot up from where it hit, a ring runs out through
+   * every cell, dust rolls away along the ground, bits fly up and fall back, and the ground keeps a dent. */
+  function drawThud(now: number, top: number): void {
     // Nothing before it has landed (slamAt stays -Infinity until then).
     if (!Number.isFinite(slamAt) || now < slamAt) return
     const since = now - slamAt
     const ctx = context!
-    const ground = head + SPRITE_H
-    const centre = octoX + SPRITE_W / 2
+    const ground = layout!.floor
+    const centre = octoCol
     const cellAt = (col: number, row: number, char: string, colour: string, alpha: number, glow = 0): void => {
       const x = col * pitchX + pitchX / 2
       const y = rowY(row, top)
@@ -655,7 +863,7 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
         // The page dims behind the burst, so the rays stand out from the read text.
         ctx.shadowBlur = 0
         ctx.globalAlpha = 1
-        ctx.fillStyle = `rgba(8, 27, 66, ${0.62 * grow * (1 - eaten)})`
+        ctx.fillStyle = `rgba(6, 22, 52, ${0.62 * grow * (1 - eaten)})`
         ctx.fillRect(0, GRID_TOP - pitchY / 2, width, height - GRID_TOP - GRID_FOOT + pitchY)
         ctx.font = `700 ${pitchY - 2}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
         const ox = centre * pitchX
@@ -685,6 +893,28 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
           }
         }
       }
+      // A ring runs out from where it hit through every cell it crosses, the empty ones too: each flares as the ring
+      // passes. Behind it the page is its own words (draw).
+      if (since < RING_MS) {
+        const radius = since * RING_SPEED
+        const fadeOut = 1 - since / RING_MS
+        const ox = centre * pitchX
+        const oy = rowY(ground, top)
+        ctx.shadowBlur = 0
+        ctx.font = `${pitchY - 3}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
+        for (let row = Math.max(0, top); row < Math.min(layout!.rows, top + visibleRows + 1); row++) {
+          const y = rowY(row, top)
+          for (let col = 0; col < layout!.cols; col++) {
+            const off = Math.abs(Math.hypot(col * pitchX + pitchX / 2 - ox, y - oy) - radius)
+            if (off > RING_WIDTH) continue
+            const empty = layout!.kind[row * layout!.cols + col] === Cell.Empty
+            if (empty && (col + row) % 2) continue
+            const core = off < RING_WIDTH * 0.4
+            cellAt(col, row, core ? (empty ? '+' : 'X') : empty ? ':' : 'x', core ? HOT[0]! : HOT[2]!, (empty ? 0.55 : 1) * fadeOut)
+          }
+        }
+        ctx.font = `700 ${pitchY - 2}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
+      }
       // Dust rolls away along the ground, slowing as it goes.
       const s = since / 1000
       for (const [speed, row, char] of DUST) {
@@ -704,9 +934,10 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     }
     // The dent stays in the ground where it hit, once the shock has passed it.
     if (since > 120) {
-      const half = Math.floor(SPRITE_W / 2) + 2
+      // As wide as the mantle and two cells more each side, about the line between two columns its stamp is centred on.
+      const half = Math.round(octo!.rx / pitchX) + 2
       const from = Math.round(centre) - half
-      for (let i = 0; i <= half * 2; i++) cellAt(from + i, ground, i === 0 ? '\\' : i === half * 2 ? '/' : '_', '#8fb3ee', 0.9)
+      for (let i = 0; i < half * 2; i++) cellAt(from + i, ground, i === 0 ? '\\' : i === half * 2 - 1 ? '/' : '_', '#8fb3ee', 0.9)
     }
     ctx.restore()
   }
@@ -790,65 +1021,82 @@ export function mountCrawlView(card: HTMLElement, hero: HTMLElement): CrawlView 
     ctx.restore()
   }
 
-  function drawReach(now: number, top: number): void {
-    if (!reach || now - reach.at > 420 || phase === 'failed') return
+  /** The gate across the page that stands for robots.txt. Shut, it is a rule of glyphs with the file's name on it, a
+   * spark running along it while the server reads the file. When the file allows the page the gate opens outward from
+   * the octopus; when it refuses, the gate turns red and stays. A run that ends some other way lets it fade. */
+  function drawGate(now: number, top: number): void {
+    if (gateRow < top || gateRow > top + visibleRows) return
     const ctx = context!
-    const fromX = octoX + Math.floor(SPRITE_W / 2)
-    const fromY = headRow(now) + SPRITE_H - 1
-    const steps = Math.max(Math.abs(reach.x - fromX), Math.abs(reach.y - fromY))
-    const life = 1 - (now - reach.at) / 420
-    for (let s = 1; s < steps; s++) {
-      const col = Math.round(fromX + (reach.x - fromX) * s / steps)
-      const row = Math.round(fromY + (reach.y - fromY) * s / steps)
-      if (row < top || row > top + visibleRows) continue
-      ctx.fillStyle = `rgba(251, 123, 76, ${0.35 + 0.65 * life})`
-      ctx.fillText(s % 3 === 0 ? '+' : ':', col * pitchX + pitchX / 2, rowY(row, top))
-    }
-  }
-
-  function drawOctopus(now: number, head: number, top: number): void {
-    const ctx = context!
-    // Dropping fast, it stretches a row taller and leaves streaks above it.
-    const drop = phase === 'finishing' ? clamp01((now - phaseAt) / finishMs) : 0
-    // How it holds itself (landing squash, hop, stride, eyes) is the octopus's own, shared with every place that draws it.
-    const pose = octopusPose({ now, failed: phase === 'failed', sinceLanding: now - slamAt, drop })
-    const lines = pose.lines
-    const row0 = head + pose.rowOffset
-    const left = octoX + pose.colOffset
-    if (drop > 0.35) {
-      const length = Math.round(1 + 4 * (drop - 0.35) / 0.65)
-      for (let k = 1; k <= length; k++) {
-        const y = rowY(row0 - k, top)
-        if (y < GRID_TOP - pitchY) break
-        ctx.globalAlpha = 0.85 * (1 - k / (length + 1))
-        ctx.fillStyle = '#a8c9fa'
-        for (let dx = 3; dx < SPRITE_W - 3; dx += 2) ctx.fillText(k === 1 ? '|' : k === 2 ? ':' : '.', (left + dx) * pitchX + pitchX / 2, y)
+    const { cols } = layout!
+    const y = rowY(gateRow, top)
+    const refused = robotsAllowed === false
+    const quiet = phase === 'failed' && !refused ? 1 - clamp01((now - phaseAt) / 300) : 1
+    const opened = now - gateAt
+    if (quiet <= 0 || opened > cols * GATE_STEP_MS + GATE_MS) return
+    const waiting = !done && seen.has('started') && robotsAllowed === null
+    const spark = (0.5 + 0.5 * Math.sin(now / 420)) * (cols - 5) + 2
+    for (let col = 2; col < cols - 2; col++) {
+      const x = col * pitchX + pitchX / 2
+      const letter = GATE_LABEL[col - gateLabel]
+      let char = letter ?? (col % 2 ? '=' : '-')
+      let colour = letter ? 'rgba(214, 230, 255, .92)' : 'rgba(168, 201, 250, .5)'
+      let alpha = quiet
+      if (refused) {
+        if (!letter) char = col % 2 ? 'x' : '+'
+        colour = letter ? '#ffb4a4' : `rgba(255, 112, 88, ${0.55 + 0.35 * Math.sin(now / 180 + col * 0.4)})`
+      } else if (opened >= 0) {
+        const age = opened - Math.abs(col + 0.5 - octoCol) * GATE_STEP_MS
+        if (age >= GATE_MS) continue
+        if (age >= 0) {
+          const step = Math.min(RAMP.length - 1, Math.floor(age / GATE_MS * RAMP.length))
+          char = letter && step < 2 ? letter : RAMP[step]!
+          colour = HOT[step]!
+        }
+      } else if (waiting && !letter) {
+        const d = Math.abs(col - spark)
+        if (d < 3.5) { char = RAMP[Math.min(RAMP.length - 1, Math.floor(d))]!; colour = HOT[Math.min(HOT.length - 1, Math.floor(d))]!; alpha = quiet * (1 - d / 5) }
       }
       ctx.globalAlpha = 1
-    }
-    lines.forEach((line, dy) => {
-      const y = rowY(row0 + dy, top)
-      if (y < GRID_TOP - pitchY || y > height - GRID_FOOT + pitchY) return
-      // The cells under the octopus are covered, so the page never shows through its mantle or between its arms.
-      const first = line.search(/\S/)
-      const last = line.length - 1 - line.split('').reverse().join('').search(/\S/)
       ctx.fillStyle = NAVY
-      ctx.fillRect((left + first - 1) * pitchX, y - pitchY / 2, (last - first + 3) * pitchX, pitchY)
-      let eye = 0
-      for (let dx = 0; dx < line.length; dx++) {
-        const char = line[dx]!
-        if (char === ' ') continue
-        const x = (left + dx) * pitchX + pitchX / 2
-        if (char === 'O') {
-          if (pose.eyes === 'squint') { ctx.fillStyle = '#ffffff'; ctx.fillText(eye++ === 0 ? '>' : '<', x, y) }
-          else if (pose.eyes === 'blink') { ctx.fillStyle = '#a8c9fa'; ctx.fillText('-', x, y) }
-          else { ctx.fillStyle = '#011758'; ctx.fillRect(x - pitchX * 0.4, y - pitchY * 0.3, pitchX * 0.8, pitchY * 0.6) }
-          continue
-        }
-        ctx.fillStyle = dy < pose.mantleRows ? '#d6e6ff' : '#a8c9fa'
-        ctx.fillText(char, x, y)
+      ctx.fillRect(col * pitchX, y - pitchY / 2, pitchX + 0.5, pitchY)
+      ctx.globalAlpha = alpha
+      ctx.fillStyle = colour
+      ctx.fillText(char, x, y)
+    }
+    ctx.globalAlpha = 1
+  }
+
+  /** The octopus's cells (crawlOctopus.ts), each on the window's grid. A cell it covers shows none of the page; the
+   * mantle keeps a cell of clear navy to either side, so the page's lines never touch it. */
+  function drawOctopus(scroll: number, top: number): void {
+    const ctx = context!
+    const cells = octo!.cells(scroll * pitchY, top * pitchY)
+    const floor = Math.floor((height - GRID_TOP - GRID_FOOT) / pitchY) + 1
+    ctx.fillStyle = NAVY
+    // Between the arms that hang below it there is no page either: each row is clear from its first arm to its last.
+    const skirt = new Map<number, [number, number]>()
+    for (const cell of cells) {
+      if (cell.row < -1 || cell.row > floor) continue
+      const mantle = cell.tone !== 'arm' && cell.tone !== 'far' && cell.tone !== 'tip'
+      ctx.fillRect((cell.col - (mantle ? 1 : 0)) * pitchX, GRID_TOP + cell.row * pitchY, pitchX * (mantle ? 3 : 1) + 0.5, pitchY)
+      if (!cell.skirt) continue
+      const span = skirt.get(cell.row)
+      if (!span) skirt.set(cell.row, [cell.col, cell.col])
+      else { span[0] = Math.min(span[0], cell.col); span[1] = Math.max(span[1], cell.col) }
+    }
+    for (const [row, [from, to]] of skirt) ctx.fillRect((from - 1) * pitchX, GRID_TOP + row * pitchY, (to - from + 3) * pitchX, pitchY)
+    for (const cell of cells) {
+      if (cell.row < -1 || cell.row > floor) continue
+      const x = cell.col * pitchX + pitchX / 2
+      const y = GRID_TOP + cell.row * pitchY + pitchY / 2
+      if (cell.tone === 'eye') {
+        ctx.fillStyle = '#011758'
+        ctx.fillRect(cell.col * pitchX, y - pitchY * 0.36, pitchX + 0.5, pitchY * 0.72)
+        if (cell.char === ' ') continue
       }
-    })
+      ctx.fillStyle = cell.heat > 0.7 ? HOT[0]! : cell.heat > 0.45 ? HOT[1]! : cell.heat > 0.2 ? HOT[2]! : INK[cell.tone]
+      ctx.fillText(cell.char, x, y)
+    }
   }
 
   /** The effects around the card while it opens and closes: its cells, the scan line, the arms and the letters. */
