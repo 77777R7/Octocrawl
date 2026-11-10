@@ -237,6 +237,7 @@ export function usage(command: Command | null): string {
       '  map <url>             list a site\'s URLs without fetching each page',
       '  serve                 run the local API (--port, --host, --hosted, --token)',
       '  login import <site>   save your login to a site from the Chrome you use, for --mode authed (octocrawl login --help)',
+      '  access-grant          accept the statement and write the access grant of the route recommended on your own machine (run it yourself)',
       '',
       'A page behind your login: --lane my-browser reads it in the Chrome you are signed in to; --mode authed reads it with a login you saved.',
       '',

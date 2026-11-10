@@ -21,6 +21,7 @@ import {
   withPoolProxy,
 } from '@w2l/contracts'
 import { COMMANDS, parseCommandLine, UsageError, usage, type Command, type CliOptions } from './flags.js'
+import { accessGrant } from './accessGrant.js'
 import { login } from './login.js'
 import { motionColor, motionWanted, startBoard, startMotion, type Board, type JobCount, type Motion, type MotionTerminal } from './motion.js'
 import { nativeModuleHelp } from './nativeModule.js'
@@ -35,6 +36,11 @@ export interface CliIo {
   signal?: AbortSignal
   /** stdout is a terminal, so a person is reading the JSON: one line on stderr says what it holds and how to get less. */
   tty?: boolean
+  /**
+   * Asks the person a question and answers what they typed, null when the input closed. Present only when a person is
+   * at a terminal to type the answer; a command that needs their own answer (`access-grant`) refuses without it.
+   */
+  ask?: (question: string) => Promise<string | null>
   /** stderr, when it is a terminal: the octopus is drawn there while a scrape, a map, a crawl or a batch runs, and while `serve` works for a caller (motion.ts). Left out, nothing is drawn. Lines written to that terminal meanwhile, `stderr`'s among them, are the terminal's to keep above the drawing (motionTerminal). */
   motion?: MotionTerminal
 }
@@ -59,6 +65,7 @@ async function dispatch(argv: readonly string[], io: CliIo): Promise<number> {
   if (name === '--version') { io.stdout(CLI_VERSION); return 0 }
   if (name === 'serve') return serve(rest, io)
   if (name === 'login') return login(rest, io)
+  if (name === 'access-grant') return accessGrant(rest, io)
   if (!(COMMANDS as readonly string[]).includes(name)) {
     io.stderr(`octocrawl: unknown command ${name}\n\n${usage(null)}`)
     return 2
