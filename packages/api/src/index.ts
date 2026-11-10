@@ -17,6 +17,7 @@ export type { ServerActivity, ServerActivityListener } from './activity.js'
 export { deliveryConfig, JOB_STREAMS_OFF_NOTICE, parseListen, parsePort } from './listen.js'
 export { loadEngineConfig, preloadEngineModules, startCaptchaSolving, tunedPolicy } from './engineConfig.js'
 export type { EngineConfig } from './engineConfig.js'
+export { defaultAccessGrantFile, LOCAL_GRANT_STATEMENT, localGrantText } from './localGrant.js'
 export { runApiServer } from './cli.js'
 // The result files a job ends with, and the CLI's `--out` writes: one column set for both.
 export { csvField, csvLine, evidenceRow, markdownFileName, RESULT_COLUMNS, RESULT_CSV, RESULT_FILE_COLUMNS, RESULT_JSONL, RESULT_MARKDOWN_DIR, resultFilesOf, writeResultFiles } from './resultFiles.js'

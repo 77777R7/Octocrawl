@@ -39,11 +39,21 @@ Without `access`, a request runs as the server is configured. A batch or crawl k
 
 ### The recommended route on your own machine
 
-On a server that runs on your machine, the enhanced route Octocrawl recommends is `installed_chrome` with `compatible_transport`. `installed_chrome` reads a page that stopped at a check in the Google Chrome installed on that machine. `compatible_transport` reads the pages of a few hosts over a browser-compatible HTTP transport first (under `compatible_transport` below). It is a recommendation, not a default: it stays off until you turn it on, and Octocrawl never writes the grant for you. Neither part pays a third party.
+On a server that runs on your machine, the enhanced route Octocrawl recommends is `installed_chrome` with `compatible_transport`. `installed_chrome` reads a page that stopped at a check in the Google Chrome installed on that machine. `compatible_transport` reads the pages of a few hosts over a browser-compatible HTTP transport first (under `compatible_transport` below). It is a recommendation, not a default: it stays off until you turn it on, and the grant is yours to accept: no server and no agent writes it for you. Neither part pays a third party.
 
 To turn it on:
 
-1. Write a grant that names both, with your own attestation, and start the server with it. The `octocrawl` commands and the local MCP service read the same grant from `W2L_ACCESS_GRANT` ([local setup](local-setup.md#the-managed-local-service)).
+1. Get a grant that names both, with your own attestation, and start the server with it. The `octocrawl` commands and the local MCP service read the same grant from `W2L_ACCESS_GRANT` ([local setup](local-setup.md#the-managed-local-service)).
+
+   Run this yourself, in a terminal:
+
+   ```bash
+   octocrawl access-grant
+   ```
+
+   It shows the statement below, asks for your name or e-mail, and writes the grant once you type `I accept`: to `access-grant.json` beside your saved logins (`~/.w2l`, or the folder of `W2L_SESSIONS_FILE`), readable by you alone, or to `--out <file>`. Then it prints the two ways to start with that file. It is yours to run: it writes nothing where nobody can type the answer (a pipe, a script, an agent's shell), no option answers for you, and no API route or MCP tool calls it. An agent that meets the hint about this route asks you to run the command; it must not run it for you. A file already there is left as it is, and nothing reads the file unasked: deleting it and restarting the server takes the grant back.
+
+   Or write the same file by hand:
 
    ```json
    {
@@ -54,7 +64,7 @@ To turn it on:
    ```
 
    ```bash
-   octocrawl serve --access-grant grant.json
+   octocrawl serve --access-grant ~/.w2l/access-grant.json
    ```
 
 2. Ask for it on the request: `"access": "enhanced"`, `--access enhanced` on the command line, or `access: "enhanced"` on the MCP tools.

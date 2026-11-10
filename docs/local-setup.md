@@ -83,9 +83,11 @@ browser-compatible HTTP transport first, it is the enhanced route Octocrawl
 recommends on your own machine. Neither pays a third party, and Octocrawl no
 longer recommends Steel. The route stays off until you turn it on:
 
-- Write an access grant that names `installed_chrome` and
-  `compatible_transport`, with your own attestation. Octocrawl never writes it
-  for you.
+- Run `octocrawl access-grant` yourself, in a terminal: it shows the statement,
+  and writes a grant that names `installed_chrome` and `compatible_transport`
+  with your own attestation once you type `I accept`
+  ([access](access.md#the-recommended-route-on-your-own-machine)). Or write
+  that file by hand. No server and no agent writes it for you.
 - Start the server with it: `octocrawl serve --access-grant grant.json`, or
   `W2L_ACCESS_GRANT` for the `octocrawl` commands and the managed local
   service above.
