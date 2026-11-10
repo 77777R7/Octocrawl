@@ -20,6 +20,7 @@ import {
   withPoolProxy,
 } from '@w2l/contracts'
 import { COMMANDS, parseCommandLine, UsageError, usage, type Command, type CliOptions } from './flags.js'
+import { accessGrant } from './accessGrant.js'
 import { login } from './login.js'
 import { nativeModuleHelp } from './nativeModule.js'
 
@@ -33,6 +34,11 @@ export interface CliIo {
   signal?: AbortSignal
   /** stdout is a terminal, so a person is reading the JSON: one line on stderr says what it holds and how to get less. */
   tty?: boolean
+  /**
+   * Asks the person a question and answers what they typed, null when the input closed. Present only when a person is
+   * at a terminal to type the answer; a command that needs their own answer (`access-grant`) refuses without it.
+   */
+  ask?: (question: string) => Promise<string | null>
 }
 
 /** Exit codes: 0 a contentful page or a completed job, 1 anything else W2L answered, 2 a refused command line, 130 interrupted. */
@@ -55,6 +61,7 @@ async function dispatch(argv: readonly string[], io: CliIo): Promise<number> {
   if (name === '--version') { io.stdout(CLI_VERSION); return 0 }
   if (name === 'serve') return serve(rest, io)
   if (name === 'login') return login(rest, io)
+  if (name === 'access-grant') return accessGrant(rest, io)
   if (!(COMMANDS as readonly string[]).includes(name)) {
     io.stderr(`octocrawl: unknown command ${name}\n\n${usage(null)}`)
     return 2
