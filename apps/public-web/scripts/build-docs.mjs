@@ -452,7 +452,7 @@ for (const [path, title, description, body, layout] of [
   await writeFile(join(root, 'dist', path.slice(1), 'index.html'), versionPublicAssets(accountPageHtml(path, title, description, body, layout), join(root, 'public')))
 }
 
-// The dashboard (scripts/dashboardPages.mjs): one sidebar, eight pages, all filled by dashboard.js.
+// The dashboard (scripts/dashboardPages.mjs): one sidebar, nine pages, all filled by dashboard.js.
 for (const [path, title, lead, body] of DASHBOARD_BODIES) {
   await mkdir(join(root, 'dist', path.slice(1)), { recursive: true })
   await writeFile(join(root, 'dist', path.slice(1), 'index.html'), versionPublicAssets(dashboardPageHtml(path, title, lead, body, assetVersions), join(root, 'public')))

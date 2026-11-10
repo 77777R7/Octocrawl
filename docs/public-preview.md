@@ -1,11 +1,10 @@
-# W2L public preview
+# Octocrawl public preview
 
 The first-use page accepts one public HTTP(S) URL and shows readable content, the final URL, the result state, and elapsed time; for an ordinary page it also shows the page's links and metadata, and up to 20 fields the visitor names, read from the page without a model. Amazon.sg `/dp/{ASIN}` pages also show a fixed product record. It exposes a price only when the selected ASIN, Singapore delivery context, and SGD currency can be verified; otherwise the product record is marked incomplete with explicit issues. Crawl, batches, and Monitor remain separate authenticated/persistent workflows.
 
 The same static build includes an English `/docs/` site generated from
 `apps/public-web/content/`. It links the first page trial to the locally
-verified Codex MCP path and separates that from the hosted login and MCP URL, which the roadmap has paused
-([ROADMAP.md](../ROADMAP.md#paused)). The docs use the Hero's language on a quieter reading area: its mountain artwork in the header, dotted rules, numbered sections with an "On this page" list that marks the section being read, ledger tables, and code blocks drawn as session sheets with numbered lines (copying takes the code alone).
+verified Codex MCP path and separates that from the hosted sign-in and MCP URL ([Hosted Octocrawl](hosted-api.md)). The docs use the Hero's language on a quieter reading area: its mountain artwork in the header, dotted rules, numbered sections with an "On this page" list that marks the section being read, ledger tables, and code blocks drawn as session sheets with numbered lines (copying takes the code alone).
 
 The Hero fills the first screen (`100svh`; it grows only when its content needs more room) over the static mountain artwork. On screens at least 760 px tall, a small *See what comes back* link at its foot points to the recorded results, and to *Recent runs* after a first extraction. The help line under the URL card shows the visitor's previews left today from `GET /api/quota` (read-only and never cached while previews remain, since a preview on the other instance may have used one; a used-up day is cached until 00:00 UTC; at most 120 lookups, two Firestore document reads each, a minute per instance); when the count cannot be read it keeps the static text.
 

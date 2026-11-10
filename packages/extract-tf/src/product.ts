@@ -1266,7 +1266,7 @@ export function collectProductFacts(doc: Document): ProductFacts {
   return facts
 }
 
-/** True when no field of a ProductFacts was stated. */
+/** True when at least one field of a ProductFacts was stated. */
 export function hasAnyProductFact(facts: ProductFacts): boolean {
   return Object.values(facts).some((f) => f !== null)
 }

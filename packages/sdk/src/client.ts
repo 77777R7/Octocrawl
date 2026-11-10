@@ -463,7 +463,7 @@ export class W2L {
 
   /** A page of a batch's items; `fields` keeps only the named item fields (plus id, url, status, createdAt), so the answer is then a list of CrawlPageProjection. */
   async getBatchItems<O extends CrawlPageQuery = CrawlPageQuery>(id: string, options: O = {} as O, request: RequestOptions = {}): Promise<CrawlPageList<ListedPage<O>>> {
-    return this.getPageList<ListedPage<O>>(`/v1/batches/${encodeURIComponent(id)}/items`, options, request)
+    return this.getPageList<ListedPage<O>>(`/v1/batches/${encodeURIComponent(id)}/items`, options, request, `batch not found: ${id}`)
   }
 
   /** Every item of a batch, page by page (at most 50 per request), or as many as the PaginationLimits allow; the generator's return value says where it stopped. */
@@ -616,7 +616,7 @@ export class W2L {
 
   /** A page of a crawl's pages; `fields` keeps only the named item fields (plus id, url, status, createdAt), so the answer is then a list of CrawlPageProjection. */
   async getCrawlPages<O extends CrawlPageQuery = CrawlPageQuery>(id: string, options: O = {} as O, request: RequestOptions = {}): Promise<CrawlPageList<ListedPage<O>>> {
-    return this.getPageList<ListedPage<O>>(`/v1/crawl/${encodeURIComponent(id)}/pages`, options, request)
+    return this.getPageList<ListedPage<O>>(`/v1/crawl/${encodeURIComponent(id)}/pages`, options, request, `crawl not found: ${id}`)
   }
 
   /**
@@ -678,7 +678,7 @@ export class W2L {
 
   /** A page of a crawl's errors; `fields` keeps only the named item fields (plus id, url, status, createdAt), so the answer is then a list of CrawlPageProjection. */
   async getCrawlErrors<O extends CrawlPageQuery = CrawlPageQuery>(id: string, options: O = {} as O, request: RequestOptions = {}): Promise<CrawlPageList<ListedError<O>>> {
-    return this.getPageList<ListedError<O>>(`/v1/crawl/${encodeURIComponent(id)}/errors`, options, request)
+    return this.getPageList<ListedError<O>>(`/v1/crawl/${encodeURIComponent(id)}/errors`, options, request, `crawl not found: ${id}`)
   }
 
   async cancelCrawl(id: string, request: RequestOptions = {}): Promise<CrawlReport> {
@@ -851,7 +851,7 @@ export class W2L {
     return (await res.json()) as T
   }
 
-  private async getPageList<T>(path: string, options: CrawlPageQuery, request: RequestOptions): Promise<CrawlPageList<T>> {
+  private async getPageList<T>(path: string, options: CrawlPageQuery, request: RequestOptions, notFound: string): Promise<CrawlPageList<T>> {
     const params = new URLSearchParams()
     if (options.cursor !== undefined) params.set('cursor', options.cursor)
     if (options.limit !== undefined) params.set('limit', String(options.limit))
@@ -860,7 +860,7 @@ export class W2L {
     if (options.includeDuplicates !== undefined) params.set('includeDuplicates', String(options.includeDuplicates))
     if (options.fields !== undefined) params.set('fields', options.fields.join(','))
     const suffix = params.size === 0 ? '' : `?${params.toString()}`
-    return this.get<CrawlPageList<T>>(`${path}${suffix}`, request, `crawl not found: ${path}`)
+    return this.get<CrawlPageList<T>>(`${path}${suffix}`, request, notFound)
   }
 
   private async get<T>(path: string, request: RequestOptions, notFound?: string): Promise<T> {

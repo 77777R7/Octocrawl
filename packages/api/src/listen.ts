@@ -202,7 +202,7 @@ function parseRateLimit(argv: readonly string[], env: NodeJS.ProcessEnv): { perM
 export function parsePort(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): number {
   const raw = readFlag(argv, '--port') ?? env['W2L_API_PORT'] ?? '8787'
   const port = Number(raw)
-  if (!Number.isFinite(port) || port < 1) throw new Error('--port must be a positive integer')
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error('--port must be a whole number from 1 to 65535')
   return port
 }
 

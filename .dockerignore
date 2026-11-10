@@ -1,6 +1,7 @@
 .git
 node_modules
 .w2l
+.claude
 **/dist
 **/*.tsbuildinfo
 research/*

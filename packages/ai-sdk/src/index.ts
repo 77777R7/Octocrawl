@@ -130,7 +130,7 @@ const mapInput = z.object({
   url: z.string().describe('The http(s) URL of the site or section to list.'),
   search: z.string().optional()
     .describe('Keep only the URLs whose address or title contains every word given (at most 10), case-insensitively.'),
-  limit: z.number().int().min(1).max(5000).optional().describe('How many URLs at most; default 100.'),
+  limit: z.number().int().min(1).max(5000).optional().describe('How many URLs at most; default 5000.'),
   includeSubdomains: z.boolean().optional().describe('Also list URLs on subdomains of the start host. Default false.'),
   sitemap: z.enum(['include', 'skip', 'only']).optional()
     .describe('include (default): the start page\'s links and the sitemaps; skip: no sitemap; only: the sitemap entries alone.'),

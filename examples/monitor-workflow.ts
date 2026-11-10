@@ -50,8 +50,8 @@ async function main(): Promise<void> {
             return
           }
           res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', etag })
-          res.end(`<!doctype html><html><head><title>W2L sample product</title></head><body><main><article>
-            <h1>W2L sample product</h1><h2>Price</h2><p>${price}</p><h2>Description</h2>
+          res.end(`<!doctype html><html><head><title>Octocrawl sample product</title></head><body><main><article>
+            <h1>Octocrawl sample product</h1><h2>Price</h2><p>${price}</p><h2>Description</h2>
             <p>This controlled demonstration product supplies a stable public document identity and an exact decimal price.
             Its source content is deliberately served from this developer-owned local process. The example changes only
             the price field so that a developer can inspect a committed baseline, an unchanged conditional request and
@@ -83,7 +83,7 @@ async function main(): Promise<void> {
         monitorId, revision: 1, url: sourceUrl, ruleVersion: 'sample-price/v1',
         intervalMs: 60_000, staleAfterMs: 180_000,
         config: { adapter: 'markdown-sections/v1', workspaceId: 'onboarding', entityKey: 'sample-product', viewKey: 'public',
-          expectedTitle: 'W2L sample product', schemaVersion: 'sample-price/v1', captureMode: 'http', conditionalRequests: true,
+          expectedTitle: 'Octocrawl sample product', schemaVersion: 'sample-price/v1', captureMode: 'http', conditionalRequests: true,
           fields: [{ name: 'price', heading: 'Price', type: 'decimal', required: true, currency: 'USD' }] },
       })
       const webhookUrl = process.env.W2L_WEBHOOK_URL

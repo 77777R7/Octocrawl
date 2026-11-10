@@ -81,7 +81,7 @@ export interface CliOptions {
   handoff?: boolean
   /** crawl: resume this crawl (its task id) instead of starting one. */
   resume?: string
-  /** The task root (default `W2L_TASK_ROOT`, else `.w2l/api`). */
+  /** The task root (default `W2L_TASK_ROOT`, else `.w2l/cli`). */
   taskRoot?: string
   help?: boolean
 }

@@ -62,7 +62,7 @@ npm test
 
 The packages are released together, at one version: `octocrawl` and `@octocrawl/cli` (the CLI), `@octocrawl/sdk`, `@octocrawl/mcp`, `@octocrawl/ai-sdk` and the Python client `octocrawl-client`.
 
-1. `node scripts/release-version.mjs set X.Y.Z` writes the version everywhere it lives (the four package manifests, the CLI's, MCP server's, SDK's and AI SDK tools' version constants, the Python client's two) and updates the lockfile; `check` confirms they agree.
+1. `node scripts/release-version.mjs set X.Y.Z` writes the version everywhere it lives (the four package manifests, the CLI's, MCP server's, SDK's and AI SDK tools' version constants, the Python client's two, `server.json` and the two plugin manifests) and updates the lockfile; `check` confirms they agree.
 2. Add the CHANGELOG entry, merge through a PR as usual, then tag the merge: `git tag -s vX.Y.Z` and push the tag.
 3. The `Release` workflow (`.github/workflows/release.yml`) checks that every version says X.Y.Z, runs the type check and the tests, packs the npm packages and installs them in a new project (`scripts/check-packages.mjs`), installs the CLI on Linux, Windows and macOS and scrapes over its native modules, better-sqlite3 and impit (`scripts/check-native-deps.mjs`; the `Native dependencies` workflow runs the same on a pull request that changes what is installed), builds and checks the Python client, then publishes to npm and PyPI through trusted publishing. No token is stored; npm records each package's provenance. A version already published is skipped, so a failed run can be run again.
 
@@ -109,9 +109,9 @@ npm run test:live
 npm run bench
 ```
 
-Test files run in parallel, except two groups that run after the rest, so that no other file shares the machine with them (see `vitest.config.ts`):
+Linux CI runs the existing `unit`, `timed` and `perf` projects on separate runners, each with a 15-minute budget (25 minutes for `timed`). `timed` still uses two workers and `perf` runs one file at a time. The `unit` job also runs the 1,000-URL crash-recovery check; each runner checks for orphaned Chromium processes and uploads its test report. The required `test` check succeeds only when every Linux project succeeds. Local `npm test` still runs all three projects in order.
 
-Linux CI runs the existing `unit`, `timed` and `perf` projects on separate runners, each with a 15-minute budget. `timed` still uses two workers and `perf` runs one file at a time. The `unit` job also runs the 1,000-URL crash-recovery check; each runner checks for orphaned Chromium processes and uploads its test report. The required `test` check succeeds only when every Linux project succeeds. Local `npm test` still runs all three projects in order.
+Test files run in parallel, except two groups that run after the rest, so that no other file shares the machine with them (see `vitest.config.ts`):
 
 - **A test that bounds the time of a piece of code** (a page converted in under so many seconds, or a cost that grows linearly) goes in a `*.perf.test.ts` file next to the module's test file. These files run last, one at a time. On CI the files run side by side on a few cores, and such bounds failed there whenever a heavy file ran beside them. Even then, measure against a reference run at the same moment (as `detectList.perf.test.ts` measures against parsing the page) rather than against a fixed number of milliseconds.
 - **A test that calls a live website** is named `*.live.test.ts`. `npm test` leaves these out, so that it passes offline and is not failed by a site's own changes; `npm run test:live` runs them.

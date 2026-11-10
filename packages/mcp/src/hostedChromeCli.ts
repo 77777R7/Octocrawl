@@ -7,8 +7,7 @@
  *   PORT                the port to listen on (Cloud Run sets it; default 8080)
  *   DISPLAY             the Xvfb display Chrome opens its window on (start.sh sets :99)
  *   W2L_CHROME_PATH     the pinned Google Chrome (the image's /usr/bin/google-chrome-stable is found without it)
- *   W2L_OPERATOR_CONTACT, W2L_OPERATOR_URL
- *                       the operator's contact, as on the hosted API (hostedChromePolicy)
+ *   W2L_CONTACT         the operator's contact, as on the hosted API (hostedChromePolicy)
  *   W2L_HOSTED_CHROME_PROXIES_FILE
  *                       the datacenter proxy list (D2, 2026-10-29), a Secret Manager secret mounted as a file of
  *                       `host:port:user:pass` lines; unset, the service leaves from Cloud Run's own egress

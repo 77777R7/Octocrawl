@@ -2,7 +2,7 @@
 
 Instructions for an AI agent (such as Cline) that is adding Octocrawl to a user's MCP settings. Octocrawl reads web pages for agents: `scrape` returns a page as Markdown (or JSON, links, HTML), `map` lists a site's URLs, and every answer carries an Evidence Record (final URL, HTTP status, robots.txt decision, hashes of what was read).
 
-There are two ways to install it. Use option 1 unless the user asks to run everything locally or needs `crawl`, `batch_scrape` or the Monitor tools.
+There are two ways to install it. Use option 1 unless the user asks to run everything locally or needs the Monitor tools, or `crawl` or `batch_scrape` without an Octocrawl account.
 
 ## Option 1: hosted Octocrawl (recommended, nothing to install)
 
@@ -29,7 +29,7 @@ Or add this server to the MCP settings file (in the Cline extension, `cline_mcp_
 
 - No account, no API key and no environment variables are needed.
 - Tools: `scrape` and `map`, over HTTP. The allowance is 20 pages a day per address; it resets at 00:00 UTC, and the tool's answer says so when it is used up.
-- If the user has an Octocrawl key (it starts with `oc_`), add it as a header, never in the URL: `"headers": { "Authorization": "Bearer oc_…" }`. A key raises the daily allowance and, when the key allows it, adds the browser lane and `scrape_product`.
+- If the user has an Octocrawl key (it starts with `oc_`), add it as a header, never in the URL: `"headers": { "Authorization": "Bearer oc_…" }`. A key raises the daily allowance and, when the key allows it, adds the browser lane and `scrape_product`. An account's key also adds `crawl` (up to 500 pages) and `batch_scrape` (up to 1,000 URLs) as hosted jobs.
 
 ## Option 2: run Octocrawl on the user's computer (every tool, no daily limit)
 

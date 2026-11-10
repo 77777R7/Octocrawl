@@ -390,7 +390,7 @@ export function mapPreviewResult(requestedUrl: string, normalized: NormalizedPre
   const quoteState = result.document?.product?.quoteState
   const quoteMissing = typeof extractedPrice !== 'number' || !Number.isFinite(extractedPrice) || (quoteState !== undefined && quoteState !== 'present')
   let reason = status === 'success' ? null
-    : status === 'blocked' ? robotsUnreachable ? 'This site\'s robots.txt could not be read, so W2L did not fetch the page.'
+    : status === 'blocked' ? robotsUnreachable ? 'This site\'s robots.txt could not be read, so Octocrawl did not fetch the page.'
       : robotsDenied ? 'This site does not allow automated preview of this page.'
       : result.blockReason === 'bot_detected_generic' || result.blockReason === 'captcha' ? 'The site returned a verification page instead of the requested content.'
         : result.blockReason === 'login_wall' ? 'The page requires a login.'
