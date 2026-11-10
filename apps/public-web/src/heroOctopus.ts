@@ -7,6 +7,7 @@
  * into. It tells the hero when it first draws, when it wakes and when it stops for good (w2l:octopus), and it keeps
  * still while it rests, off screen and in a hidden tab. */
 import './heroOctopus.css'
+import { framePace } from './framePace'
 
 // The artwork's contours set the octopus's glyph scale and colours.
 const ARTWORK_SRC = '/assets/mountain-hero.webp'
@@ -149,7 +150,8 @@ const GROUND_MS = 150
 const GROUND_SEED = 113
 // The frame loop runs at about 30 fps. A frame later than SLOW_MS counts as slow (layout work aside): a device too
 // slow from the start stops at once, and later only a sustained slowdown (90 net slow frames, 7 s or more) stops it,
-// so a passing burst of jank never ends the looping hero for the visit.
+// so a passing burst of jank never ends the looping hero for the visit. Nothing counts while the loop settles after it
+// starts or wakes (framePace.ts).
 const FRAME_MS = 33
 const SLOW_MS = 80
 const SLOW_START = 8
@@ -1533,8 +1535,7 @@ export function mountHeroOctopus(cell: HTMLElement): () => void {
   let running = false
   let frameId = 0
   let lastFrame = 0
-  let firstFrame = 0
-  let slowFrames = 0
+  const pace = framePace({ slowMs: SLOW_MS, earlyMs: SLOW_START_MS, earlyLimit: SLOW_START, laterLimit: SLOW_LATER })
   // Layout work never counts as a slow frame.
   let layoutChanged = false
   let resizeTimer = 0
@@ -1555,7 +1556,7 @@ export function mountHeroOctopus(cell: HTMLElement): () => void {
     if (!live || running || stalled || document.hidden || !visible) return
     running = true
     lastFrame = 0
-    slowFrames = 0
+    pace.start(performance.now())
     frameId = requestAnimationFrame(frame)
   }
   const sleep = (): void => {
@@ -1566,11 +1567,9 @@ export function mountHeroOctopus(cell: HTMLElement): () => void {
     if (!running) return
     frameId = requestAnimationFrame(frame)
     if (now - lastFrame < FRAME_MS) return
-    if (lastFrame && now - lastFrame > SLOW_MS && !layoutChanged) slowFrames += 1
-    else slowFrames = Math.max(0, slowFrames - 1)
+    const gap = lastFrame && !layoutChanged ? now - lastFrame : 0
     layoutChanged = false
-    firstFrame ||= now
-    if (slowFrames >= (now - firstFrame < SLOW_START_MS ? SLOW_START : SLOW_LATER)) {
+    if (pace.tooSlow(now, gap)) {
       halt()
       return
     }

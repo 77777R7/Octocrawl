@@ -121,6 +121,28 @@ describe('the hero octopus', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
+  it('keeps going through slow frames while it settles, and stops on a device that stays slow', async () => {
+    let gap = 120
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => setTimeout(() => callback(performance.now()), gap))
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => clearTimeout(id))
+    // A busy browser for the first second and a half (a page restored after a discard), then frames on time.
+    const busy = await mount()
+    onScreen([{ isIntersecting: true }])
+    await vi.advanceTimersByTimeAsync(1500)
+    gap = 16
+    await vi.advanceTimersByTimeAsync(4000)
+    expect(busy.states).toEqual(['running', 'awake'])
+    busy.dispose()
+
+    // A device that never gets faster still gives the motion up.
+    gap = 120
+    const slow = await mount()
+    onScreen([{ isIntersecting: true }])
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(slow.states.at(-1)).toBe('stalled')
+    slow.dispose()
+  })
+
   it('says it stalled, and draws nothing, when its source has no octopus in it', async () => {
     octopusSource = false
     const { cell, states, dispose, counts } = await mount()
