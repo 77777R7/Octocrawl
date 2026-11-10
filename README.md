@@ -193,8 +193,11 @@ The bare HTTP baseline has a high false-success rate on purpose. It has no conte
 ```
 packages/
   contracts/       TypeScript types and ground-truth schema (MIT)
-  fixtures/        HTTP server with 56 ground-truth test cases
+  fixtures/        HTTP server with 62 ground-truth test cases
   http-core/       robots.txt parser (ReDoS-resistant)
+  attest/          Ed25519 signer for compliance records (no product path calls it yet)
+  canary/          The live-site canary suite `npm run canary` reads
+  octopus/         The crawl window's octopus, drawn without the DOM
   extract-tf/      Content extraction, HTML → Markdown, PDF text
   runtime/         TaskStore, frontier, bounded crawl orchestrator
   bench/           Benchmark runner, ladder CLI (w2l-ladder), scoring

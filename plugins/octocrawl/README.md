@@ -25,7 +25,7 @@ The first time it is used, run `/mcp` in Claude Code, choose the plugin's octocr
 ## What it sends and fetches
 
 - Each tool call goes to `https://mcp.octocrawl.dev/mcp-oauth` with the address you asked about and the call's options. Octocrawl's servers then fetch that page; your computer does not.
-- The tools are `scrape` (one page) and `map` (the addresses on a site), plus `scrape_product` when the connection has the browser lane. Hosted Octocrawl obeys robots.txt for every address and refuses private network addresses.
+- The tools are `scrape` (one page), `map` (the addresses on a site), `crawl` (up to 500 pages) and `batch_scrape` (up to 1,000 URLs) with their status, results, wait and cancel tools, plus `scrape_product` when the connection has the browser lane. Hosted Octocrawl obeys robots.txt for every address and refuses private network addresses.
 - Calls spend your account's credits: 1 per page read over HTTP, 5 per page read in a browser, 1 per map. Activity in your dashboard lists each call.
 - What the service records, and for how long, is in the [privacy policy](https://octocrawl.dev/docs/privacy/).
 
@@ -33,7 +33,7 @@ The first time it is used, run `/mcp` in Claude Code, choose the plugin's octocr
 
 The connection is listed under MCP connections on [API keys](https://octocrawl.dev/dashboard/keys/), where Disconnect ends it at once; it also ends after 90 days unused.
 
-Crawls, batches, Monitors and saved logins run on your own computer instead, with `npx octocrawl serve` and the `@octocrawl/mcp` server; see [Connect an agent](https://octocrawl.dev/docs/connect-mcp/).
+Monitors and saved logins, and crawls or batches beyond those limits, run on your own computer instead, with `npx octocrawl serve` and the `@octocrawl/mcp` server; see [Connect an agent](https://octocrawl.dev/docs/connect-mcp/).
 
 ## License
 

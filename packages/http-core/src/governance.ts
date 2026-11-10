@@ -3,9 +3,9 @@
  *
  * Three guards, all applied BEFORE a channel runs:
  *
- *  1. Mode. `public` means HTTP + local browser only, on public pages. The
+ *  1. Mode. `standard` means HTTP + local browser only, on public pages. The
  *     more capable channels (vendor, authed session, handoff) exist for
- *     higher modes (`assisted`, `authed`) and cannot be reached otherwise.
+ *     higher modes (`research`, `authed`) and cannot be reached otherwise.
  *
  *  2. Domain allowlist. When the policy carries allowlistedDomains, a URL
  *     whose host is not on it is refused before any network work. The

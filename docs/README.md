@@ -34,7 +34,7 @@ This folder holds Octocrawl's reference, guides, design decisions and dated reco
 
 ## Decisions
 
-[ADRs](adr/) record design decisions (in Chinese): [0001 Playwright](adr/0001-direct-playwright.md), [0002 Node.js runtime](adr/0002-node-canonical-runtime.md), [0003 storage interface](adr/0003-storage-behind-interface.md), [0004 anti-bot as a coverage ladder](adr/0004-anti-bot-as-coverage-ladder.md), [0005 enhanced access policy](adr/0005-enhanced-access-policy.md), [0006 Task verification](adr/0006-task-verification.md).
+[ADRs](adr/) record design decisions (in Chinese): [0001 Playwright](adr/0001-direct-playwright.md), [0002 Node.js runtime](adr/0002-node-canonical-runtime.md), [0003 storage interface](adr/0003-storage-behind-interface.md), [0004 anti-bot as a coverage ladder](adr/0004-anti-bot-as-coverage-ladder.md), [0005 enhanced access policy](adr/0005-enhanced-access-policy.md), [0006 Task verification](adr/0006-task-verification.md), [0007 region readiness](adr/0007-region-readiness.md).
 
 ## Plans and records
 

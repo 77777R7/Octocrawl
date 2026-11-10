@@ -212,3 +212,37 @@ describe('compileRule — pattern retention', () => {
     expect(compileRule('/foo*.html$', false).pattern).toBe('/foo*.html$')
   })
 })
+
+describe('robots.txt groups a publisher wrote loosely', () => {
+  it('a User-agent line with no token names no crawler, so it does not outrank *', () => {
+    const doc = parseRobotsTxt('User-agent:\nAllow: /\n\nUser-agent: *\nDisallow: /private\n')
+    const verdict = evaluateRobots(doc, 'Mozilla/5.0 (compatible; w2l-research/0.1)', '/private/x')
+    expect(verdict.allowed).toBe(false)
+    expect(verdict.matchedAgent).toBe('*')
+  })
+
+  it('a User-agent line with no token still ends the group before it', () => {
+    const doc = parseRobotsTxt('User-agent: *\nDisallow: /a\nUser-agent:\nDisallow: /b\n')
+    expect(doc.groups).toHaveLength(1)
+    expect(doc.groups[0]!.rules.map((rule) => rule.pattern)).toEqual(['/a'])
+  })
+
+  it('several groups for one token are read as one group (RFC 9309 §2.2.1)', () => {
+    const star = parseRobotsTxt('User-agent: *\nDisallow: /a\n\nUser-agent: other\nDisallow: /\n\nUser-agent: *\nDisallow: /b\nCrawl-delay: 2\n')
+    expect(evaluateRobots(star, 'w2l-research/0.1', '/a/x').allowed).toBe(false)
+    expect(evaluateRobots(star, 'w2l-research/0.1', '/b/x').allowed).toBe(false)
+    expect(evaluateRobots(star, 'w2l-research/0.1', '/c').allowed).toBe(true)
+    expect(evaluateRobots(star, 'w2l-research/0.1', '/c').crawlDelayMs).toBe(2000)
+
+    const named = parseRobotsTxt('User-agent: w2l-research\nDisallow: /a\n\nUser-agent: *\nDisallow: /\n\nUser-agent: w2l-research\nDisallow: /b\n')
+    const verdict = evaluateRobots(named, 'w2l-research/0.1', '/b/x')
+    expect(verdict.allowed).toBe(false)
+    expect(verdict.matchedAgent).toBe('w2l-research')
+    expect(evaluateRobots(named, 'w2l-research/0.1', '/c').allowed).toBe(true)
+  })
+
+  it('a single matching group is returned as parsed', () => {
+    const doc = parseRobotsTxt('User-agent: *\nDisallow: /a\n')
+    expect(matchRobotsGroup(doc, 'w2l/0.1')).toBe(doc.groups[0])
+  })
+})

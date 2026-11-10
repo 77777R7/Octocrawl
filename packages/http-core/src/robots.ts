@@ -241,7 +241,8 @@ export function parseRobotsTxt(text: string): RobotsTxt {
     switch (field) {
       case 'user-agent':
         if (sawRuleInGroup) flush()
-        agents.push(value.toLowerCase())
+        // A line with no token names no crawler. Recorded as '' it would be held by every User-Agent and outrank `*`.
+        if (value !== '') agents.push(value.toLowerCase())
         break
       case 'allow':
       case 'disallow':
@@ -278,27 +279,31 @@ export function parseRobotsTxt(text: string): RobotsTxt {
  * used when no product token matches.  Returns null when neither applies —
  * "no group for this UA" is a distinct fact from "a group that allows
  * everything", and the compliance record reports it as such.
+ *
+ * A file may name the winning token in several groups; their rules are then
+ * read as one group (same section), so a later group's Disallow is not lost.
  */
 export function matchRobotsGroup(robots: RobotsTxt, userAgent: string): RobotsGroup | null {
   const ua = userAgent.toLowerCase()
-  let best: RobotsGroup | null = null
-  let bestLen = -1
-  let wildcard: RobotsGroup | null = null
+  let token: string | null = null
+  let wildcard = false
 
   for (const group of robots.groups) {
     for (const agent of group.agents) {
-      if (agent === '*') {
-        wildcard ??= group
-        continue
-      }
-      if (ua.includes(agent) && agent.length > bestLen) {
-        best = group
-        bestLen = agent.length
-      }
+      if (agent === '*') wildcard = true
+      else if (ua.includes(agent) && agent.length > (token?.length ?? -1)) token = agent
     }
   }
 
-  return best ?? wildcard
+  const winner = token ?? (wildcard ? '*' : null)
+  if (winner === null) return null
+  const named = robots.groups.filter((group) => group.agents.includes(winner))
+  if (named.length === 1) return named[0]!
+  return {
+    agents: [...new Set(named.flatMap((group) => group.agents))],
+    rules: named.flatMap((group) => group.rules),
+    crawlDelayMs: named.find((group) => group.crawlDelayMs !== null)?.crawlDelayMs ?? null,
+  }
 }
 
 /** The rules that fired for a path, most-specific first. */

@@ -15,6 +15,8 @@ The plugin connects to `https://mcp.octocrawl.dev/mcp-oauth`. The first time a t
 
 - One known page: `scrape`. Ask for `formats: ["markdown"]` for the text, `["tables"]` for a page's tables, `["links"]` for its links.
 - The pages of a site without reading each one: `map`.
+- A section of a site, page by page (up to 500 pages): `crawl`, then `wait_crawl`, then `get_crawl_pages`.
+- A known list of URLs (up to 1,000): `batch_scrape`, then `wait_batch`, then `get_batch_items`.
 - One Amazon.sg product page (`https://www.amazon.sg/dp/<ASIN>`) as checked JSON: `scrape_product`.
 
 ## Read the result
@@ -25,4 +27,4 @@ The plugin connects to `https://mcp.octocrawl.dev/mcp-oauth`. The first time a t
 
 ## What it does not do
 
-It reads public pages only. It obeys robots.txt, refuses private network addresses, and does not sign in to sites, solve CAPTCHAs or use proxies. Crawls, batches and monitoring run with the open-source Octocrawl on the person's own computer (https://octocrawl.dev/docs/connect-mcp/).
+It reads public pages only. It obeys robots.txt, refuses private network addresses, and does not sign in to sites, solve CAPTCHAs or use proxies. Monitoring, saved logins and larger crawls or batches run with the open-source Octocrawl on the person's own computer (https://octocrawl.dev/docs/connect-mcp/).

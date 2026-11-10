@@ -1,5 +1,6 @@
 .git
 .w2l
+.claude
 node_modules
 **/node_modules
 **/dist
