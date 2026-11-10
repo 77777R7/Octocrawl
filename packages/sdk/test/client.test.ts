@@ -574,6 +574,18 @@ describe('W2L SDK', () => {
     expect(bare).toMatchObject({ status: 409, code: 'conflict', retryAfterMs: null, agentHints: [] })
   })
 
+  it('keeps a code the SDK does not list, as hosted Octocrawl sends, and drops one that is not a code', async () => {
+    const answer = (status: number, body: unknown) => new W2L({ baseUrl: 'http://localhost', fetch: (async () => new Response(JSON.stringify(body), { status })) as typeof fetch })
+    const quota = await answer(429, { error: 'this account\'s credits are used up (0 left)', code: 'quota_exhausted' }).scrape('https://example.com/').catch((reason: unknown) => reason)
+    expect(quota).toMatchObject({ name: 'W2LError', status: 429, code: 'quota_exhausted' })
+    const busy = await answer(409, { error: 'a job is running', code: 'job_running' }).batchScrape(['https://example.com/']).catch((reason: unknown) => reason)
+    expect(busy).toMatchObject({ status: 409, code: 'job_running' })
+    for (const code of [42, '', 'Not A Code', '<b>x</b>']) {
+      const error = await answer(500, { error: 'x', code }).scrape('https://example.com/').catch((reason: unknown) => reason)
+      expect((error as W2LError).code).toBeUndefined()
+    }
+  })
+
   it('leaves the code undefined when the error body carries none', async () => {
     const client = new W2L({ baseUrl: 'http://localhost', fetch: (async () => new Response('Bad Gateway', { status: 502 })) as typeof fetch })
     const error = await client.listMonitors().catch((reason: unknown) => reason)

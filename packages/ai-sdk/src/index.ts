@@ -300,7 +300,7 @@ function refusalOf(error: unknown): OctocrawlRefusal {
   return {
     status: 'refused',
     httpStatus: error.status,
-    // The body's own code: the SDK keeps only the codes it knows, and hosted Octocrawl adds its own (quota_exhausted).
+    // The body's own code first: hosted Octocrawl adds its own (quota_exhausted), in whatever shape it sends them.
     code: typeof body.code === 'string' ? body.code : (error.code ?? null),
     error: typeof body.error === 'string' ? body.error : error.message,
     agentHints: error.agentHints,
