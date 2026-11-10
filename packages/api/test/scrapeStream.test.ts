@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { RequestError, type TraceEvent } from '@w2l/contracts'
+import { RequestError, type ScrapeStage, type TraceEvent } from '@w2l/contracts'
+import { W2L, W2LError } from '@w2l/sdk'
 import { createApp, STAGE_STREAM_TYPE } from '../src/app.js'
 import { createApiEngine, type ApiEngine } from '../src/engine.js'
 import type { ServerActivity } from '../src/activity.js'
@@ -142,6 +143,22 @@ describe('a scrape answered as a stream of its stages', () => {
     const response = await post(createApp(engine, { onActivity: (event) => { events.push(event) } }), { url: `${origin}/page`, fastMode: true }, STAGE_STREAM_TYPE)
     expect((await lines(response)).map((line) => line.stage ?? line.type)).toEqual(['robots', 'page', 'result'])
     expect(events.map((event) => event.type === 'call_stage' ? event.stage.stage : event.type)).toEqual(['call_started', 'robots', 'page', 'call_ended'])
+  })
+
+  it('is read by the SDK\'s scrape with onStage: the stages, then the answer or the error the plain call gives', async () => {
+    const { origin, engine } = await setup()
+    const sdkOn = (app: ReturnType<typeof createApp>) => new W2L({ baseUrl: 'http://api.test', token: '', fetch: ((input: RequestInfo | URL, init?: RequestInit) => app.request(String(input), init)) as typeof fetch })
+    const stages: ScrapeStage[] = []
+    const answer = await sdkOn(createApp(engine)).scrape(`${origin}/page`, { fastMode: true }, { onStage: (stage) => { stages.push(stage) } })
+    expect(stages).toEqual([{ stage: 'robots', allowed: true }, { stage: 'page' }])
+    expect(answer).toMatchObject({ status: 'success', requestedUrl: `${origin}/page` })
+    // An error after the first stage is thrown as the plain call throws it.
+    const failing = sdkOn(createApp(engineThat(engine, async (tell) => { tell?.(ROBOTS_READ); await Promise.resolve(); throw new RequestError('timeout must be an integer', 'invalid_request') })))
+    const plain = await failing.scrape(`${origin}/page`).catch((error: unknown) => error) as W2LError
+    const streamed = await failing.scrape(`${origin}/page`, {}, { onStage: () => {} }).catch((error: unknown) => error) as W2LError
+    expect(streamed).toBeInstanceOf(W2LError)
+    expect({ ...streamed, message: streamed.message }).toEqual({ ...plain, message: plain.message })
+    expect(streamed.status).toBe(400)
   })
 
   it('ends the stream when the caller goes away, the scrape cancelled as the plain call\'s is', async () => {

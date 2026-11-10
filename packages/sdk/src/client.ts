@@ -41,7 +41,7 @@ import type {
   ScrapeRequest,
   ScrapeResponse,
 } from '@w2l/contracts'
-import { DEFAULT_MAP_TIMEOUT_MS, DEFAULT_SCRAPE_TIMEOUT_MS, RATE_LIMITED_CODE, type ApiErrorCode } from '@w2l/contracts'
+import { DEFAULT_MAP_TIMEOUT_MS, DEFAULT_SCRAPE_TIMEOUT_MS, RATE_LIMITED_CODE, type ApiErrorCode, type ScrapeStage } from '@w2l/contracts'
 import { SDK_VERSION } from './version.js'
 import { JobWatcher, type WatchOptions, type WatcherClient } from './watcher.js'
 
@@ -82,7 +82,7 @@ export const MAP_ANSWER_MARGIN_MS = 5_000
  * or agent set there still applies) with its own wait for headers.
  * Undefined elsewhere: a browser's fetch has no such wait.
  */
-function headersWait(ms: number): { dispatch(options: object, handler: unknown): boolean } | undefined {
+function headersWait(ms: number, body = false): { dispatch(options: object, handler: unknown): boolean } | undefined {
   if ((globalThis as { process?: { versions?: { undici?: string } } }).process?.versions?.undici === undefined) return undefined
   return {
     dispatch(options, handler) {
@@ -90,7 +90,9 @@ function headersWait(ms: number): { dispatch(options: object, handler: unknown):
       const global = globalThis as unknown as Record<symbol, { dispatch(options: object, handler: unknown): boolean } | undefined>
       const dispatcher = global[Symbol.for('undici.globalDispatcher.2')] ?? global[Symbol.for('undici.globalDispatcher.1')]
       if (dispatcher === undefined) throw new Error('no global fetch dispatcher')
-      return dispatcher.dispatch({ ...options, headersTimeout: ms }, handler)
+      // An answer that comes as a stream has its headers early and its last line at the deadline: the wait between two
+      // parts of the body is then the same wait (undici's own is 300 s).
+      return dispatcher.dispatch({ ...options, headersTimeout: ms, ...(body ? { bodyTimeout: ms } : {}) }, handler)
     },
   }
 }
@@ -107,6 +109,19 @@ export interface RequestOptions {
    * here. The default is `js-sdk@<SDK_VERSION>`.
    */
   origin?: string
+}
+
+/** The media type that asks `POST /v1/scrape` for the scrape's stages as lines, then its answer (docs/scrape-options.md). */
+const STAGE_STREAM_TYPE = 'application/x-ndjson'
+
+export interface ScrapeRequestOptions extends RequestOptions {
+  /**
+   * Called with each stage of the scrape as the server tells it, before the answer: robots.txt read, then the page
+   * received (ScrapeStage). A server on the person's computer tells them, for a scrape on the HTTP lane; a scrape that
+   * starts in a browser tells none, and neither does hosted Octocrawl or a server older than the stages, so the
+   * answer never depends on it being called. An error it throws is ignored.
+   */
+  onStage?: (stage: ScrapeStage) => void
 }
 
 /** What the SDK records as `origin` unless the caller or the host says otherwise. */
@@ -294,14 +309,51 @@ export class W2LError extends Error {
 
 /** Reads a failed response; the message defaults to `<METHOD> <path> failed: <status> <body>`. */
 async function responseError(method: 'GET' | 'POST' | 'DELETE', path: string, res: Response, message?: string): Promise<W2LError> {
-  const text = await res.text()
+  return errorOf(method, path, res.status, await res.text(), res.headers.get('retry-after'), message)
+}
+
+/** A failed answer as the error the SDK throws: its status, the body's text, and its Retry-After when it had one. */
+function errorOf(method: 'GET' | 'POST' | 'DELETE', path: string, status: number, text: string, retryAfter: string | null, message?: string): W2LError {
   let body: unknown = text
   try { body = JSON.parse(text) } catch {}
   const fields = body !== null && typeof body === 'object' ? (body as { code?: unknown; agentHints?: unknown }) : {}
   // Any code the server names, in the shape every Octocrawl code has: a server newer than this SDK, or hosted Octocrawl, has codes it does not list.
   const code = typeof fields.code === 'string' && /^[a-z_]+$/.test(fields.code) ? fields.code : undefined
   const agentHints = Array.isArray(fields.agentHints) ? fields.agentHints.filter((hint): hint is string => typeof hint === 'string') : []
-  return new W2LError(message ?? `${method} ${path} failed: ${res.status} ${text}`, res.status, code, method, path, body, retryAfterMs(res.headers.get('retry-after')), agentHints)
+  return new W2LError(message ?? `${method} ${path} failed: ${status} ${text}`, status, code, method, path, body, retryAfterMs(retryAfter), agentHints)
+}
+
+/** The lines of a response whose body is a line of JSON each, as they arrive; a line that is not a JSON object is passed over. */
+async function* jsonLines(res: Response): AsyncGenerator<Record<string, unknown>> {
+  const parsed = function* (lines: readonly string[]): Generator<Record<string, unknown>> {
+    for (const line of lines) {
+      if (line.trim() === '') continue
+      let value: unknown
+      try { value = JSON.parse(line) } catch { continue }
+      if (value !== null && typeof value === 'object' && !Array.isArray(value)) yield value as Record<string, unknown>
+    }
+  }
+  // A fetch that gives no stream (a caller's own) has the whole body at once.
+  if (res.body === null) { yield* parsed((await res.text()).split('\n')); return }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  /** The pieces of the line being read, which has no end yet: a long line (a large result) is joined once, at its end. */
+  let pieces: string[] = []
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      const text = done ? decoder.decode() : decoder.decode(value, { stream: true })
+      const ends = text.lastIndexOf('\n')
+      if (ends === -1 && !done) { pieces.push(text); continue }
+      const whole = pieces.join('') + (done ? text : text.slice(0, ends))
+      pieces = done ? [] : [text.slice(ends + 1)]
+      yield* parsed(whole.split('\n'))
+      if (done) return
+    }
+  } finally {
+    // Whoever stops reading (the result came, the caller threw) lets the connection go, without waiting on it.
+    void reader.cancel().catch(() => {})
+  }
 }
 
 /** Retry-After as delay-seconds or an HTTP-date, in milliseconds from now. */
@@ -360,15 +412,53 @@ export class W2L {
     this.platformFetch = options.fetch === undefined
   }
 
-  async scrape(url: string, opts: ScrapeOptions & { debug: false }, request?: RequestOptions): Promise<CompactScrapeResponse>
-  async scrape(url: string, opts?: ScrapeOptions, request?: RequestOptions): Promise<ScrapeResponse>
-  async scrape(url: string, opts: ScrapeOptions = {}, request: RequestOptions = {}): Promise<ScrapeResponse | CompactScrapeResponse> {
+  async scrape(url: string, opts: ScrapeOptions & { debug: false }, request?: ScrapeRequestOptions): Promise<CompactScrapeResponse>
+  async scrape(url: string, opts?: ScrapeOptions, request?: ScrapeRequestOptions): Promise<ScrapeResponse>
+  async scrape(url: string, opts: ScrapeOptions = {}, request: ScrapeRequestOptions = {}): Promise<ScrapeResponse | CompactScrapeResponse> {
     // The API answers by the scrape's deadline (a timeout it does not accept, at once with HTTP 400):
     // wait that long plus a margin, and no longer.
     const deadlineMs = Number.isInteger(opts.timeout) ? Math.min(Math.max(opts.timeout!, 0), DEFAULT_SCRAPE_TIMEOUT_MS) : DEFAULT_SCRAPE_TIMEOUT_MS
     // A scrape handed to the person, or read in their Chrome, waits for them as well: as long as they take (undici reads 0 as no limit); request.signal ends it.
     const handedOver = (opts.handoff !== undefined && opts.handoff !== false) || opts.lane === 'my-browser' || opts.access === 'my-browser'
-    return this.post<ScrapeResponse | CompactScrapeResponse>('/v1/scrape', { ...opts, url, origin: originOf(opts, request) }, 200, request, handedOver ? 0 : deadlineMs + SCRAPE_ANSWER_MARGIN_MS)
+    const answerWithinMs = handedOver ? 0 : deadlineMs + SCRAPE_ANSWER_MARGIN_MS
+    const body = { ...opts, url, origin: originOf(opts, request) }
+    if (request.onStage === undefined) return this.post<ScrapeResponse | CompactScrapeResponse>('/v1/scrape', body, 200, request, answerWithinMs)
+    return this.scrapeWithStages(body, request, request.onStage, answerWithinMs)
+  }
+
+  /**
+   * A scrape whose caller listens for its stages: the request asks for the stage stream, and the answer is read as
+   * whichever the server sent. A stream is lines of JSON, a stage each, then the result with the HTTP status the
+   * plain call would have had; one JSON body is the plain answer (a call that ended before any stage, a server that
+   * tells none). Either way what is returned, or thrown, is what the plain call returns or throws.
+   */
+  private async scrapeWithStages(body: unknown, request: RequestOptions, onStage: (stage: ScrapeStage) => void, answerWithinMs: number): Promise<ScrapeResponse | CompactScrapeResponse> {
+    const path = '/v1/scrape'
+    const dispatcher = this.platformFetch ? headersWait(answerWithinMs, true) : undefined
+    const init: RequestInit & { dispatcher?: unknown } = {
+      method: 'POST',
+      signal: request.signal,
+      headers: this.headers({ 'content-type': 'application/json', accept: `${STAGE_STREAM_TYPE}, application/json` }),
+      body: JSON.stringify(body),
+      ...(dispatcher === undefined ? {} : { dispatcher }),
+    }
+    const res = await this.fetchImpl(`${this.baseUrl}${path}`, init)
+    if (res.status !== 200) throw await responseError('POST', path, res)
+    if (!(res.headers.get('content-type') ?? '').toLowerCase().startsWith(STAGE_STREAM_TYPE)) return (await res.json()) as ScrapeResponse | CompactScrapeResponse
+    for await (const line of jsonLines(res)) {
+      if (line.type === 'stage') {
+        const { type: _type, ...stage } = line
+        // A stage is told for whoever shows progress: what they do with it never fails the scrape, a listener that
+        // answers with a promise included.
+        try { void Promise.resolve((onStage as (stage: ScrapeStage) => unknown)(stage as ScrapeStage)).catch(() => {}) } catch { /* ignored */ }
+      } else if (line.type === 'result') {
+        if (line.http === 200) return line.body as ScrapeResponse | CompactScrapeResponse
+        // An error that came after the stream had started, as the plain call would have answered it.
+        throw errorOf('POST', path, typeof line.http === 'number' ? line.http : 500, JSON.stringify(line.body), null)
+      }
+    }
+    // As a connection cut before the answer: a failure of the network, not an answer of the API's.
+    throw new TypeError(`POST ${path} failed: the server's answer ended before the scrape's result`)
   }
 
   /** The record of one scrape call, by the `scrapeId` its response carried (`metadata.scrapeId`); a W2LError with code `not_found` for an id the server has no record of. */

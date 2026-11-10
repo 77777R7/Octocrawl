@@ -2,7 +2,7 @@ export { chunkUrls, MAP_ANSWER_MARGIN_MS, SDK_ORIGIN, W2L, W2LError, WaitTimeout
 export { DEFAULT_WATCH_POLL_INTERVAL_MS, JobWatcher, MIN_WATCH_POLL_INTERVAL_MS, pageCursor, parseSseBlock } from './watcher.js'
 export type { WatchKind, WatchOptions, WatchTransport, WatcherClient, WatcherError, WatcherEvent, WatcherWebSocket, WatcherWebSocketConstructor } from './watcher.js'
 export { SDK_VERSION } from './version.js'
-export type { W2LOptions, RequestOptions, WaitOptions, CreateMonitorRequest, ReviseMonitorRequest, RunMonitorRequest, ScrapeOptions } from './client.js'
+export type { W2LOptions, RequestOptions, ScrapeRequestOptions, WaitOptions, CreateMonitorRequest, ReviseMonitorRequest, RunMonitorRequest, ScrapeOptions } from './client.js'
 export type { AppendToBatchOptions, ChunkedBatchJob, ChunkedBatchOptions, ChunkedBatchResult } from './client.js'
 export type { BatchCollected, BatchDocuments, CrawlCollected, CrawlDocuments, ListedError, ListedPage, PageCollection, PagedListOptions, PaginationEnd, PaginationLimits, PaginationStop } from './client.js'
 export type {
@@ -88,4 +88,5 @@ export type {
   MonitorEvent,
   MonitorSnapshot,
   ScrapeRequest,
+  ScrapeStage,
 } from '@w2l/contracts'
