@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { motionColor, motionTerminal, motionWanted, startMotion, stopMotion, type MotionColor } from '../src/motion.js'
+import { screen } from './screen.js'
 
 const HIDE = '\x1b[?25l'
 const SHOW = '\x1b[?25h'
@@ -12,7 +13,7 @@ function terminal(columns = 100, rows = 30) {
   const writes: string[] = []
   return { writes, write: (text: string) => { writes.push(text) }, size: () => ({ columns, rows }) }
 }
-const start = (term: ReturnType<typeof terminal>, command: 'scrape' | 'map' = 'scrape', color: MotionColor = '256') => startMotion(term, { command, host: 'example.com', color })
+const start = (term: ReturnType<typeof terminal>, command: 'scrape' | 'map' | 'crawl' | 'batch' = 'scrape', color: MotionColor = '256') => startMotion(term, { command, ...(command === 'batch' ? {} : { host: 'example.com' }), color })
 
 beforeEach(() => { vi.useFakeTimers() })
 afterEach(() => { stopMotion(); vi.useRealTimers() })
@@ -61,7 +62,7 @@ describe('the octopus on the terminal', () => {
     expect(headRow(term.writes.at(-1)!)).toBe(2)
     motion.stage({ stage: 'page' })
     vi.advanceTimersByTime(20_000)
-    expect(shown(term.writes.at(-1)!).at(-1)).toBe('  Page received · checking it · 60 s')
+    expect(shown(term.writes.at(-1)!).at(-1)).toBe('  Page received · checking it · 1 min 0 s')
     // The foot of the page is the result's alone, and the result ends the drawing.
     expect(headRow(term.writes.at(-1)!)).toBe(5)
   })
@@ -98,6 +99,70 @@ describe('the octopus on the terminal', () => {
     vi.advanceTimersByTime(3_040)
     expect(shown(term.writes.at(-1)!).at(-1)).toBe('  Mapping example.com · 3 s')
     expect(headRow(term.writes.at(-1)!)).toBe(0)
+  })
+
+  it('counts a crawl\'s pages as they are fetched, and waits at the top: a crawl does not know how many it will find', () => {
+    const term = terminal()
+    const motion = start(term, 'crawl')
+    vi.advanceTimersByTime(400)
+    expect(shown(term.writes.at(-1)!).at(-1)).toBe('  Crawling example.com')
+    motion.count({ done: 1, total: null })
+    vi.advanceTimersByTime(80)
+    expect(shown(term.writes.at(-1)!).at(-1)).toBe('  Crawling example.com · 1 page fetched')
+    motion.count({ done: 1_204, total: null })
+    vi.advanceTimersByTime(80 * 1_000)
+    expect(shown(term.writes.at(-1)!).at(-1)).toBe('  Crawling example.com · 1,204 pages fetched · 1 min 20 s')
+    expect(headRow(term.writes.at(-1)!)).toBe(0)
+    // A resumed crawl names no site.
+    const resumed = terminal()
+    startMotion(resumed, { command: 'crawl', color: 'none' }).count({ done: 3, total: null })
+    vi.advanceTimersByTime(400)
+    expect(shown(resumed.writes.at(-1)!).at(-1)).toBe('  Crawling · 3 pages fetched')
+  })
+
+  it('goes down the page by the share of a batch\'s pages that are done, and says when the batch waits for the person', () => {
+    const term = terminal()
+    const motion = start(term, 'batch')
+    vi.advanceTimersByTime(400)
+    expect(shown(term.writes.at(-1)!).at(-1)).toBe('  Starting the batch')
+    expect(headRow(term.writes.at(-1)!)).toBe(0)
+    motion.count({ done: 0, total: 20, waitingForPerson: true })
+    vi.advanceTimersByTime(80)
+    expect(shown(term.writes.at(-1)!).at(-1)).toBe('  Waiting for you in Chrome · 0/20 pages done')
+    motion.count({ done: 10, total: 20 })
+    vi.advanceTimersByTime(20_000)
+    expect(shown(term.writes.at(-1)!).at(-1)).toBe('  10/20 pages done · 20 s')
+    expect(headRow(term.writes.at(-1)!)).toBe(3)
+    motion.count({ done: 20, total: 20 })
+    vi.advanceTimersByTime(20_000)
+    expect(headRow(term.writes.at(-1)!)).toBe(6)
+    // A count that makes no share (nothing asked for, more done than asked for) moves it nowhere it should not be.
+    motion.count({ done: 3, total: 0 })
+    vi.advanceTimersByTime(20_000)
+    expect(headRow(term.writes.at(-1)!)).toBe(0)
+    motion.count({ done: 30, total: 20 })
+    vi.advanceTimersByTime(20_000)
+    expect(headRow(term.writes.at(-1)!)).toBe(6)
+  })
+
+  it('leaves on the screen only the lines written beside it, in order, whatever it drew between them', () => {
+    const written: string[] = []
+    const stream = { write: (text: string): boolean => { written.push(text); return true }, columns: 100, rows: 30 }
+    const motion = startMotion(motionTerminal(stream), { command: 'batch', color: '256' })
+    stream.write('octocrawl batch: task 1\n')
+    vi.advanceTimersByTime(400)
+    // With the drawing up, the screen holds it under the line.
+    expect(screen(written)).toHaveLength(16)
+    stream.write('a line of the engine\'s log\n')
+    motion.count({ done: 2, total: 4 })
+    vi.advanceTimersByTime(3_000)
+    stream.write('two lines\nin one write\n')
+    vi.advanceTimersByTime(3_000)
+    expect(screen(written).slice(0, 4)).toEqual(['octocrawl batch: task 1', 'a line of the engine\'s log', 'two lines', 'in one write'])
+    expect(screen(written).at(-1)).toBe('  2/4 pages done · 6 s')
+    motion.stop()
+    stream.write('octocrawl batch: completed\n')
+    expect(screen(written)).toEqual(['octocrawl batch: task 1', 'a line of the engine\'s log', 'two lines', 'in one write', 'octocrawl batch: completed'])
   })
 
   it('draws the octopus in colour, and with NO_COLOR in none: only the cursor moves and lines are erased', () => {

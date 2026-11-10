@@ -61,9 +61,19 @@ export function motionColor(env: NodeJS.ProcessEnv): MotionColor {
   return env.COLORTERM === 'truecolor' || env.COLORTERM === '24bit' ? 'truecolor' : '256'
 }
 
+/** How far a crawl or a batch has got, from its status as last read: the pages done, and of how many when the job knows (a batch does; a crawl finds its pages as it goes). */
+export interface JobCount {
+  done: number
+  total: number | null
+  /** A batch on the my-browser lane that waits for the person to allow its sites in their Chrome. */
+  waitingForPerson?: boolean
+}
+
 export interface Motion {
   /** A stage of the scrape, as it is reported (scrapeStages). */
   stage: (stage: ScrapeStage) => void
+  /** A crawl's or a batch's count, each time its status is read. */
+  count: (count: JobCount) => void
   /** Run `say`, which writes whole lines to the same terminal, with the drawing out of the way: the lines stay in the scrollback and the drawing goes on under them (motionTerminal does this for every other writer of a process's stderr). */
   above: (say: () => void) => void
   /** Wipe the drawing and give the cursor back. Calling it again does nothing. */
@@ -116,14 +126,17 @@ export function stopMotion(): void {
 }
 
 /**
- * Start drawing for one scrape or map of `host`. A map reports no stages, so its octopus waits at the top of the
- * page until the answer; so does a scrape that starts in a browser. On a terminal too small for the page, the line
- * that says what the run is doing is drawn alone.
+ * Start drawing for one command: a scrape or a map of `host`, a crawl from it (none when one is resumed), or a batch.
+ * A scrape's octopus goes as far down the page as its stages say. A map reports no stages, so its octopus waits at
+ * the top of the page until the answer; so does a scrape that starts in a browser, and a crawl, which cannot say how
+ * many pages it will find. A batch's goes down by the share of its pages that are done. On a terminal too small for
+ * the page, the line that says what the run is doing is drawn alone.
  */
-export function startMotion(terminal: MotionTerminal, options: { command: 'scrape' | 'map'; host: string; color: MotionColor }): Motion {
+export function startMotion(terminal: MotionTerminal, options: { command: 'scrape' | 'map' | 'crawl' | 'batch'; host?: string; color: MotionColor }): Motion {
   const startedAt = Date.now()
   const seen = new Set<CrawlStage>()
   let robots: Extract<ScrapeStage, { stage: 'robots' }> | null = null
+  let job: JobCount | null = null
   let depth = 0
   let lastAt = startedAt
   /** How many lines of the drawing are on the terminal, the cursor on the line under them. */
@@ -133,12 +146,22 @@ export function startMotion(terminal: MotionTerminal, options: { command: 'scrap
 
   const paint = (text: string, tone: OctopusTone | 'page'): string => options.color === 'none' ? text : `\x1b[${SGR[options.color][tone]}m${text}\x1b[0m`
 
+  const number = (n: number): string => n.toLocaleString('en-US')
+  const host = options.host === undefined ? '' : ` ${options.host}`
+  /** What the run is doing, from the last thing it reported. */
+  const doing = (): string => {
+    if (options.command === 'crawl') return `Crawling${host}${job === null ? '' : ` · ${number(job.done)} ${job.done === 1 ? 'page' : 'pages'} fetched`}`
+    if (options.command === 'batch') {
+      if (job === null) return 'Starting the batch'
+      return `${job.waitingForPerson === true ? 'Waiting for you in Chrome · ' : ''}${number(job.done)}${job.total === null ? '' : `/${number(job.total)}`} pages done`
+    }
+    if (robots === null) return seen.has('page') ? stageLabel(seen, null) : `${options.command === 'map' ? 'Mapping' : 'Reading'}${host}`
+    if (robots.overridden === true && !seen.has('page')) return `${robots.unreachable === true ? 'robots.txt could not be read' : 'robots.txt disallows it'} · fetching it anyway (robots_overridden)`
+    return stageLabel(seen, robots.allowed, robots.unreachable === true)
+  }
   const label = (now: number): string => {
-    const doing = robots === null ? (seen.has('page') ? stageLabel(seen, null) : `${options.command === 'map' ? 'Mapping' : 'Reading'} ${options.host}`)
-      : robots.overridden === true && !seen.has('page') ? `${robots.unreachable === true ? 'robots.txt could not be read' : 'robots.txt disallows it'} · fetching it anyway (robots_overridden)`
-      : stageLabel(seen, robots.allowed, robots.unreachable === true)
     const seconds = Math.floor((now - startedAt) / 1000)
-    return `${doing}${seconds >= 1 ? ` · ${seconds} s` : ''}`
+    return `${doing()}${seconds < 1 ? '' : seconds < 60 ? ` · ${seconds} s` : ` · ${Math.floor(seconds / 60)} min ${seconds % 60} s`}`
   }
 
   const lines = (now: number): string[] => {
@@ -185,8 +208,9 @@ export function startMotion(terminal: MotionTerminal, options: { command: 'scrap
   const draw = (): void => {
     const now = Date.now()
     if (stopped || now - startedAt < FIRST_FRAME_MS) return
-    // Toward how far the run has reported, slower as it nears it (the crawl window's pace), and never past it.
-    const cap = crawlCap(seen, robots === null ? null : robots.allowed, false)
+    // Toward how far the run has reported, slower as it nears it (the crawl window's pace), and never past it: a
+    // scrape's stages, or the share of a job's pages that are done when the job knows how many there are.
+    const cap = job === null ? crawlCap(seen, robots === null ? null : robots.allowed, false) : job.total === null || job.total <= 0 ? 0 : Math.min(1, Math.max(0, job.done / job.total))
     depth += (cap - depth) * (1 - Math.exp(-(now - lastAt) / (cap < depth ? 300 : 1400)))
     lastAt = now
     const frame = lines(now)
@@ -205,6 +229,7 @@ export function startMotion(terminal: MotionTerminal, options: { command: 'scrap
     stage: (stage) => {
       if (stage.stage === 'robots') { robots = stage; seen.add('robots') } else seen.add('page')
     },
+    count: (count) => { job = count },
     above: (say) => {
       wipe()
       try { say() } finally { draw() }
