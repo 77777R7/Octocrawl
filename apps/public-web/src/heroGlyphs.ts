@@ -10,6 +10,7 @@
  * the cliffs and break in a spray of light at their foot. */
 import { CLOUD, COOL, EMBER, FACE, SCENES, SURF, between, hash, position, sceneName, smooth, type Scene, type SceneName } from './heroArtwork'
 import { createEmbers, type Embers } from './heroEmbers'
+import { framePace } from './framePace'
 import { createFog, type Fog, type FogPrep } from './heroFog'
 import type { Analysis, Request } from './heroGlyphsWorker'
 import { createSky } from './heroSky'
@@ -69,7 +70,8 @@ const STAR_SKY = 0.44
 // The sunset clouds are mapped in cells of this size (css px) to keep the sky's stars and meteors off them.
 const CLOUD_CELL = 24
 // A device too slow to add the glyphs gives them up for the visit, at once while the octopus is still deciding
-// whether this device can animate at all: the octopus matters more.
+// whether this device can animate at all: the octopus matters more. Nothing counts while the loop settles after it
+// starts or resumes (framePace.ts).
 const SLOW_MS = 80
 const EARLY_MS = 5000
 const EARLY_LIMIT = 6
@@ -255,8 +257,7 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
   let source = { x: 0, y: 0 }
   let ringSpan = 1
   let disposed = false
-  let slow = 0
-  let firstFrame = 0
+  const pace = framePace({ slowMs: SLOW_MS, earlyMs: EARLY_MS, earlyLimit: EARLY_LIMIT, laterLimit: SLOW_LIMIT })
   // When each passing light's current pass began (or will begin), on the glyphs' clock: all soon after the start,
   // so the hero comes alive at once.
   let bandAt = between([0, 800])
@@ -648,9 +649,7 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
     raf = requestAnimationFrame(frame)
     // About 30 fps is plenty for twinkles and slow light.
     if (now - last < 32) return
-    firstFrame ||= now
-    slow = now - last > SLOW_MS ? slow + 1 : Math.max(0, slow - 1)
-    if (slow >= (now - firstFrame < EARLY_MS ? EARLY_LIMIT : SLOW_LIMIT)) {
+    if (pace.tooSlow(now, now - last)) {
       close()
       return
     }
@@ -698,6 +697,7 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
   function run(): void {
     if (raf || disposed || !warm || !artwork || document.hidden) return
     last = performance.now()
+    pace.start(last)
     raf = requestAnimationFrame(frame)
   }
   function stop(): void {
