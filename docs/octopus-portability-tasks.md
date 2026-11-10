@@ -101,8 +101,9 @@ CLI：
 - [x] **C2 `crawl` 和 `batch` 的终端八爪鱼。** 在 `settled` 的轮询里（`run.ts:293-299`）取计数，八爪鱼旁边一行 `N/M`。等用户点 Allow 的提示行（`handoffPrompts`，`run.ts:261-275`）照常打印，不被动画区盖住。
   - 完成标准：同 C1，另加一条：动画期间打印的提示行完整保留在滚动历史里。
   - 做完后的样子：batch 的状态行是 `3/20 pages done`，八爪鱼的位置就是完成的比例；my-browser 的 batch 等用户点 Allow 时前面加 `Waiting for you in Chrome`。crawl 不知道总共有多少页，所以只有 `Crawling <host> · 7 pages fetched`，八爪鱼停在顶上不往下走。任务一结束（或 Ctrl-C）先清画面，再打印结尾那行；`--handoff` 阶段不画。
-- [ ] **S1 `serve` 终端的活动区。** 有请求进来时，在终端底部画一次八爪鱼和一行"谁在读什么"（工具或路由、host、阶段）；空闲时只留一行。启动行和之后的日志行照常往上滚。只在 stderr 是 TTY 时启用。
+- [x] **S1 `serve` 终端的活动区。** 有请求进来时，在终端底部画一次八爪鱼和一行"谁在读什么"（工具或路由、host、阶段）；空闲时只留一行。启动行和之后的日志行照常往上滚。只在 stderr 是 TTY 时启用。
   - 完成标准：测试覆盖并发两个请求时显示不串行、非 TTY 时输出和今天逐字节相同；用 Claude Code 经 stdio MCP 调一次 `scrape`，在 serve 终端里看到动画，记录命令和 commit。
+  - 做完后的样子：空闲时一行 `Waiting for calls · N answered so far`。有 scrape 或 map 调用时画八爪鱼，每个调用一行：调用方（请求里的 `origin`，去掉 `mcp-` 前缀和版本号）、scrape 或 map、host、这个调用自己的阶段、已用时间；八爪鱼跟着运行最久的那个调用。crawl 和 batch 从开始到结束各有一行，写已记录的页数（来自引擎的 job 事件，没有总数）；服务器启动时接着跑的旧任务不发开始事件，所以没有行，batch 结束后 handoff 记录的页面也不会把行带回来。最多显示 4 行，其余计数。150 ms 内答完的调用只计数不显示。请求里的文字只显示可打印字符。服务器经 `runApiServer` 的 `onActivity` 把这些事告诉 CLI（`ServerActivity`，`packages/api/src/activity.ts`）；不传监听时一个阶段都不听，和以前一样。
 
 ### Phase 2：MCP 进度
 

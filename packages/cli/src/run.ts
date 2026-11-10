@@ -7,7 +7,7 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createApiEngine, csvField, defaultSessionsFile, evidenceRow, markdownFileName, parseListen, preloadEngineModules, RESULT_FILE_COLUMNS, runApiServer, scrapeStages, startCaptchaSolving, type ApiEngine, type HandoffHooks, type ResultPage } from '@w2l/api'
+import { createApiEngine, csvField, defaultSessionsFile, evidenceRow, markdownFileName, parseListen, preloadEngineModules, RESULT_FILE_COLUMNS, runApiServer, scrapeStages, startCaptchaSolving, type ApiEngine, type HandoffHooks, type ResultPage, type ServerActivity } from '@w2l/api'
 import {
   CONTENTFUL_STATUS,
   parseBatchStartRequest,
@@ -22,7 +22,7 @@ import {
 } from '@w2l/contracts'
 import { COMMANDS, parseCommandLine, UsageError, usage, type Command, type CliOptions } from './flags.js'
 import { login } from './login.js'
-import { motionColor, motionWanted, startMotion, type JobCount, type Motion, type MotionTerminal } from './motion.js'
+import { motionColor, motionWanted, startBoard, startMotion, type Board, type JobCount, type Motion, type MotionTerminal } from './motion.js'
 import { nativeModuleHelp } from './nativeModule.js'
 
 export const CLI_VERSION = '0.8.11'
@@ -35,7 +35,7 @@ export interface CliIo {
   signal?: AbortSignal
   /** stdout is a terminal, so a person is reading the JSON: one line on stderr says what it holds and how to get less. */
   tty?: boolean
-  /** stderr, when it is a terminal: the octopus is drawn there while a scrape, a map, a crawl or a batch runs (motion.ts). Left out, nothing is drawn. Lines written to that terminal meanwhile, `stderr`'s among them, are the terminal's to keep above the drawing (motionTerminal). */
+  /** stderr, when it is a terminal: the octopus is drawn there while a scrape, a map, a crawl or a batch runs, and while `serve` works for a caller (motion.ts). Left out, nothing is drawn. Lines written to that terminal meanwhile, `stderr`'s among them, are the terminal's to keep above the drawing (motionTerminal). */
   motion?: MotionTerminal
 }
 
@@ -367,7 +367,7 @@ async function urlsFrom(file: string): Promise<string[]> {
 
 async function serve(argv: readonly string[], io: CliIo): Promise<number> {
   if (argv.includes('--help')) {
-    io.stdout('usage: octocrawl serve [--port <n>] [--host <addr>] [--hosted --token <t>] [--rate-limit-per-minute <n>] [--task-root <dir>] [--access-grant <file>]\nRuns the local API (as w2l-api does) on --task-root, else W2L_TASK_ROOT, else .w2l/api, until SIGINT. --access-grant (or W2L_ACCESS_GRANT) names what enhanced access may do (ADR 0005).')
+    io.stdout('usage: octocrawl serve [--port <n>] [--host <addr>] [--hosted --token <t>] [--rate-limit-per-minute <n>] [--task-root <dir>] [--access-grant <file>] [--no-motion]\nRuns the local API (as w2l-api does) on --task-root, else W2L_TASK_ROOT, else .w2l/api, until SIGINT. --access-grant (or W2L_ACCESS_GRANT) names what enhanced access may do (ADR 0005).\nOn a terminal, the line under the log says what the server is doing, with the octopus while a scrape or a map call runs; --no-motion (or OCTOCRAWL_NO_MOTION=1) draws nothing.')
     return 0
   }
   // --task-root, as on the other commands; the server reads W2L_TASK_ROOT.
@@ -381,11 +381,20 @@ async function serve(argv: readonly string[], io: CliIo): Promise<number> {
     rest.splice(at, inline === undefined ? 2 : 1)
     env = { ...io.env, W2L_TASK_ROOT: value }
   }
-  const server = await runApiServer(rest, env, { signals: false, log: io.stderr })
+  // --no-motion is the command line's own, as on the other commands: the server does not take it.
+  const noMotion = rest.includes('--no-motion')
+  if (noMotion) rest.splice(0, rest.length, ...rest.filter((arg) => arg !== '--no-motion'))
+  // On a terminal the server's work is drawn under its log (motion.ts, startBoard), once it has said where it listens.
+  // Nothing is listened to otherwise, and the server is the one it was.
+  const drawn = io.motion !== undefined && motionWanted(env, noMotion) ? io.motion : null
+  let board: Board | null = null
+  const server = await runApiServer(rest, env, { signals: false, log: io.stderr, ...(drawn === null ? {} : { onActivity: (event: ServerActivity) => board?.activity(event) }) })
+  if (drawn !== null) board = startBoard(drawn, { color: motionColor(env) })
   await new Promise<void>((resolve) => {
     if (io.signal?.aborted) resolve()
     else io.signal?.addEventListener('abort', () => resolve(), { once: true })
   })
+  board?.stop()
   await server.close()
   return 0
 }
