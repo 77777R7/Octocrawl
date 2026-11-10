@@ -30,7 +30,7 @@
 
 ---
 
-**Scrape pages. Crawl websites. Turn web content into usable data.**
+**Web scraping MCP server and API: any public URL to clean Markdown. No API key needed to start.**
 
 Octocrawl is an open-source web scraping and crawling toolkit for AI agents, RAG and research. Collect documentation for a knowledge base, extract product details for comparison, or turn web tables and listings into data for analysis. Each page comes with a source record.
 
