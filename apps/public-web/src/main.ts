@@ -15,6 +15,7 @@ import { mountCrawlView } from './crawlView'
 import { readPreview, STAGE_STREAM } from './previewStream'
 import { readinessNote, taskStatus, type TaskState } from './taskStatus'
 import { buildWindow } from './windowBuild'
+import { mountLedger } from './runsLedger'
 import { markdownToText } from './markdownText'
 import { mountMapResults } from './tools/mapResults'
 import { toolNextStep } from './tools/nextStep'
@@ -155,8 +156,11 @@ const submitLabel = document.querySelector<HTMLElement>('#submit-label')!
 const section = document.querySelector<HTMLElement>('#result-section')!
 const resultHeading = document.querySelector<HTMLElement>('#result-heading')!
 const runsGrid = document.querySelector<HTMLElement>('#runs-grid')!
+const runsLedger = runsGrid.closest<HTMLElement>('.runs-ledger')!
 const runDetail = document.querySelector<HTMLElement>('#run-detail')!
 const detailUrl = document.querySelector<HTMLElement>('#detail-url')!
+const detailHead = runDetail.querySelector<HTMLElement>('.detail-head')!
+const detailKicker = detailHead.querySelector<HTMLElement>('.section-kicker')!
 const content = document.querySelector<HTMLElement>('#result-content')!
 const urlCard = document.querySelector<HTMLElement>('.url-card')!
 const capabilityMessage = document.querySelector<HTMLElement>('#capability-message')!
@@ -983,7 +987,11 @@ function renderOutputPanel(result: PreviewResponse, build: 'window' | 'body' | '
   const view = views.includes(outputView) ? outputView : views[0]!
   const asText = view === 'markdown' && markdownMode === 'text'
   const text = asText ? TEXT_VIEW : VIEW_TEXT[view]
-  const payload = asText ? markdownToText(viewPayload(result, view)) : viewPayload(result, view)
+  // A result whose data for one view is not in the shape that view reads must not take the panel, and the tabs to
+  // every other view, down with it: that view says it cannot be shown, and offers nothing to copy.
+  let payload = ''
+  let broken = false
+  try { payload = asText ? markdownToText(viewPayload(result, view)) : viewPayload(result, view) } catch { broken = true }
   const output = document.createElement('section')
   output.className = 'output-panel result-window'
   output.setAttribute('aria-labelledby', 'content-title')
@@ -1063,14 +1071,20 @@ function renderOutputPanel(result: PreviewResponse, build: 'window' | 'body' | '
   body.setAttribute('aria-labelledby', `window-tab-${view}`)
   // Scrolls with the keyboard too.
   body.tabIndex = 0
-  if (view === 'json') body.append(sourceView(payload, jsonTint))
-  else if (view === 'fields') body.append(renderFields(result))
-  else if (view === 'links') body.append(renderLinks(result))
-  else if (view === 'info') body.append(renderPageInfo(result))
-  else if (!payload.trim()) body.append(textElement('p', 'No readable Markdown was returned. Switch to JSON to inspect the status and reason.', 'empty-content'))
-  else if (asText) body.append(sourceView(payload.slice(0, MARKDOWN_PREVIEW_LIMIT), (line, into) => tinted(into, line)))
-  else if (markdownMode === 'preview') body.append(renderMarkdown(payload))
-  else body.append(sourceView(payload.slice(0, MARKDOWN_PREVIEW_LIMIT), markdownTint()))
+  try {
+    if (broken) throw new Error('view payload')
+    if (view === 'json') body.append(sourceView(payload, jsonTint))
+    else if (view === 'fields') body.append(renderFields(result))
+    else if (view === 'links') body.append(renderLinks(result))
+    else if (view === 'info') body.append(renderPageInfo(result))
+    else if (!payload.trim()) body.append(textElement('p', 'No readable Markdown was returned. Switch to JSON to inspect the status and reason.', 'empty-content'))
+    else if (asText) body.append(sourceView(payload.slice(0, MARKDOWN_PREVIEW_LIMIT), (line, into) => tinted(into, line)))
+    else if (markdownMode === 'preview') body.append(renderMarkdown(payload))
+    else body.append(sourceView(payload.slice(0, MARKDOWN_PREVIEW_LIMIT), markdownTint()))
+  } catch {
+    copy.disabled = download.disabled = true
+    body.replaceChildren(textElement('p', view === 'json' ? 'This view could not be shown.' : `The ${viewName(view)} view could not be shown for this result. The JSON view has everything the service returned.`, 'empty-content'))
+  }
 
   const foot = document.createElement('div')
   foot.className = 'window-foot'
@@ -1128,8 +1142,9 @@ function setOutputView(view: OutputView, build: 'body' | 'none' = 'none'): void 
   if (run?.result) renderOutputPanel(run.result, build)
 }
 
-/** One extraction in this visit. Runs live only in memory and are never sent anywhere. */
-type Run = { id: number; url: string; startedAt: Date; clientMs: number; result: PreviewResponse | null }
+/** One extraction in this visit: when it was sent (by the clock, and by performance.now), how long the browser
+ * measured it to take, and its result once that is back. Runs live only in memory and are never sent anywhere. */
+type Run = { id: number; url: string; startedAt: Date; since: number; clientMs: number; result: PreviewResponse | null }
 const MAX_RUNS = 6
 let runs: Run[] = []
 let selectedRunId = 0
@@ -1161,37 +1176,27 @@ function outputLabel(run: Run): string {
   return availableViews(run.result).map((view) => (toolText && view === 'markdown' ? 'Text' : VIEW_SHORT[view])).join(' · ')
 }
 
+/** The ledger of this visit's runs (runsLedger.ts). */
+const ledger = mountLedger(runsGrid, (id) => selectRun(id))
 function renderRuns(): void {
-  const focusedId = document.activeElement instanceof HTMLElement ? document.activeElement.closest<HTMLElement>('.run-card')?.dataset.run : undefined
-  runsGrid.replaceChildren(...runs.map((run) => {
-    const card = document.createElement('button')
-    card.type = 'button'
-    card.className = 'run-card'
-    card.dataset.run = String(run.id)
-    card.setAttribute('aria-pressed', String(run.id === selectedRunId))
-    const label = urlLabel(run.result?.finalUrl ?? run.url)
-    const head = textElement('span', '', 'run-card-head')
-    const glyph = textElement('span', label.charAt(0).toUpperCase(), 'run-glyph')
-    glyph.setAttribute('aria-hidden', 'true')
-    head.append(glyph, textElement('span', label, 'run-url'))
-    card.append(head)
-    const status = runStatus(run)
-    const rows: Array<[string, string, string?]> = [
-      ['Type', runType(run)],
-      ['Status', status.text, `run-status tone-${status.tone}`],
-      ['Total time', run.result ? formatDuration(run.clientMs) : '—', 'run-time'],
-      ['Started', run.startedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })],
-      ['Output', outputLabel(run)],
-    ]
-    for (const [key, value, extra] of rows) {
-      const row = textElement('span', '', 'run-row')
-      row.append(textElement('span', key, 'run-key'), textElement('span', value, extra ? `run-val ${extra}` : 'run-val'))
-      card.append(row)
-    }
-    card.addEventListener('click', () => selectRun(run.id))
-    return card
-  }))
-  if (focusedId) runsGrid.querySelector<HTMLElement>(`[data-run="${focusedId}"]`)?.focus()
+  ledger.render(runs.map((run) => ({
+    id: run.id,
+    label: urlLabel(run.result?.finalUrl ?? run.url),
+    type: runType(run),
+    status: runStatus(run),
+    time: run.result ? formatDuration(run.clientMs) : null,
+    since: run.since,
+    started: run.startedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    output: outputLabel(run),
+  })), selectedRunId)
+}
+
+/** Brings the selected run's result into view. With only a few runs the ledger is short, and the page comes to rest
+ * on it, so the run's row and its result share the screen; a ledger that would take most of the screen is passed, and
+ * the page rests on the result. */
+function revealResults(): void {
+  const short = runsLedger.offsetHeight + 40 <= window.innerHeight * 0.45
+  scrollPageTo(window.scrollY + (short ? runsLedger.getBoundingClientRect().top - 16 : runDetail.getBoundingClientRect().top))
 }
 
 function selectRun(id: number): void {
@@ -1201,7 +1206,9 @@ function selectRun(id: number): void {
   renderRuns()
   renderDetail(run)
   resultHeading.focus({ preventScroll: true })
-  scrollPageTo(window.scrollY + runDetail.getBoundingClientRect().top)
+  // The page moves only when the result is not already in the upper part of the screen.
+  const top = runDetail.getBoundingClientRect().top
+  if (top < 0 || top > window.innerHeight * 0.55) revealResults()
 }
 
 function renderDetailUrl(result: PreviewResponse | null): void {
@@ -1216,7 +1223,7 @@ function renderDetailUrl(result: PreviewResponse | null): void {
   } else detailUrl.append(textElement('strong', result ? 'Not available' : 'Waiting for the page…'))
 }
 
-/** Status and time live on the run card; the detail explains and shows the content. */
+/** Status and time live on the run's row of the ledger; the detail explains and shows the content. */
 function renderDetail(run: Run): void {
   content.replaceChildren()
   const result = run.result
@@ -1226,13 +1233,17 @@ function renderDetail(run: Run): void {
     const box = document.createElement('div')
     box.className = 'loading-panel'
     box.setAttribute('role', 'status')
-    box.append(textElement('span', '', 'loading-spinner'))
-    box.append(textElement('p', 'Reading the page and preparing its content. This usually takes a few seconds.'))
+    const mark = textElement('span', '', 'glyph-spin')
+    mark.setAttribute('aria-hidden', 'true')
+    box.append(mark, textElement('p', 'Reading the page and preparing its content. This usually takes a few seconds.'))
     content.append(box)
+    buildWindow(detailHead, [detailKicker], 200)
     return
   }
   const title = result.title?.trim()
   setHeading(title || urlLabel(result.finalUrl ?? result.requestedUrl), !title)
+  // The head prints itself as the window under it does, once it is on screen.
+  buildWindow(detailHead, [detailKicker], 200)
   if (!isPageRead(result)) content.append(renderGuidance(result))
   else if (result.reason || result.status === 'incomplete' && !result.product) {
     content.append(textElement('p', statusDetail(result.status, result.reason), 'result-note'))
@@ -1273,11 +1284,6 @@ function setResultMessage(result: PreviewResponse): void {
   message.className = `form-message${read ? '' : ' is-error'}`
 }
 
-/** Brings the selected run's result into view, below the hero; the run cards sit just above it. */
-function revealResults(): void {
-  scrollPageTo(window.scrollY + runDetail.getBoundingClientRect().top)
-}
-
 /** Shows the run's result; the page moves to it unless the crawl window is still playing (it moves there after). */
 function finishRun(run: Run, result: PreviewResponse, started: number, reveal = true): void {
   run.result = result
@@ -1288,8 +1294,7 @@ function finishRun(run: Run, result: PreviewResponse, started: number, reveal = 
   // The browser measurement includes network and synchronous result rendering.
   requestAnimationFrame(() => {
     run.clientMs = Math.max(run.clientMs, performance.now() - started)
-    const time = runsGrid.querySelector<HTMLElement>(`[data-run="${run.id}"] .run-time`)
-    if (time) time.textContent = formatDuration(run.clientMs)
+    ledger.setTime(run.id, formatDuration(run.clientMs))
   })
   if (reveal) revealResults()
 }
@@ -1676,7 +1681,7 @@ form.addEventListener('submit', async (event) => {
   // Before the form turns busy, so the window can take focus from the button that sent it.
   const crawling = crawl.begin(url)
   setBusy(true)
-  const run: Run = { id: nextRunId++, url, startedAt: new Date(), clientMs: 0, result: null }
+  const run: Run = { id: nextRunId++, url, startedAt: new Date(), since: performance.now(), clientMs: 0, result: null }
   runs = [run, ...runs].slice(0, MAX_RUNS)
   selectedRunId = run.id
   section.hidden = false
@@ -1685,7 +1690,7 @@ form.addEventListener('submit', async (event) => {
   heroScrollLabel.textContent = 'Recent runs'
   renderRuns()
   renderDetail(run)
-  const started = performance.now()
+  const started = run.since
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), 55_000)
   /** The window plays out its end, then the page moves to the result. */

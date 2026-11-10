@@ -4,6 +4,26 @@
 // goes in with textContent only; the charts are SVG from dashboard-charts.js (window.OctoCharts).
 (() => {
   const $ = (id) => document.getElementById(id)
+  // First-party page events, as on the docs (docs.js): to this site's /api/events only, nothing sent for a visitor who
+  // asks not to be tracked. They say which page was opened, which setup line was copied (by its block's id, never its
+  // text, so never a key) and how a Playground run ended (by status and reason, never the URL), so the funnel can tell a
+  // run that failed someone from one that gave them what they came for.
+  const optedOut = navigator.doNotTrack === '1' || navigator.globalPrivacyControl === true
+  const track = (name, props = {}) => {
+    if (optedOut) return
+    const body = JSON.stringify({ name, props: { path: location.pathname, ...props } })
+    try { if (navigator.sendBeacon?.('/api/events', new Blob([body], { type: 'application/json' }))) return } catch {}
+    fetch('/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true, credentials: 'same-origin' }).catch(() => {})
+  }
+  {
+    // The path only: a Playground address can carry the URL a visitor handed over (?url=), which stays out of the logs.
+    const props = {}
+    const from = new URLSearchParams(location.search).get('from') ?? ''
+    if (/^[a-z0-9-]{1,60}$/.test(from)) props.from = from
+    track('page_view', props)
+  }
+  /** A reason as a short code (failureReason, blockReason, the record's reason); anything else is "other". */
+  const reasonCode = (value) => (typeof value === 'string' && /^[a-z0-9_.-]{1,60}$/.test(value) ? value : 'other')
   const number = (n) => Number(n).toLocaleString('en-US')
   const day = (iso) => (iso ? new Date(iso).toISOString().slice(0, 10) : '')
   const longDay = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
@@ -658,7 +678,7 @@
   for (const button of document.querySelectorAll('[data-copy]')) {
     button.addEventListener('click', async () => {
       const source = $(button.dataset.copy)
-      try { await navigator.clipboard.writeText(source.dataset.full ?? source.textContent); button.textContent = 'Copied'; setTimeout(() => { button.textContent = 'Copy' }, 1500) } catch { getSelection().selectAllChildren(source) }
+      try { await navigator.clipboard.writeText(source.dataset.full ?? source.textContent); if (button.dataset.copy === 'play-output') track('result_copy', { view: 'playground' }); else if (button.dataset.copy === 'play-code') track('get_code_copy', { tab: 'playground' }); else track('setup_copy', { target: 'dashboard', client: button.dataset.copy.slice(0, 60) }); button.textContent = 'Copied'; setTimeout(() => { button.textContent = 'Copy' }, 1500) } catch { getSelection().selectAllChildren(source) }
     })
   }
 
@@ -1173,6 +1193,8 @@
       if (problem) { say(`Check the fields in Options: ${problem}`, true); return }
       say('')
       const ran = endpoint
+      let reported = false
+      const report = (props) => { if (!reported) track('playground_run', { view: ran, ...props }); reported = true }
       submit.disabled = true
       submit.textContent = 'Running…'
       $('play-result').hidden = true
@@ -1189,15 +1211,24 @@
               : response.status === 503 ? 'The Playground is not available right now. Try again later.'
                 : response.status === 504 ? 'The run took too long and was stopped. Activity shows what it cost, if anything.'
                   : 'The run could not reach hosted Octocrawl. Try again in a minute.'
+          report({ outcome: 'refused', reason: `http_${response.status}` })
           say(why.trim(), true)
           idle()
           return
         }
-        if (ran !== endpoint) { idle(); return }
+        // Switched to the other mode while it ran: the run still ended, and still counts, without its reason.
+        if (ran !== endpoint) { report({ outcome: (ran === 'map' ? (linkList(result.links) ?? []).length > 0 : READ.has(result.status)) ? 'ok' : 'failed' }); idle(); return }
         answer = result
         const used = response.headers.get('x-credits-used')
         const left = response.headers.get('x-credits-remaining')
         const [label, mark] = outcomeOf(result)
+        {
+          const record = result.evidenceRecord || {}
+          const why = ran === 'map' ? (mark === 'ok' ? null : 'no_links')
+            : offPage(result) && READ.has(result.status) ? 'off_page'
+              : mark === 'ok' ? null : result.failureReason || result.blockReason || record.reason || result.status
+          report({ outcome: mark === 'ok' ? 'ok' : 'failed', ...(why ? { reason: reasonCode(why) } : {}) })
+        }
         const pill = $('play-status'); pill.className = `status ${mark}`; pill.textContent = label
         const record = result.evidenceRecord
         const elsewhere = ran === 'scrape' && record && offPage(result)
@@ -1220,7 +1251,7 @@
         // The balance and the run's request line changed: read both again.
         activity = null
         load()
-      } catch { say('The run could not reach hosted Octocrawl. Try again in a minute.', true); idle() } finally { submit.disabled = false; goLabel() }
+      } catch { report({ outcome: 'error', reason: 'no_answer' }); say('The run could not reach hosted Octocrawl. Try again in a minute.', true); idle() } finally { submit.disabled = false; goLabel() }
     })
 
     // A recent run's card runs it again: its endpoint and URL go back into the form.

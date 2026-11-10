@@ -1,9 +1,22 @@
 /** The crawl window's model, without the DOM: the page it draws as a grid of glyphs, how far down that page the
- * octopus may go given what the server has reported, and the words of a read page that its cells resolve into.
- * Everything a visitor reads in the window comes from the run itself; the page's silhouette is drawn, never claimed. */
+ * octopus may go given what the server has reported, and the Markdown of a read page, set as text, that the grid
+ * resolves into. Everything a visitor reads in the window comes from the run itself; the page's silhouette is drawn,
+ * never claimed, and once a page is read the silhouette gives way to the page's own words. */
 
 // The stages and how far they let the octopus go live with the octopus itself, so every place that shows a run agrees.
+import type { CrawlStage } from '@w2l/octopus'
 export { crawlCap, mayRead, PROGRESS_STEPS, stageLabel, stepsDone, type CrawlStage, type StageEvent } from '@w2l/octopus'
+
+/** How far down the page (0 to 1) the window lets the octopus go before the result is back, whatever the stages
+ * allow: the rest of the page is kept for its last dive. */
+export const DIVE_FROM = 0.62
+
+/** Whether the gate that stands for robots.txt is open, so the octopus's arms may reach past it: only when the
+ * server said the file allows the page, or, from a server that reported no robots stage, once it has plainly gone on
+ * to the page (the page stage, or a result that read it). A refusal keeps it shut whatever comes after. */
+export function gateOpen(seen: ReadonlySet<CrawlStage>, robotsAllowed: boolean | null, pageRead: boolean): boolean {
+  return robotsAllowed === true || (robotsAllowed === null && (seen.has('page') || pageRead))
+}
 
 /** A cell of the drawn page: nothing, the page's chrome (navigation, sidebar, footer), or its main content. */
 export const Cell = { Empty: 0, Chrome: 1, Text: 2, Title: 3, Image: 4 } as const
@@ -13,6 +26,7 @@ export interface Block { kind: 'title' | 'text' | 'image'; top: number; bottom: 
 
 export interface PageLayout {
   cols: number
+  /** How many rows the page has: the silhouette's, or fewer once closePage has ended it sooner. */
   rows: number
   kind: Uint8Array
   /** The silhouette's own glyph for each cell (a char code; 32 for none). */
@@ -21,6 +35,9 @@ export interface PageLayout {
   blocks: Block[]
   /** The footer's rule near the page's foot: the ground the octopus lands on. */
   floor: number
+  /** The columns of the main column, and of the sidebar when the page is wide enough to have one. */
+  main: { left: number; right: number }
+  aside: { left: number; right: number } | null
 }
 
 /** A small deterministic generator, so one link always draws the same page. */
@@ -114,23 +131,47 @@ export function layoutPage(cols: number, rows: number, seed: number): PageLayout
     y += lines + 2
     sincePicture++
   }
-  // Footer.
-  for (let x = 0; x < cols; x++) set(x, footer, Cell.Chrome, '·')
-  for (let row = footer + 1; row < rows; row++) {
-    for (let x = margin; x < cols - margin; x += 9) for (let i = 0; i < 5 && x + i < cols - margin; i++) set(x + i, row, Cell.Chrome, '-')
-  }
-  return { cols, rows, kind, glyph, blocks, floor: footer }
+  writeFooter(cols, rows, kind, glyph, footer)
+  return { cols, rows, kind, glyph, blocks, floor: footer, main: { left: mainLeft, right: mainRight - 1 }, aside: sidebar ? { left: mainRight + 4, right: cols - margin - 1 } : null }
 }
 
-/** A page's Markdown as plain words: no link targets, pictures, emphasis marks, code fences or table rules. */
-export function plainText(markdown: string): string {
-  return markdown
-    .replace(/```[\s\S]*?```/g, ' ')
+/** The page's footer: a rule across row `floor`, and its lines on the rows under it. */
+function writeFooter(cols: number, rows: number, kind: Uint8Array, glyph: Uint16Array, floor: number): void {
+  const margin = Math.max(2, Math.round(cols * 0.04))
+  for (let row = floor; row < rows; row++) {
+    for (let x = 0; x < cols; x++) {
+      const line = row === floor || (x >= margin && x < cols - margin && (x - margin) % 9 < 5)
+      kind[row * cols + x] = line ? Cell.Chrome : Cell.Empty
+      glyph[row * cols + x] = line ? code(row === floor ? '·' : '-') : SPACE
+    }
+  }
+}
+
+/** Ends the page at row `floor` (above the silhouette's own): the footer is written there, the row above it is left
+ * clear, and nothing below is the page any more. The window ends a read page a set way below what it shows, so the
+ * octopus's last dive is as long whenever the result comes. */
+export function closePage(layout: PageLayout, floor: number): void {
+  if (floor >= layout.floor || floor < 1) return
+  const { cols, kind, glyph } = layout
+  for (let x = 0; x < cols; x++) { kind[(floor - 1) * cols + x] = Cell.Empty; glyph[(floor - 1) * cols + x] = SPACE }
+  writeFooter(cols, floor + 2, kind, glyph, floor)
+  layout.rows = floor + 2
+  layout.floor = floor
+  layout.blocks = layout.blocks.filter(block => block.top < floor - 1).map(block => ({ ...block, bottom: Math.min(block.bottom, floor - 2) }))
+}
+
+/** One part of a read page as the window sets it: a heading (with its # marks), a list item or quote (with its
+ * marker), a line of code, or a paragraph. */
+export type DocKind = 'heading' | 'item' | 'code' | 'text'
+export interface DocLine { text: string; kind: DocKind }
+
+/** A line's words without what only a renderer needs: pictures, link targets, tags, emphasis marks, code ticks and
+ * table bars. */
+function inlineText(line: string): string {
+  return line
     .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/<[^>]+>/g, ' ')
-    .replace(/^\s{0,3}(#{1,6}|[-*+]|\d+[.)]|>)\s+/gm, '')
-    .replace(/^\s*\|?[\s:|-]+\|[\s:|-]*$/gm, ' ')
     .replace(/(\*\*|__|\*|_|~~)(\S(?:[^*_~]*?\S)?)\1/g, '$2')
     .replace(/`+/g, '')
     .replace(/\|/g, ' ')
@@ -138,52 +179,149 @@ export function plainText(markdown: string): string {
     .trim()
 }
 
-/** Words laid into runs of cells, one run at a time, never split mid-word unless a word is longer than a run, with a
- * space between words. Writes a char code into `out` for each cell it fills, and stops when the words do. */
-function pour(words: string[], runs: Array<{ start: number; length: number }>, out: Uint16Array): void {
-  let word = 0
-  let offset = 0
-  for (const run of runs) {
-    let at = 0
-    while (word < words.length && at < run.length) {
-      const rest = words[word]!.slice(offset)
-      const room = run.length - at
-      if (rest.length > room && at > 0 && rest.length <= run.length) break
-      const piece = rest.slice(0, room)
-      for (let i = 0; i < piece.length; i++) out[run.start + at + i] = piece.charCodeAt(i)
-      if (at + piece.length < run.length) out[run.start + at + piece.length] = SPACE
-      at += piece.length + 1
-      if (piece.length < rest.length) offset += piece.length
-      else { word++; offset = 0 }
-    }
-    if (word >= words.length) return
+/** A page's Markdown as the parts the window sets: each heading with its # marks, each list item or quote with its
+ * marker, each paragraph joined into one line, code as it is written. Rules, table rules and code fences' own lines
+ * are left out. Characters are only ever taken away, never added. */
+export function markdownLines(markdown: string): DocLine[] {
+  const lines: DocLine[] = []
+  let paragraph = ''
+  let fenced = false
+  const flush = (): void => {
+    if (paragraph) lines.push({ text: paragraph, kind: 'text' })
+    paragraph = ''
   }
+  for (const raw of markdown.replace(/\r\n?/g, '\n').split('\n')) {
+    if (/^\s*(```|~~~)/.test(raw)) { fenced = !fenced; flush(); continue }
+    if (fenced) {
+      const code = raw.replace(/\s+/g, ' ').trim()
+      if (code) lines.push({ text: code, kind: 'code' })
+      continue
+    }
+    // A rule, a heading's underline, or the rule under a table's head.
+    if (/^\s*([-*_=]\s*){3,}$/.test(raw) || /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(raw)) { flush(); continue }
+    const text = inlineText(raw)
+    if (!text) { flush(); continue }
+    const heading = /^(#{1,6})\s+(.+)$/.exec(text)
+    if (heading) { flush(); lines.push({ text: `${heading[1]} ${heading[2]}`, kind: 'heading' }); continue }
+    if (/^([-*+]|\d+[.)]|>)\s+\S/.test(text)) { flush(); lines.push({ text, kind: 'item' }); continue }
+    paragraph = paragraph ? `${paragraph} ${text}` : text
+  }
+  flush()
+  return lines
 }
 
-/** The read page's own words, placed where the silhouette has lines: its title in the title, its text in the
- * paragraphs. Only characters from `title` and `markdown` are ever placed; a page with no words gets none. */
-export function fillWords(layout: PageLayout, title: string | null, markdown: string | null): Uint16Array {
-  const out = new Uint16Array(layout.cols * layout.rows)
-  const runsOf = (kinds: Cell[]): Array<{ start: number; length: number }> => {
-    const runs: Array<{ start: number; length: number }> = []
-    for (const block of layout.blocks) {
-      for (let y = block.top; y <= block.bottom; y++) {
-        let start = -1
-        for (let x = block.left; x <= block.right + 1; x++) {
-          const inside = x <= block.right && kinds.includes(layout.kind[y * layout.cols + x] as Cell)
-          if (inside && start < 0) start = x
-          if (!inside && start >= 0) { runs.push({ start: y * layout.cols + start, length: x - start }); start = -1 }
+/** A character that takes two cells of the grid: CJK and the other wide scripts, full-width forms, and what lies
+ * past the basic plane (emoji among it). */
+export function isWide(point: number): boolean {
+  return (point >= 0x1100 && point <= 0x115f) || (point >= 0x2e80 && point <= 0xa4cf) || (point >= 0xac00 && point <= 0xd7a3)
+    || (point >= 0xf900 && point <= 0xfaff) || (point >= 0xfe30 && point <= 0xfe4f) || (point >= 0xff00 && point <= 0xff60)
+    || (point >= 0xffe0 && point <= 0xffe6) || point >= 0x1f000
+}
+
+/** In PageWords.chars: the second cell of a character two cells wide. */
+export const WIDE_TAIL = 0xffffffff
+
+/** What a read page's cells show. */
+export interface PageWords {
+  /** The character each cell shows (a code point; 0 for none, WIDE_TAIL for the second cell of a wide one). */
+  chars: Uint32Array
+  /** 1 where the cell is part of a heading. */
+  heading: Uint8Array
+  /** The last row that took a character, -1 when none did. */
+  lastRow: number
+}
+
+/** What a line may not be broken inside: a word, or a single character of a wide script (those scripts are written
+ * without spaces, and break between any two characters). `glued` says it follows the one before with no space. */
+interface Atom { chars: string[]; cells: number; glued: boolean }
+
+function atomsOf(text: string): Atom[] {
+  const atoms: Atom[] = []
+  for (const word of text.split(' ')) {
+    let run: string[] = []
+    let glued = false
+    const flush = (): void => {
+      if (!run.length) return
+      atoms.push({ chars: run, cells: run.length, glued })
+      glued = true
+      run = []
+    }
+    for (const char of word) {
+      if (!isWide(char.codePointAt(0)!)) { run.push(char); continue }
+      flush()
+      atoms.push({ chars: [char], cells: 2, glued })
+      glued = true
+    }
+    flush()
+  }
+  return atoms
+}
+
+/** No more of a page's Markdown than this many characters is read to set the window's one screen of it: a page can
+ * be a megabyte long, and the result is set while the animation runs. */
+const TYPESET_SOURCE = 8000
+
+/** The start of a long Markdown, ended at a line's end (or else between two words), so nothing is cut in half. */
+function opening(markdown: string): string {
+  if (markdown.length <= TYPESET_SOURCE) return markdown
+  const cut = markdown.slice(0, TYPESET_SOURCE)
+  const line = cut.lastIndexOf('\n')
+  if (line > 0) return cut.slice(0, line)
+  const space = cut.lastIndexOf(' ')
+  // One unbroken run: all of the cut, less a surrogate left without its pair.
+  return space > 0 ? cut.slice(0, space) : cut.replace(/[\ud800-\udbff]$/, '')
+}
+
+/** The read page's own Markdown set as text in the page's main column, on rows `from` to `to`: its title first when
+ * the Markdown does not open with a heading of its own, then part after part, each wrapped to the column (a word
+ * longer than a line is cut at the line's end) with a clear row between parts; the items of one list, and the lines
+ * of one block of code, follow each other directly. It stops where the rows end. Only characters of `title` and
+ * `markdown` are ever placed; a page with no words gets none. */
+export function typesetPage(layout: PageLayout, title: string | null, markdown: string | null, rows: { from: number; to: number }): PageWords {
+  const words: PageWords = { chars: new Uint32Array(layout.kind.length), heading: new Uint8Array(layout.kind.length), lastRow: -1 }
+  const width = layout.main.right - layout.main.left + 1
+  const lines = markdown ? markdownLines(opening(markdown)) : []
+  const named = title?.replace(/\s+/g, ' ').trim() ?? ''
+  if (named && lines[0]?.kind !== 'heading') {
+    // The Markdown often opens by saying the title again.
+    if (lines[0]?.text === named) lines.shift()
+    lines.unshift({ text: named, kind: 'heading' })
+  }
+  const last = Math.min(rows.to, Math.floor(layout.kind.length / layout.cols) - 1)
+  let row = Math.max(0, rows.from)
+  let before: DocKind | null = null
+  for (const line of lines) {
+    if (before !== null && !(before === line.kind && (line.kind === 'item' || line.kind === 'code'))) row++
+    before = line.kind
+    let at = 0
+    for (const atom of atomsOf(line.text)) {
+      // A space before it, unless it starts the line or is glued to what came before.
+      let lead = atom.glued || at === 0 ? 0 : 1
+      if (at > 0 && at + lead + atom.cells > width) { row++; at = 0; lead = 0 }
+      let taken = 0
+      while (taken < atom.chars.length) {
+        if (row > last) return words
+        const point = atom.chars[taken]!.codePointAt(0)!
+        const size = isWide(point) ? 2 : 1
+        if (at + lead + size > width) {
+          // A character the column is too narrow for is left out; otherwise the word goes on at the next line.
+          if (at === 0) break
+          row++
+          at = 0
+          lead = 0
+          continue
         }
+        const cell = row * layout.cols + layout.main.left + at + lead
+        words.chars[cell] = point
+        words.heading[cell] = line.kind === 'heading' ? 1 : 0
+        if (size === 2) { words.chars[cell + 1] = WIDE_TAIL; words.heading[cell + 1] = words.heading[cell]! }
+        words.lastRow = row
+        at += lead + size
+        lead = 0
+        taken++
       }
     }
-    return runs
+    if (at > 0) row++
   }
-  const split = (text: string): string[] => text.split(/\s+/).filter(Boolean)
-  const heading = title?.replace(/\s+/g, ' ').trim() ?? ''
-  if (heading) pour(split(heading), runsOf([Cell.Title]), out)
-  let body = markdown ? plainText(markdown) : ''
-  // The Markdown usually opens with the title the title block already shows.
-  if (heading && body.startsWith(heading)) body = body.slice(heading.length).trim()
-  if (body) pour(split(body), runsOf([Cell.Text]), out)
-  return out
+  return words
 }

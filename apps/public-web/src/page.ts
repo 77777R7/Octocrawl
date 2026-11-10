@@ -296,7 +296,14 @@ ${siteHeaderMarkup()}
           </div>
         </div>
       </div>
-      <div class="band"><div class="frame runs-grid" id="runs-grid"></div></div>
+      <div class="band">
+        <div class="frame runs-frame">
+          <div class="runs-ledger">
+            <div class="runs-cols" aria-hidden="true"><span>Page</span><span class="run-type">Type</span><span>Status</span><span>Time</span><span class="run-started">Started</span><span>Output</span><span></span></div>
+            <div class="runs-grid" id="runs-grid"></div>
+          </div>
+        </div>
+      </div>
       <div class="band">
         <div class="frame run-detail" id="run-detail">
           <div class="detail-head">

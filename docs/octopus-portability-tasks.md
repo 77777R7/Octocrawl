@@ -79,7 +79,7 @@ CLI：
 
 各客户端（来自文档和源码，未实测）：
 
-- `notifications/progress` 的 `message`：Claude Code 显示（一度回退，2.1.153 修复），排版方式不明；Cursor 不显示（2026-07 官方论坛）；Codex CLI 不显示（TUI 里对应分支是空的）；Claude 桌面、VS Code Copilot、Cline 没找到来源。
+- `notifications/progress` 的 `message`：Claude Code 显示（一度回退，2.1.153 修复）。2026-11-10 在 Claude Code 2.1.251 的终端里实测 `wait_batch`：文字在工具调用那一行下面单独一行，`⎿  3/5 pages done (60%)`，原地更新，括号里的百分比是 Claude Code 按 `progress` 和 `total` 自己加的，调用结束后这一行消失；普通 `scrape` 当时只有 `Calling octocrawl · 6s…`，下面没有文字。不带 `total` 时怎么显示没有测；Cursor 不显示（2026-07 官方论坛）；Codex CLI 不显示（TUI 里对应分支是空的）；Claude 桌面、VS Code Copilot、Cline 没找到来源。
 - MCP Apps（SEP-1865，2026-01-26 定稿）：Claude 网页和桌面、ChatGPT、Goose 支持，VS Code 标为实验，Cursor 有用户报告渲染失败；Claude Code 不渲染。iframe 是否在工具运行期间就挂载，规范没有写明。
 - Claude Code mod：插件可以在 `ToolProgress`、`Spinner` 等位置画字符格（`Raster`），终端里每秒最多 30 次重绘。工具钩子能不能匹配 `mcp__octocrawl__*`，以及 mod 能不能拿到 MCP 进度消息，都没有测过。
 
@@ -98,14 +98,16 @@ CLI：
 - [x] **C1 `scrape` 和 `map` 的终端八爪鱼。**（`packages/cli/src/motion.ts`） 写 stderr。启用条件和关闭开关见 D4。Ctrl-C、异常退出时恢复光标。结束时清掉动画区，留一行摘要（今天 `run.ts:169-175` 那一行）。`map` 没有阶段，只有两态。
   - 完成标准：测试覆盖非 TTY 时一个转义字符都不写、stdout 字节和今天完全一样、关闭开关生效、中断后光标恢复序列已写出；在真实终端里对一个公开页面和一个 robots 拒绝的页面各跑一次，记录命令和 commit。
   - 做完后的样子：15 行（一页 14 行字符加一行状态），终端不足 49 列或 17 行时只画状态行；150 ms 内答完的调用（缓存命中）什么都不画；结果一到立刻清掉，不为落地动画多等，所以没有结束姿态，失败原因由原有的那行 stderr 说。stderr 的文字行和今天一样，没有新增摘要行。`TERM=dumb` 也不画。运行期间写到 stderr 的整行（命令自己的提示、引擎的 `console.error` 日志）先清掉画面、打印、再重画，留在滚动历史里（`motionTerminal`）；C2 的提示行走同一条路。已知缺口：运行中按回车，终端回显的换行会让画面错开一行，结束后滚动历史里留下一行残画。
-- [ ] **C2 `crawl` 和 `batch` 的终端八爪鱼。** 在 `settled` 的轮询里（`run.ts:293-299`）取计数，八爪鱼旁边一行 `N/M`。等用户点 Allow 的提示行（`handoffPrompts`，`run.ts:261-275`）照常打印，不被动画区盖住。
+- [x] **C2 `crawl` 和 `batch` 的终端八爪鱼。** 在 `settled` 的轮询里（`run.ts:293-299`）取计数，八爪鱼旁边一行 `N/M`。等用户点 Allow 的提示行（`handoffPrompts`，`run.ts:261-275`）照常打印，不被动画区盖住。
   - 完成标准：同 C1，另加一条：动画期间打印的提示行完整保留在滚动历史里。
-- [ ] **S1 `serve` 终端的活动区。** 有请求进来时，在终端底部画一次八爪鱼和一行"谁在读什么"（工具或路由、host、阶段）；空闲时只留一行。启动行和之后的日志行照常往上滚。只在 stderr 是 TTY 时启用。
+  - 做完后的样子：batch 的状态行是 `3/20 pages done`，八爪鱼的位置就是完成的比例；my-browser 的 batch 等用户点 Allow 时前面加 `Waiting for you in Chrome`。crawl 不知道总共有多少页，所以只有 `Crawling <host> · 7 pages fetched`，八爪鱼停在顶上不往下走。任务一结束（或 Ctrl-C）先清画面，再打印结尾那行；`--handoff` 阶段不画。
+- [x] **S1 `serve` 终端的活动区。** 有请求进来时，在终端底部画一次八爪鱼和一行"谁在读什么"（工具或路由、host、阶段）；空闲时只留一行。启动行和之后的日志行照常往上滚。只在 stderr 是 TTY 时启用。
   - 完成标准：测试覆盖并发两个请求时显示不串行、非 TTY 时输出和今天逐字节相同；用 Claude Code 经 stdio MCP 调一次 `scrape`，在 serve 终端里看到动画，记录命令和 commit。
+  - 做完后的样子：空闲时一行 `Waiting for calls · N answered so far`。有 scrape 或 map 调用时画八爪鱼，每个调用一行：调用方（请求里的 `origin`，去掉 `mcp-` 前缀和版本号）、scrape 或 map、host、这个调用自己的阶段、已用时间；八爪鱼跟着运行最久的那个调用。crawl 和 batch 从开始到结束各有一行，写已记录的页数（来自引擎的 job 事件，没有总数）；服务器启动时接着跑的旧任务不发开始事件，所以没有行，batch 结束后 handoff 记录的页面也不会把行带回来。最多显示 4 行，其余计数。150 ms 内答完的调用只计数不显示。请求里的文字只显示可打印字符。服务器经 `runApiServer` 的 `onActivity` 把这些事告诉 CLI（`ServerActivity`，`packages/api/src/activity.ts`）；不传监听时一个阶段都不听，和以前一样。
 
 ### Phase 2：MCP 进度
 
-- [ ] **P1 普通 `scrape` 和 `map` 发阶段进度。** 依赖 K2。MCP 服务器是本地 API 的 REST 客户端，而 REST 的回答今天不带阶段，所以要先让阶段经 REST 传出来（例如 `/v1/scrape` 的流式回答），这一步算在 P1 里。只在调用带 `progressToken` 时发；文字是白话阶段，一行以内（措辞见 D6）。不改工具列表和 instructions。
+- [ ] **P1 普通 `scrape` 发阶段进度。**（`map` 没有阶段可报，不发。分三步：① 本地 API 的 `/v1/scrape` 带 `Accept: application/x-ndjson` 时逐行回阶段，已做；② SDK 的 `scrape` 加 `onStage`；③ MCP 把阶段发成进度，不带 `total`。） 依赖 K2。MCP 服务器是本地 API 的 REST 客户端，而 REST 的回答今天不带阶段，所以要先让阶段经 REST 传出来（例如 `/v1/scrape` 的流式回答），这一步算在 P1 里。只在调用带 `progressToken` 时发；文字是白话阶段，一行以内（措辞见 D6）。不改工具列表和 instructions。
   - 完成标准：测试断言带 token 时收到 robots 和 page 两条、不带时一条不发、工具列表和 instructions 的长度测试仍过；在 Claude Code 里实际看一次，把看到的排版写进本文件"现状"一节，替换"排版方式不明"。
 - [ ] **P2 托管端进度。** 见 D7，列出但不开工。
 

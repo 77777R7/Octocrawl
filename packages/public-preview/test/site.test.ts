@@ -384,6 +384,11 @@ describe('first-party analytics', () => {
     expect(parseWebEvent({ name: 'markdown_mode', props: { mode: 'preview' } })).toEqual({ name: 'markdown_mode', props: { mode: 'preview' } })
     expect(parseWebEvent({ name: 'markdown_mode', props: { mode: 'raw' } })).toBeNull()
     expect(parseWebEvent({ name: 'markdown_mode', props: { mode: 1 } })).toBeNull()
+    // A copied setup line, and a Playground run's outcome from a fixed list with a short reason.
+    expect(parseWebEvent({ name: 'setup_copy', props: { path: '/tools/url-to-markdown/', target: 'tool-next' } })).toEqual({ name: 'setup_copy', props: { path: '/tools/url-to-markdown/', target: 'tool-next' } })
+    expect(parseWebEvent({ name: 'playground_run', props: { path: '/dashboard/scrape/', view: 'scrape', outcome: 'failed', reason: 'cloudflare_challenge' } })).toEqual({ name: 'playground_run', props: { path: '/dashboard/scrape/', view: 'scrape', outcome: 'failed', reason: 'cloudflare_challenge' } })
+    expect(parseWebEvent({ name: 'playground_run', props: { outcome: 'great' } })).toBeNull()
+    expect(parseWebEvent({ name: 'playground_run', props: { outcome: 1 } })).toBeNull()
     const day1 = dailyVisitorId('k'.repeat(32), 'visitor:abc', new Date('2026-09-30T12:00:00Z'))
     expect(dailyVisitorId('k'.repeat(32), 'visitor:abc', new Date('2026-09-30T23:00:00Z'))).toBe(day1)
     expect(dailyVisitorId('k'.repeat(32), 'visitor:abc', new Date('2026-10-01T00:00:00Z'))).not.toBe(day1)

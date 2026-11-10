@@ -34,7 +34,12 @@ export function toolNextStep(kind: NextStepKind, url: string, { code, morePages 
     const row = el('li', 'tool-next-item')
     row.append(el('strong', '', head), el('span', '', text))
     // The line itself, to copy straight into a terminal without opening the guide.
-    if (code) row.append(el('code', 'tool-next-code', code))
+    if (code) {
+      const line = el('code', 'tool-next-code', code)
+      // The line has no Copy button: a visitor selects it and copies by hand, which the browser reports as a copy.
+      line.addEventListener('copy', () => track('setup_copy', { target: 'tool-next' }))
+      row.append(line)
+    }
     row.append(action)
     list.append(row)
   }

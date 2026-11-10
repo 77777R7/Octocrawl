@@ -180,11 +180,11 @@ export const EVENT_BODY_BYTES = 2_048
 const EVENT_NAMES = new Set([
   'page_view', 'example_click', 'view_change', 'result_copy', 'result_download',
   'get_code_open', 'get_code_copy', 'link_click', 'docs_code_copy', 'mcp_client_select', 'example_tab', 'selfhost_tab',
-  'markdown_mode', 'next_step_view',
+  'markdown_mode', 'next_step_view', 'setup_copy', 'playground_run',
 ])
-const PROP_KEYS = new Set(['path', 'ref', 'utm_source', 'utm_medium', 'utm_campaign', 'from', 'view', 'tab', 'target', 'href', 'client', 'trigger', 'mode'])
+const PROP_KEYS = new Set(['path', 'ref', 'utm_source', 'utm_medium', 'utm_campaign', 'from', 'view', 'tab', 'target', 'href', 'client', 'trigger', 'mode', 'outcome', 'reason'])
 /** Properties whose values come from a fixed list on the page. */
-const PROP_VALUES: Record<string, Set<string>> = { mode: new Set(['source', 'preview']) }
+const PROP_VALUES: Record<string, Set<string>> = { mode: new Set(['source', 'preview']), outcome: new Set(['ok', 'failed', 'refused', 'error']) }
 
 export type WebEvent = { name: string; props: Record<string, string | number | boolean> }
 
