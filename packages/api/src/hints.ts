@@ -56,6 +56,21 @@ export function hostedGateHint(host: string, lanes: readonly string[]): string {
   return `${host} gates automated access on the lanes tried (${lanes.join(', ')}); hosted Octocrawl does not solve challenges or change its identity, and has no proxy, session or handoff of yours; on your computer Octocrawl can hand the page to you in your own Chrome (npx octocrawl serve, then the scrape with handoff: true) or read it with a login you saved there (octocrawl login import <host>, then mode authed)`
 }
 
+/**
+ * What Octocrawl says of a page that refused the exit (`access_denied`: a block page, with no check to pass). Waiting and
+ * asking again from the same network do not clear it, so the next step is another network, or the person's own Chrome,
+ * unless that is where the page was refused.
+ */
+function refusedHint(host: string, lanes: readonly string[]): string {
+  const chrome = lanes.includes('my_browser') ? '' : ', or, on your own machine, read the page in your own Chrome: handoff: true on a scrape (octocrawl scrape --handoff), or a batch handoff (octocrawl batch --handoff, POST /v1/batches/:id/handoff)'
+  return `${host} refused this exit with a block page on the lanes tried (${lanes.join(', ')}): the page has no check to pass, so waiting or asking again from the same network does not help; another network may be let in (a proxy or session you own)${chrome}`
+}
+
+/** What hosted Octocrawl says of a page that refused its exit: it has no other network of the person's, so the route is their own computer. */
+export function hostedRefusedHint(host: string, lanes: readonly string[]): string {
+  return `${host} refused hosted Octocrawl's exit with a block page on the lanes tried (${lanes.join(', ')}): the page has no check to pass, so waiting or asking again from here does not help, and hosted Octocrawl has no proxy or session of yours; on your computer Octocrawl asks from your own network (npx octocrawl serve), and can hand the page to you in your own Chrome (the scrape with handoff: true)`
+}
+
 /** The deadlines a hint names as the most a timeout may be raised to: the engine's, or hosted Octocrawl's two (REST, and the MCP tool's). */
 function timeoutCeiling(hosted: boolean): string {
   return hosted ? `up to ${DEFAULT_SCRAPE_TIMEOUT_MS} ms over REST, ${HOSTED_MCP_TIMEOUT_CEILING_MS} ms from an MCP tool` : `up to ${DEFAULT_SCRAPE_TIMEOUT_MS} ms`
@@ -114,8 +129,8 @@ export function fileHint(file: NonNullable<FetchResult['file']>, noFiles = false
 /** Quality events the http lane raises as an offer to the browser lane (see the ladder's QUALITY_ESCALATION_EVENTS). */
 const QUALITY_EVENTS: ReadonlySet<string> = new Set(['quality_low_yield', 'quality_client_rendered'])
 
-/** The block reasons that are a gate on automated access, which W2L does not get past. */
-const GATES: ReadonlySet<string> = new Set(['cloudflare_challenge', 'captcha', 'bot_detected_generic', 'access_denied'])
+/** The block reasons that are a check on automated access, which Octocrawl does not get past. A refused exit (`access_denied`) is not one: it has its own hints. */
+const GATES: ReadonlySet<string> = new Set(['cloudflare_challenge', 'captcha', 'bot_detected_generic'])
 
 /** What a hint is read from: the result's verdict, caveats, trace and json issues, and the lanes the run tried. */
 export type HintedResult = Pick<FetchResult, 'status' | 'failureReason' | 'blockReason' | 'retryAt' | 'truncated' | 'truncatedAt' | 'warnings' | 'markdown' | 'escalations' | 'trace' | 'lane' | 'requestedUrl' | 'file' | 'json'> & {
@@ -256,7 +271,7 @@ export interface FailureFacts { status: string; failureReason: string | null; bl
  * The group a failed page falls into in the finished batch's hint, or null for a page the hint leaves alone: a page read
  * (with or without content), a cancelled or over-budget one (not the site's doing), and a page at a login wall, which has
  * its own line (`batchLoginWallHint`). `fast_mode_declined`: an empty http answer whose browser lane fastMode declined.
- * `robots_unreachable` and `robots_disallowed`: a robots.txt refusal. `gated`: a check Octocrawl does not pass. The rest
+ * `robots_unreachable` and `robots_disallowed`: a robots.txt refusal. `gated`: a check Octocrawl does not pass (a refused exit, `access_denied`, keeps its own name). The rest
  * is the page's own failure or block reason.
  */
 export function failureGroupOf(facts: FailureFacts): string | null {
@@ -288,7 +303,7 @@ export function withFailure(failures: BatchFailures, group: string, host: string
 }
 
 /** The groups whose line says a next step; the rest share one line that points at the items. Listed in the order the lines come when counts tie. */
-const NAMED_FAILURE_GROUPS = ['fast_mode_declined', 'robots_unreachable', 'gated', 'timeout', 'robots_disallowed'] as const
+const NAMED_FAILURE_GROUPS = ['fast_mode_declined', 'robots_unreachable', 'gated', 'access_denied', 'timeout', 'robots_disallowed'] as const
 /** The most lines of their own a finished batch's failures take; the groups past them join the last line. */
 const MAX_FAILURE_LINES = 4
 
@@ -302,13 +317,14 @@ function failedPages(group: BatchFailures[string]): string {
 /**
  * The lines of a finished batch's status about its failed pages: one a reason, the next step in each, in place of an
  * agent reading every failed item for the same. `fast_mode_declined` says to send those URLs again without fastMode;
- * the robots and gate lines say what this server obeys and the route on the person's own computer; a timeout line names
+ * the robots and gate lines say what this server obeys and the route on the person's own computer; a refused exit's line
+ * says that waiting does not help and names another network; a timeout line names
  * a longer timeout; every other reason shares one line that points at `get_batch_errors`, where each item keeps its
  * own hint. Pages at a login wall are not here (`batchLoginWallHint`). `batch.timeout` is the batch's, when it named one;
  * `browserLane` false when the key has no browser lane, so the batch ran on HTTP alone and no fastMode of its own kept it
  * from the browser; `handoff` true when this server hands a batch's stopped pages to the person's Chrome.
  */
-export function batchFailureHints(failures: BatchFailures, batch: { timeout?: number; hosted?: boolean; browserLane?: boolean; handoff?: boolean }): string[] {
+export function batchFailureHints(failures: BatchFailures, batch: { timeout?: number; hosted?: boolean; browserLane?: boolean; handoff?: boolean; refusedInPersonChrome?: boolean }): string[] {
   const hosted = batch.hosted === true
   const most = DEFAULT_SCRAPE_TIMEOUT_MS
   const groups = Object.entries(failures).filter(([, group]) => group.count > 0)
@@ -332,6 +348,12 @@ export function batchFailureHints(failures: BatchFailures, batch: { timeout?: nu
         ? '; hosted Octocrawl does not solve challenges or change its identity; on your computer Octocrawl can hand them to you in your own Chrome (npx octocrawl serve, then the batch with a handoff) or read them with a login you saved there (octocrawl login import <host>, then mode authed)'
         : batch.handoff === true ? '; get through the check yourself in your own Chrome: a batch handoff (hand_off_batch, POST /v1/batches/:id/handoff, octocrawl batch --handoff) opens them there and Octocrawl reads the page'
         : '; this server has no Chrome of the person\'s to hand them to; on their own computer Octocrawl can (npx octocrawl serve, then the batch with a handoff)'}`
+      case 'access_denied': return `${pages} refused ${hosted ? 'hosted Octocrawl\'s' : 'this'} exit with a block page, which has no check to pass: waiting or a new batch from ${hosted
+        ? `here does not help, and hosted Octocrawl has no proxy or session of yours; on your computer Octocrawl asks from your own network (npx octocrawl serve), and can hand ${one ? 'it' : 'them'} to you in your own Chrome (the batch with a handoff)`
+        : batch.refusedInPersonChrome === true ? 'the same network does not help, and the person\'s own Chrome was refused there too; another network may be let in (a proxy or session you own)'
+        : `the same network does not help; another network may be let in (a proxy or session you own)${batch.handoff === true
+          ? ', or read them in your own Chrome: a batch handoff (hand_off_batch, POST /v1/batches/:id/handoff, octocrawl batch --handoff) opens them there and Octocrawl reads the page'
+          : '; this server has no Chrome of the person\'s to hand them to; on their own computer Octocrawl can (npx octocrawl serve, then the batch with a handoff)'}`}`
       case 'timeout': return (batch.timeout ?? most) >= most
         ? `${pages} ran out of the longest timeout Octocrawl takes (${most} ms): the ${one ? 'site was' : 'sites were'} down or slower than that; a new batch of ${one ? 'that URL' : 'those URLs'} later tells one from the other`
         : `${pages} ran out of ${one ? 'its' : 'their'} ${batch.timeout} ms timeout: a new batch of ${one ? 'that URL' : 'those URLs'} with a longer timeout (up to ${most} ms) when the ${one ? 'site is' : 'sites are'} slow rather than down`
@@ -530,6 +552,8 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode' | 'waitFor'>, 
   }
   const hosted = offers.hosted === true
   if (result.status === 'blocked' && result.blockReason === 'login_wall') hints.push(loginWallHint(run, offers))
+  // A refused exit is not a check: no solving, no waiting and no installed_chrome recommendation, which is for a check that rung waits out.
+  if (result.status === 'blocked' && result.blockReason === 'access_denied') hints.push(hosted ? hostedRefusedHint(host, run.channelsTried) : refusedHint(host, run.channelsTried))
   if (result.status === 'blocked' && result.blockReason !== null && GATES.has(result.blockReason)) {
     hints.push(hosted ? hostedGateHint(host, run.channelsTried) : `${host} gates automated access on the lanes tried (${run.channelsTried.join(', ')}); Octocrawl does not solve challenges or change its identity unless this server's access grant names a provider that does (--access-grant, ADR 0005); a proxy or session you own is the supported route, or, on your own machine, getting through the check yourself in your own Chrome: handoff: true on a scrape (octocrawl scrape --handoff), or a batch handoff (octocrawl batch --handoff, POST /v1/batches/:id/handoff)`)
     // The bundled browser met the check too: the rung after it, on the person's machine, is their installed Chrome; a run

@@ -1338,7 +1338,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       // A finished batch says what to do about the pages behind a login in one line, and about the rest of its failed pages a line a reason; a batch still running has more to read first, and a handoff waits for its end.
       const failedSteps = isTerminalStatus(task.status) && (counts.failed ?? 0) + (counts.blocked ?? 0) > 0 ? await stepsOf(store, taskId, 'errors') : []
       const behindLogin = failedSteps.filter((step) => step.result?.blockReason === 'login_wall')
-      const failureLines = batchFailureHints(failuresOf(failedSteps, task), { hosted: options.hosted === true, handoff: waitingForPerson !== undefined, ...(task.batch.timeout === undefined ? {} : { timeout: task.batch.timeout }) })
+      // A page the person's own Chrome was refused too is not sent back there (every refused page of the batch, or the line keeps the route for the others).
+      const refused = failedSteps.filter((step) => step.result?.blockReason === 'access_denied')
+      const failureLines = batchFailureHints(failuresOf(failedSteps, task), { hosted: options.hosted === true, handoff: waitingForPerson !== undefined, ...(refused.length > 0 && refused.every((step) => step.result?.lane === 'my_browser') ? { refusedInPersonChrome: true } : {}), ...(task.batch.timeout === undefined ? {} : { timeout: task.batch.timeout }) })
       // And about the pages it read with nothing taken from them: a selection that held nothing, json fields with no source on the page.
       const extractionLines = !isTerminalStatus(task.status) ? [] : batchExtractionHints({
         read: (counts.success ?? 0) + (counts.partial ?? 0) + (counts.empty_verified ?? 0),
