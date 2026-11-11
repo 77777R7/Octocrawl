@@ -478,7 +478,8 @@ describe('anonymous preview contract', () => {
     tempDirs.push(dir)
     await writeFile(join(dir, 'index.html'), '<!doctype html><title>Preview</title>')
     const visitors: string[] = []
-    const url = await endpoint({ consume: async visitor => { visitors.push(visitor); return 'ok' } }, async target => fixture(target.url), {
+    const addresses: (string | undefined)[] = []
+    const url = await endpoint({ consume: async (visitor, _now, _execution, address) => { visitors.push(visitor); addresses.push(address); return 'ok' } }, async target => fixture(target.url), {
       staticDir: dir, visitorCookieSecret: 's'.repeat(32),
     })
     const page = await fetch(url)
@@ -491,6 +492,12 @@ describe('anonymous preview contract', () => {
     expect(visitors[0]).toBe(visitors[1])
     expect(visitors[0]).toMatch(/^visitor:/)
     expect(visitors[2]).toBe('ip:3.3.3.3')
+    // The address is counted as well, whatever the cookie says; an IPv6 address by its /64, which one host can rotate within.
+    expect(addresses).toEqual(['1.1.1.1', '2.2.2.2', '3.3.3.3'])
+    await request(cookie!, '2001:db8:1:2:aaaa::1')
+    await request(cookie!, '2001:0DB8:1:2:bbbb:0:0:9')
+    await request(cookie!, '::ffff:4.4.4.4')
+    expect(addresses.slice(3)).toEqual(['2001:db8:1:2::/64', '2001:db8:1:2::/64', '4.4.4.4'])
   })
 
   it('allows owner-token evaluation without consuming visitor quota and keeps evidence private', async () => {

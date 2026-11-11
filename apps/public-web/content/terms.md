@@ -24,7 +24,7 @@ The preview is run by Howard Lun, an individual in British Columbia, Canada. You
 ## What the preview is
 
 - A limited, free public trial. There is no payment, and an account is optional (below).
-- Each visitor gets five previews per UTC day, and the whole site 150. These limits may change.
+- Each visitor gets five previews per UTC day, each network address 15, and the whole site 150. These limits may change.
 - The preview may be changed, slowed down, paused or stopped at any time, without notice.
 - It reads one public `http://` or `https://` address per request. It refuses private and reserved network addresses, pages whose robots.txt does not allow it or cannot be reached, and pages that ask for a login or show a verification challenge. Size and time limits are listed in [Limits and result states](/docs/limits/).
 
