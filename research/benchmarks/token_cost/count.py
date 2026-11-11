@@ -13,7 +13,8 @@ Arms (tokens to read the whole page):
   octocrawl_md    the page's Markdown alone, all pages joined
 
 Retention (Octocrawl and Fetch MCP alike): paragraphs and list items of 60+ characters in the Playwright snapshot (the page as the browser shows it,
-navigation included) found in Octocrawl's Markdown after both are reduced to letters and digits. A snapshot paragraph
+navigation included) found in the arm's text after both are reduced to letters and digits (the Fetch MCP's answers
+joined without their "Contents of" headers and truncation notes, Octocrawl's Markdown joined across answers). A snapshot paragraph
 the Markdown lacks is either chrome Octocrawl dropped on purpose or content it lost: low values are read by hand.
 """
 import json
@@ -41,6 +42,16 @@ def read(path):
 
 def squash(text):
     return re.sub(r'[^0-9a-z]+', '', text.lower())
+
+
+def fetch_body(answers):
+    """The Fetch MCP's page text without its paging scaffolding, so a paragraph cut across two answers still matches.
+
+    Each answer opens with "Contents of <url>:" and a cut one ends with an <error>Content truncated...</error> note; both
+    stay in the token count (the agent receives them) and are removed here for the retention check alone.
+    """
+    text = re.sub(r'<error>Content truncated\.[^<]*</error>', '', answers)
+    return re.sub(r'(?m)^Contents of \S+:\n?', '', text)
 
 
 def snapshot_paragraphs(snapshot):
@@ -81,7 +92,7 @@ def main():
         hay = squash(md or '')
         found = [p for p in paras if squash(p)[:120] in hay]
         row['retention'] = {'snapshot_paragraphs': len(paras), 'found_in_markdown': len(found), 'share': round(len(found) / len(paras), 3) if paras else None}
-        fhay = squash(fm or '')
+        fhay = squash(fetch_body(fm or ''))
         ffound = [p for p in paras if squash(p)[:120] in fhay]
         row['fetch_retention'] = {'found': len(ffound), 'share': round(len(ffound) / len(paras), 3) if paras else None}
         row['fetch_missing_examples'] = [p[:140] for p in paras if p not in ffound][:5]
