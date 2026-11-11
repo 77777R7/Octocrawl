@@ -6,18 +6,26 @@ export type QuotaDecision = 'ok' | 'visitor_limited' | 'global_limited'
 /** Previews per visitor, and for the whole site, per UTC day. */
 export const VISITOR_DAILY_PREVIEWS = 5
 export const SITE_DAILY_PREVIEWS = 150
+/**
+ * Previews per client address (an IPv6 address by its /64) per UTC day, whatever visitor cookies it sends. The site hands
+ * a new signed cookie to any page view, so a client that dropped its cookie was a new visitor each time and could use up
+ * the site's day alone (found 2026-11-11). Three visitors' worth, so that people behind one shared address still get
+ * their own five.
+ */
+export const ADDRESS_DAILY_PREVIEWS = 15
 
-/** What a visitor has left today: never more than the site has left, so the page cannot promise a preview the
- * site-wide limit would refuse. */
+/** What a visitor has left today: never more than the site or its address has left, so the page cannot promise a
+ * preview a wider limit would refuse. A used-up address reads as the visitor's own limit. */
 export interface QuotaStatus {
   decision: QuotaDecision
   limit: number
   remaining: number
 }
 
-export function quotaStatus(siteUsed: number, visitorUsed: number): QuotaStatus {
-  const decision: QuotaDecision = siteUsed >= SITE_DAILY_PREVIEWS ? 'global_limited' : visitorUsed >= VISITOR_DAILY_PREVIEWS ? 'visitor_limited' : 'ok'
-  const remaining = decision === 'ok' ? Math.min(VISITOR_DAILY_PREVIEWS - visitorUsed, SITE_DAILY_PREVIEWS - siteUsed) : 0
+export function quotaStatus(siteUsed: number, visitorUsed: number, addressUsed = 0): QuotaStatus {
+  const decision: QuotaDecision = siteUsed >= SITE_DAILY_PREVIEWS ? 'global_limited'
+    : visitorUsed >= VISITOR_DAILY_PREVIEWS || addressUsed >= ADDRESS_DAILY_PREVIEWS ? 'visitor_limited' : 'ok'
+  const remaining = decision === 'ok' ? Math.min(VISITOR_DAILY_PREVIEWS - visitorUsed, ADDRESS_DAILY_PREVIEWS - addressUsed, SITE_DAILY_PREVIEWS - siteUsed) : 0
   return { decision, limit: VISITOR_DAILY_PREVIEWS, remaining }
 }
 
@@ -27,12 +35,15 @@ export function quotaExpiry(now: Date): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 2))
 }
 
+/** `visitor` is the cookie's visitor (`visitor:<id>`) or, without one, `ip:<address>`; `address` is the client's address
+ * group (clientAddressGroup in server.ts), counted against ADDRESS_DAILY_PREVIEWS beside it. Without an address only
+ * the visitor and the site are counted. */
 export interface PreviewQuota {
   /** Advisory read-only check before acquiring a scarce origin permit. */
-  check?(visitor: string, now?: Date, execution?: ExecutionBudget): Promise<QuotaDecision>
+  check?(visitor: string, now?: Date, execution?: ExecutionBudget, address?: string): Promise<QuotaDecision>
   /** Read-only: what this visitor has left today. Never writes a counter. */
-  status?(visitor: string, now?: Date, execution?: ExecutionBudget): Promise<QuotaStatus>
-  consume(visitor: string, now?: Date, execution?: ExecutionBudget): Promise<QuotaDecision>
+  status?(visitor: string, now?: Date, execution?: ExecutionBudget, address?: string): Promise<QuotaStatus>
+  consume(visitor: string, now?: Date, execution?: ExecutionBudget, address?: string): Promise<QuotaDecision>
 }
 
 interface FirestoreDocument {
@@ -64,37 +75,43 @@ export class FirestorePreviewQuota implements PreviewQuota {
     this.endpointBase = `https://firestore.googleapis.com/v1/${this.resourceBase}`
   }
 
-  private names(visitor: string, now: Date): { global: string; individual: string } {
+  private names(visitor: string, now: Date, address: string | undefined): { global: string; individual: string; address: string | null } {
     const day = now.toISOString().slice(0, 10)
-    const visitorHash = createHmac('sha256', this.hashKey).update(`${day}:${visitor}`).digest('hex')
+    const hash = (key: string) => createHmac('sha256', this.hashKey).update(`${day}:${key}`).digest('hex')
     return {
       global: `${this.resourceBase}/publicPreviewQuotas/${day}-global`,
-      individual: `${this.resourceBase}/publicPreviewQuotas/${day}-${visitorHash}`,
+      individual: `${this.resourceBase}/publicPreviewQuotas/${day}-${hash(visitor)}`,
+      // `address:` never begins a visitor key (`visitor:` or `ip:`), so the two counters cannot share a document.
+      address: address === undefined ? null : `${this.resourceBase}/publicPreviewQuotas/${day}-${hash(`address:${address}`)}`,
     }
   }
 
-  async check(visitor: string, now = new Date(), execution: ExecutionBudget = {}): Promise<QuotaDecision> {
-    return (await this.status(visitor, now, execution)).decision
+  private async readAll(names: { global: string; individual: string; address: string | null }, token: string, execution: ExecutionBudget): Promise<DocumentRead[]> {
+    return Promise.all([names.global, names.individual, ...(names.address === null ? [] : [names.address])].map(name => this.read(name, token, execution)))
   }
 
-  async status(visitor: string, now = new Date(), execution: ExecutionBudget = {}): Promise<QuotaStatus> {
+  async check(visitor: string, now = new Date(), execution: ExecutionBudget = {}, address?: string): Promise<QuotaDecision> {
+    return (await this.status(visitor, now, execution, address)).decision
+  }
+
+  async status(visitor: string, now = new Date(), execution: ExecutionBudget = {}, address?: string): Promise<QuotaStatus> {
     throwIfExecutionStopped(execution)
-    const { global, individual } = this.names(visitor, now)
+    const names = this.names(visitor, now, address)
     const token = await this.accessToken(execution)
-    const [all, own] = await Promise.all([this.read(global, token, execution), this.read(individual, token, execution)])
+    const [all, own, group] = await this.readAll(names, token, execution)
     throwIfExecutionStopped(execution)
-    return quotaStatus(all.count, own.count)
+    return quotaStatus(all!.count, own!.count, group?.count ?? 0)
   }
 
-  async consume(visitor: string, now = new Date(), execution: ExecutionBudget = {}): Promise<QuotaDecision> {
-    const { global, individual } = this.names(visitor, now)
+  async consume(visitor: string, now = new Date(), execution: ExecutionBudget = {}, address?: string): Promise<QuotaDecision> {
+    const names = this.names(visitor, now, address)
     // Firestore commits are atomic. Under contention the preconditions force
     // a retry instead of allowing two requests to consume the same last slot.
     for (let attempt = 0; attempt < 6; attempt++) {
       throwIfExecutionStopped(execution)
       const token = await this.accessToken(execution)
-      const [all, own] = await Promise.all([this.read(global, token, execution), this.read(individual, token, execution)])
-      const decision = quotaStatus(all.count, own.count).decision
+      const docs = await this.readAll(names, token, execution)
+      const decision = quotaStatus(docs[0]!.count, docs[1]!.count, docs[2]?.count ?? 0).decision
       if (decision !== 'ok') return decision
       // A client disconnect between the reads and commit must not consume a
       // quota slot for a scrape that will never start.
@@ -102,7 +119,7 @@ export class FirestorePreviewQuota implements PreviewQuota {
       const response = await this.fetcher(`${this.endpointBase}:commit`, {
         method: 'POST',
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ writes: [this.write(all, now), this.write(own, now)] }),
+        body: JSON.stringify({ writes: docs.map(doc => this.write(doc, now)) }),
         signal: this.requestSignal(execution, 5_000),
       })
       if (response.ok) return 'ok'

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { FirestorePreviewQuota, quotaExpiry, quotaStatus } from '../src/quota.js'
+import { ADDRESS_DAILY_PREVIEWS, FirestorePreviewQuota, quotaExpiry, quotaStatus } from '../src/quota.js'
 
 interface Saved { count: number; updateTime: string }
 const restPrefix = 'https://firestore.googleapis.com/v1/'
@@ -48,6 +48,22 @@ describe('durable preview quota', () => {
     expect(decisions.filter(value => value === 'visitor_limited')).toHaveLength(1)
     expect([...store.docs.values()].map(value => value.count).sort((a, b) => a - b)).toEqual([5, 5])
     expect([...store.docs.keys()].every(name => name.startsWith('projects/sample-project/databases/(default)/documents/'))).toBe(true)
+    expect(store.names.join(' ')).not.toContain('203.0.113.10')
+  })
+
+  it('counts the address beside the visitor cookie, so new cookies from one network stop at the address\'s limit', async () => {
+    const store = fakeFirestore()
+    const quota = new FirestorePreviewQuota('sample-project', 'x'.repeat(32), store.fetcher)
+    const now = new Date('2026-09-24T02:00:00Z')
+    const decisions: string[] = []
+    // A client that drops its cookie after every five previews: each new cookie is a new visitor, the address is not.
+    for (let cookie = 0; cookie < 4; cookie++) for (let i = 0; i < 5; i++) decisions.push(await quota.consume(`visitor:${cookie}`, now, {}, '203.0.113.10'))
+    expect(decisions.filter(value => value === 'ok')).toHaveLength(ADDRESS_DAILY_PREVIEWS)
+    expect(decisions.slice(ADDRESS_DAILY_PREVIEWS).every(value => value === 'visitor_limited')).toBe(true)
+    expect(await quota.status('visitor:fresh', now, {}, '203.0.113.10')).toEqual({ decision: 'visitor_limited', limit: 5, remaining: 0 })
+    // Another network is not touched, and a visitor near the address's limit is told what the address has left.
+    expect(await quota.status('visitor:fresh', now, {}, '198.51.100.1')).toEqual({ decision: 'ok', limit: 5, remaining: 5 })
+    expect(quotaStatus(0, 0, ADDRESS_DAILY_PREVIEWS - 2)).toEqual({ decision: 'ok', limit: 5, remaining: 2 })
     expect(store.names.join(' ')).not.toContain('203.0.113.10')
   })
 

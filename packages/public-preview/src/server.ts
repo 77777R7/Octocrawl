@@ -3,7 +3,7 @@ import { createHmac, createHash, randomBytes, timingSafeEqual } from 'node:crypt
 import { readFile, stat } from 'node:fs/promises'
 import { isIP } from 'node:net'
 import { basename, dirname, extname, relative, resolve, sep } from 'node:path'
-import { VISITOR_DAILY_PREVIEWS, type PreviewQuota, type QuotaDecision, type QuotaStatus } from './quota.js'
+import { ADDRESS_DAILY_PREVIEWS, VISITOR_DAILY_PREVIEWS, type PreviewQuota, type QuotaDecision, type QuotaStatus } from './quota.js'
 import { AmazonGateBusyError, type AmazonOriginGate, type AmazonOriginPermit } from './amazonGate.js'
 import type { PreviewCapture, PreviewResponse, PreviewStage } from './preview.js'
 import { normalizePreviewUrl } from './previewUrl.js'
@@ -183,6 +183,25 @@ function setSourceCookie(req: IncomingMessage, res: ServerResponse, pathname: st
   const secure = !/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host ?? '')
   const existing = res.getHeader('set-cookie')
   res.setHeader('set-cookie', [...(Array.isArray(existing) ? existing : typeof existing === 'string' ? [existing] : []), sourceCookie(landingSource(req, pathname, search, ownHost), secure)])
+}
+
+/** The client's address as the address quota counts it: an IPv4 address (an IPv4-mapped IPv6 one included) as it is, an
+ * IPv6 address by its /64, since one host or home is usually handed a whole /64 and can rotate within it. */
+export function clientAddressGroup(address: string): string {
+  const lower = address.toLowerCase()
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(lower)
+  if (mapped && isIP(mapped[1]!) === 4) return mapped[1]!
+  if (isIP(lower) !== 6) return lower
+  const [head, tail] = lower.includes('::') ? lower.split('::') as [string, string] : [lower, null]
+  const groups = (part: string) => part === '' ? [] : part.split(':').flatMap(group => {
+    if (!group.includes('.')) return [group]
+    const [a, b, c, d] = group.split('.').map(Number) as [number, number, number, number]
+    return [((a << 8) | b).toString(16), ((c << 8) | d).toString(16)]
+  })
+  const front = groups(head)
+  const back = tail === null ? [] : groups(tail)
+  const full = [...front, ...Array<string>(8 - front.length - back.length).fill('0'), ...back]
+  return `${full.slice(0, 4).map(group => group.replace(/^0+(?=.)/, '')).join(':')}::/64`
 }
 
 function visitorKey(req: IncomingMessage, secret: string | undefined): string {
@@ -385,20 +404,21 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       if (options.enabled === false) { sendJson(res, 200, { enabled: false }); return }
       if (!options.quota.status) { sendJson(res, 501, { error: 'quota_status_unavailable' }); return }
       const key = visitorKey(req, options.visitorCookieSecret)
+      const address = clientAddressGroup(visitorAddress(req))
       // One instant for the day the store counts, the cache and the reset time.
       const now = Date.now()
       const resetsAt = nextUtcMidnight(new Date(now))
-      const cached = usedUp.get(key)
+      const cached = usedUp.get(`${key} ${address}`)
       let status = cached !== undefined && now < cached.until ? cached.status : null
       if (status === null) {
         if (now - quotaLookups.windowStart >= 60_000) quotaLookups = { windowStart: now, count: 0 }
         if (quotaLookups.count >= QUOTA_LOOKUPS_PER_MINUTE) { sendJson(res, 503, { error: 'quota_busy' }); return }
         quotaLookups.count++
-        try { status = await options.quota.status(key, new Date(now), { deadlineAt: now + 5_000 }) }
+        try { status = await options.quota.status(key, new Date(now), { deadlineAt: now + 5_000 }, address) }
         catch { if (!res.destroyed) sendJson(res, 503, { error: 'quota_unavailable' }); return }
         if (status.decision !== 'ok') {
           if (usedUp.size >= 5_000) usedUp.clear()
-          usedUp.set(key, { until: resetsAt, status })
+          usedUp.set(`${key} ${address}`, { until: resetsAt, status })
         }
       }
       if (!res.destroyed) sendJson(res, 200, {
@@ -448,7 +468,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
         const abort = new AbortController()
         res.once('close', () => { if (!res.writableEnded) abort.abort(new DOMException('Client disconnected', 'AbortError')) })
         let quota: QuotaDecision
-        try { quota = await options.quota.consume(visitorKey(req, options.visitorCookieSecret), undefined, { signal: abort.signal, deadlineAt }) }
+        try { quota = await options.quota.consume(visitorKey(req, options.visitorCookieSecret), undefined, { signal: abort.signal, deadlineAt }, clientAddressGroup(visitorAddress(req))) }
         catch (error) {
           const interrupted = abort.signal.aborted || Date.now() >= deadlineAt || error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
           if (interrupted) refuse(200, 'timeout', 'The site did not answer within the time limit.')
@@ -456,7 +476,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
           return
         }
         if (quota !== 'ok') {
-          refuse(429, 'quota_exceeded', quota === 'global_limited' ? 'The public preview has reached its daily limit.' : `You have used your ${VISITOR_DAILY_PREVIEWS} free runs for today.`,
+          refuse(429, 'quota_exceeded', quota === 'global_limited' ? 'The public preview has reached its daily limit.' : `You have used your ${VISITOR_DAILY_PREVIEWS} free runs for today, or your network its ${ADDRESS_DAILY_PREVIEWS}.`,
             { 'retry-after': String(Math.max(1, Math.ceil((nextUtcMidnight() - Date.now()) / 1_000))) })
           return
         }
@@ -588,7 +608,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       if (target.amazonAsin !== null && !evaluation && options.quota.check) {
         let available: QuotaDecision
         try {
-          available = await options.quota.check(visitorKey(req, options.visitorCookieSecret), undefined, { signal: abort.signal, deadlineAt })
+          available = await options.quota.check(visitorKey(req, options.visitorCookieSecret), undefined, { signal: abort.signal, deadlineAt }, clientAddressGroup(visitorAddress(req)))
         } catch (error) {
           const interrupted = abort.signal.aborted || Date.now() >= deadlineAt
             || error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
@@ -602,7 +622,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
           const tomorrow = nextUtcMidnight()
           if (!res.destroyed) send(res, 429,
             empty('quota_exceeded', submitted,
-              available === 'global_limited' ? 'The public preview has reached its daily limit.' : `You have used your ${VISITOR_DAILY_PREVIEWS} previews for today.`,
+              available === 'global_limited' ? 'The public preview has reached its daily limit.' : `You have used your ${VISITOR_DAILY_PREVIEWS} previews for today, or your network its ${ADDRESS_DAILY_PREVIEWS}.`,
               Math.max(0, performance.now() - started)),
             { 'retry-after': String(Math.max(1, Math.ceil((tomorrow - Date.now()) / 1_000))) })
           return
@@ -618,7 +638,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
         // still subject to this origin gate, even though it bypasses quota.
         if (target.amazonAsin !== null) permit = await options.amazonGate!.acquire(abort.signal, deadlineAt)
         let quota
-        try { quota = evaluation ? 'ok' : await options.quota.consume(visitorKey(req, options.visitorCookieSecret), undefined, { signal: abort.signal, deadlineAt }) }
+        try { quota = evaluation ? 'ok' : await options.quota.consume(visitorKey(req, options.visitorCookieSecret), undefined, { signal: abort.signal, deadlineAt }, clientAddressGroup(visitorAddress(req))) }
         catch (error) {
           const interrupted = abort.signal.aborted || Date.now() >= deadlineAt
             || error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
@@ -628,7 +648,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
         }
         if (quota !== undefined && quota !== 'ok') {
           const tomorrow = nextUtcMidnight()
-          reply = { status: 429, body: empty('quota_exceeded', submitted, quota === 'global_limited' ? 'The public preview has reached its daily limit.' : `You have used your ${VISITOR_DAILY_PREVIEWS} previews for today.`),
+          reply = { status: 429, body: empty('quota_exceeded', submitted, quota === 'global_limited' ? 'The public preview has reached its daily limit.' : `You have used your ${VISITOR_DAILY_PREVIEWS} previews for today, or your network its ${ADDRESS_DAILY_PREVIEWS}.`),
             headers: { 'retry-after': String(Math.max(1, Math.ceil((tomorrow - Date.now()) / 1_000))) } }
         } else if (quota === 'ok') {
           try {
