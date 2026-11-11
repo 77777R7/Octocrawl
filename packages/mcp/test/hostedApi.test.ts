@@ -222,7 +222,7 @@ it('keyless calls from Claude\'s egress range share one pool of their own, besid
   const refusal = await spent.json() as { error: string; agentHints: string[] }
   expect(refusal.error).toContain('every Claude connector without a key shares')
   // A key cannot be sent from claude.ai, but a connector can sign in: the hint names /mcp-oauth before the local server.
-  expect(refusal.agentHints[0]).toContain('sign in free for 1,000 credits a month')
+  expect(refusal.agentHints[0]).toContain('sign in free for 500 credits a month')
   expect(refusal.agentHints[0]).toContain(MCP_OAUTH_RESOURCE)
   expect(refusal.agentHints[1]).toContain('npx octocrawl serve')
   expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, { ...from('160.79.104.10'), authorization: 'Bearer oc_range' })).status).toBe(200)
@@ -249,7 +249,7 @@ it('every keyless caller together, Claude\'s pool included, gets a share of the 
   expect(spent.status).toBe(429)
   const refusal = await spent.json() as { error: string; agentHints: string[] }
   expect(refusal.error).toContain('the 2 pages a day that hosted Octocrawl serves without a key are used up')
-  expect(refusal.agentHints[0]).toContain('sign in free for 1,000 credits a month')
+  expect(refusal.agentHints[0]).toContain('sign in free for 500 credits a month')
   expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, { ...from('203.0.113.2'), authorization: 'Bearer oc_key' })).status).toBe(200)
 })
 
@@ -286,7 +286,7 @@ it('accounts have a day of their own: callers without an account who spent the s
   expect(spent.status).toBe(429)
   const refusal = await spent.json() as { error: string; agentHints: string[] }
   expect(refusal.error).toContain('hosted Octocrawl has served the 2 pages a day it serves without an account')
-  expect(refusal.agentHints[0]).toContain('sign in free for 1,000 credits a month')
+  expect(refusal.agentHints[0]).toContain('sign in free for 500 credits a month')
   expect(refusal.agentHints[0]).toContain(MCP_OAUTH_RESOURCE)
   expect(refusal.agentHints[0]).toContain('https://octocrawl.dev/signin/')
   // Signed in, both accounts go on until every account together has started the accounts' day.

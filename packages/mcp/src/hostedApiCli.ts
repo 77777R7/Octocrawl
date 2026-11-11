@@ -15,7 +15,7 @@
  *   W2L_KEYLESS_TOTAL_DAILY     keyless pages per UTC day for every keyless caller together, within the site's (default 500)
  *   W2L_ACCOUNTS_DAILY          pages per UTC day for every account together, apart from the site's (default 3000)
  *   W2L_ACCOUNT_DAILY           pages per UTC day one account may start, within the accounts' (default 500)
- *   W2L_MONTHLY_CREDITS         credits every account gets a month, spent by its keys (default 1000)
+ *   W2L_MONTHLY_CREDITS         credits every account gets a month, spent by its keys (default 500)
  *   W2L_TRIAL_CREDITS           credits added once to an account the first time its credits run out (default 0: none)
  *   W2L_PUBLIC_API_ORIGIN       the public address, for hints (e.g. https://api.octocrawl.dev)
  *   W2L_SOURCE_COMMIT           recorded in the startup line
@@ -57,7 +57,7 @@ const port = positive('PORT', 8080)
 const hashKey = (process.env.W2L_QUOTA_HASH_KEY ?? '').trim()
 if (hashKey.length < 32) throw new Error('W2L_QUOTA_HASH_KEY must contain at least 32 characters')
 const store = process.env.W2L_HOSTED_STORE ?? 'firestore'
-const monthlyCredits = positive('W2L_MONTHLY_CREDITS', 1_000)
+const monthlyCredits = positive('W2L_MONTHLY_CREDITS', 500)
 // 0 or unset: no trial pack; positive() refuses 0, so the switch is the variable being set.
 const trialCredits = (process.env.W2L_TRIAL_CREDITS ?? '').trim() === '' || process.env.W2L_TRIAL_CREDITS === '0' ? 0 : positive('W2L_TRIAL_CREDITS', 0)
 let keys: HostedKeys

@@ -54,7 +54,7 @@ export type CodeFormat = 'markdown' | 'links' | 'map'
  * page's cards (fromCodeCards) and its Markdown copy (markdownTwin.ts) both come from here. */
 export function codeWays(format: CodeFormat = 'markdown'): ReadonlyArray<readonly [head: string, text: string, code: string, href: string, link: string]> {
   return [
-    ['REST API', 'Hosted, no key for 20 pages a day; a free account’s key for 1,000 credits a month.', format === 'map' ? `curl https://api.octocrawl.dev/v1/map -H 'content-type: application/json' -d '{"url":"https://example.com","limit":5000}'` : `curl https://api.octocrawl.dev/v1/scrape -H 'content-type: application/json' -d '{"url":"https://example.com","formats":["${format}"]}'`, format === 'map' ? '/docs/reference/#rest-and-sdk' : '/docs/scrape/#first-call', format === 'map' ? 'API reference' : 'Make your first call'],
+    ['REST API', 'Hosted, no key for 20 pages a day; a free account’s key for 500 credits a month.', format === 'map' ? `curl https://api.octocrawl.dev/v1/map -H 'content-type: application/json' -d '{"url":"https://example.com","limit":5000}'` : `curl https://api.octocrawl.dev/v1/scrape -H 'content-type: application/json' -d '{"url":"https://example.com","formats":["${format}"]}'`, format === 'map' ? '/docs/reference/#rest-and-sdk' : '/docs/scrape/#first-call', format === 'map' ? 'API reference' : 'Make your first call'],
     ['MCP', 'Claude Code, Cursor, Codex and OpenCode read pages through Octocrawl’s tools.', MCP_ADD, '/docs/connect-mcp/', 'Connect MCP'],
     ['CLI', 'On your own computer, with no daily limit, plus crawl and batch.', format === 'map' ? 'npx octocrawl map https://example.com' : format === 'links' ? 'npx octocrawl scrape https://example.com --formats links' : 'npx octocrawl scrape https://example.com --markdown', '/docs/reference/', 'Advanced reference'],
     format === 'map' ? ['Playground', 'Signed in, list up to 5,000 URLs of a site on your credits: 1 credit a map that finds some.', 'octocrawl.dev/dashboard/map/', '/dashboard/map/', 'Open the Playground'] : ['Playground', 'Signed in, run any page on your credits, read in a browser when it needs one.', 'octocrawl.dev/dashboard/scrape/', '/dashboard/scrape/', 'Open the Playground'],
@@ -79,7 +79,7 @@ export function toolBanner(): string {
       <div class="band">
         <div class="frame tl-banner">
           <h2 id="tl-banner-title">More than five a day? <em>Start free.</em></h2>
-          <p>A free account gets 1,000 credits a month for the hosted API, MCP and the Playground. No card. Or run Octocrawl on your own computer, with no limit.</p>
+          <p>A free account gets 500 credits a month for the hosted API, MCP and the Playground. No card. Or run Octocrawl on your own computer, with no limit.</p>
           <div class="tl-banner-actions"><a class="tl-button is-primary" href="/signin/">Start free <span aria-hidden="true">→</span></a><a class="tl-button" href="https://github.com/77777R7/Octocrawl">Run it yourself <span aria-hidden="true">↗</span></a></div>
         </div>
       </div>

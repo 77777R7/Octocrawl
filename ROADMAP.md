@@ -393,12 +393,12 @@ Hosted phase 1 uses the API's existing hosted mode, which refuses private addres
 
 - One credit per page read over HTTP; five per page on the browser lane; one per `map` call. Phase 2's vendor-backed routes settle their provider cost plus margin from the same balance.
 - Keyless: scrape and map over HTTP within a per-IP daily allowance, and 429 with `Retry-After` beyond it. The allowance is about 20 pages a day, under the $50 monthly cap set on 2026-10-06.
-- With a key: 1,000 free credits a month and the browser lane. Paid packs come in Firecrawl's bands (Hobby about 5,000 credits, Standard about 100,000), through a merchant of record.
+- With a key: 500 free credits a month (1,000 until 2026-11-11) and the browser lane. Paid packs come in Firecrawl's bands (Hobby about 5,000 credits, Standard about 100,000), through a merchant of record.
 - Keys are issued by hand from the waitlist in phase 1; self-service sign-up and purchase are P4.
 - **Changed 2026-10-11 by Howard: accounts and credits come now, before P4.**
   - Sign-in on octocrawl.dev with GitHub, Google or an email link. It is written in this repository, with no identity vendor, and the site's CSP stays as it is.
   - An account page shows the balance and usage, and creates and revokes keys. Keys issued by hand keep working on their daily allowance.
-  - Every account gets 1,000 credits a month, email-only accounts included. One grant goes to each GitHub account, Google account and verified email.
+  - Every account gets 500 credits a month, email-only accounts included (changed from 1,000 by Howard on 2026-11-11; a balance already granted for November keeps what is left of it). One grant goes to each GitHub account, Google account and verified email.
   - A result is charged by what it returned: 1 credit for a page read over HTTP, 5 for a page read on the browser lane, 1 for a `map` call, and 1 for a page that does not exist (404 or 410). A page stopped by a check, a challenge or robots.txt costs nothing, and so does a call that read nothing (a DNS failure, no response, an invalid request, a server error).
   - Accounts' keys get the browser lane. Keyless use keeps its daily allowances.
   - Payment stays in P4 and waits for item 3's two-week cost record. Where the seller is registered is not decided yet.

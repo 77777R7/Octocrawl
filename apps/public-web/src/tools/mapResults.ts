@@ -74,7 +74,7 @@ function render(body: HTMLElement, heading: HTMLElement, reply: MapReply): void 
     const box = el('div', 'map-guidance')
     box.append(el('p', 'panel-kicker', reply.status === 'quota_exceeded' ? 'DAILY LIMIT' : 'NO PAGES FOUND'), el('p', 'map-reason', reply.reason ?? 'No pages could be found.'))
     const next = el('p', 'map-next')
-    const signin = el('a', '', reply.status === 'quota_exceeded' ? 'Sign in for 1,000 free credits a month →' : 'Limits and result states →')
+    const signin = el('a', '', reply.status === 'quota_exceeded' ? 'Sign in for 500 free credits a month →' : 'Limits and result states →')
     signin.href = reply.status === 'quota_exceeded' ? '/signin/' : '/docs/limits/'
     next.append(signin)
     box.append(next)

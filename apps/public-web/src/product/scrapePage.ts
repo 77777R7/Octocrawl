@@ -418,7 +418,7 @@ function evidence(): string {
 
 /** What a result costs on hosted Octocrawl, and the words above the table; the page and its Markdown copy show both. */
 export const COST_ROWS: ReadonlyArray<readonly [result: string, credits: string]> = [['Page read over HTTP', '1'], ['Page read in a browser', '5'], ['Page not found (404, 410)', '1'], ['Blocked, not allowed, or nothing read', '0']]
-export const COST_LEAD = 'The three pages above were read over HTTP: 1 credit each on an account, or within the 20 free pages a day without a key. A free account gets 1,000 credits a month. On your own computer there is no limit. Paid credit packs aren’t sold yet.'
+export const COST_LEAD = 'The three pages above were read over HTTP: 1 credit each on an account, or within the 20 free pages a day without a key. A free account gets 500 credits a month. On your own computer there is no limit. Paid credit packs aren’t sold yet.'
 
 function cost(): string {
   const rows = COST_ROWS

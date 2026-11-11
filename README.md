@@ -69,7 +69,7 @@ Connect your agent to hosted Octocrawl. No key is needed to start ([steps for Cl
 claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp
 ```
 
-Without a key it reads 20 pages a day over HTTP. For more, [sign in](https://octocrawl.dev/signin/?utm_source=github&utm_medium=readme&utm_campaign=key) and make a key: an account gets 1,000 credits a month and the browser lane. The key goes in a header, never in the URL:
+Without a key it reads 20 pages a day over HTTP. For more, [sign in](https://octocrawl.dev/signin/?utm_source=github&utm_medium=readme&utm_campaign=key) and make a key: an account gets 500 credits a month and the browser lane. The key goes in a header, never in the URL:
 
 ```bash
 claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp --header "Authorization: Bearer oc_…"

@@ -911,7 +911,7 @@ describe('the first five minutes explain themselves (2026-11-05 audit)', () => {
   it('says on API keys what a key is for and where an agent goes instead, on both empty lists', async () => {
     const none = { ...account(OCTOBER.resetsAt, usageOf(octoberLines())), keys: [] }
     const { $, window } = await page('/dashboard/keys/', '', OCTOBER.now, { ...octoberAnswers(), 'GET /api/account': [200, none], 'GET /api/account/connections': [200, { connections: [] }] })
-    expect(window.document.querySelector('#keys-title + span + p, #keys-title')!.closest('section')!.querySelector('p')!.textContent).toContain('1,000 credits a month instead of the keyless 20 pages a day')
+    expect(window.document.querySelector('#keys-title + span + p, #keys-title')!.closest('section')!.querySelector('p')!.textContent).toContain('500 credits a month instead of the keyless 20 pages a day')
     expect($('keys-empty').hidden).toBe(false)
     expect($('keys-empty').querySelector('a')!.getAttribute('href')).toBe('/dashboard/connect/')
     expect($('connections-empty').querySelector('a')!.getAttribute('href')).toBe('/dashboard/connect/')

@@ -10,7 +10,7 @@ export const HUB_DESCRIPTION = 'Convert a public URL to Markdown or plain text, 
 
 export const HUB_FAQ: ReadonlyArray<readonly [question: string, answer: string]> = [
   ['Are these tools free?', 'Yes. Every tool here runs in your browser without an account: five pages a day per visitor (at most 150 a day for the whole site), reset at 00:00 UTC.'],
-  ['Do I need an account?', 'No. Sign in when you want more: a free account gets 1,000 credits a month for the hosted API, MCP and the Playground, which also reads pages that need a browser. No card.'],
+  ['Do I need an account?', 'No. Sign in when you want more: a free account gets 500 credits a month for the hosted API, MCP and the Playground, which also reads pages that need a browser. No card.'],
   ['Can I use them from code or an agent?', 'Yes. The same reads are one call to the hosted API (<code>api.octocrawl.dev</code>) or the MCP server (<code>mcp.octocrawl.dev</code>), or run <code>npx octocrawl serve</code> on your own computer with no limit.'],
   ['What happens when a page can’t be read?', 'You get the reason instead of an empty file: the site’s robots.txt disallows it, it blocks the request, it needs a login, or it draws its content with JavaScript, which these free tools don’t run.'],
 ]

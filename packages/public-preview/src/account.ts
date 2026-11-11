@@ -36,7 +36,7 @@ import { metadataAccessToken } from './quota.js'
 import type { Session } from './auth.js'
 
 /** The hosted API's monthly grant (W2L_MONTHLY_CREDITS there); the page shows a month not yet started as this. */
-export const DEFAULT_MONTHLY_CREDITS = 1_000
+export const DEFAULT_MONTHLY_CREDITS = 500
 /** Keys an account may hold at once; a revoked key does not count. */
 export const MAX_ACTIVE_KEYS = 5
 export const USAGE_DAYS = 30

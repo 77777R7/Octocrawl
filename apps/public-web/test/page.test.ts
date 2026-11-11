@@ -138,7 +138,7 @@ describe('Page markup', () => {
     const constant = (name: string) => Number(new RegExp(`export const ${name} = ([\\d_]+)`).exec(hostedApi)?.[1]?.replace(/_/g, ''))
     const limits = readFileSync(new URL('../content/limits.md', import.meta.url), 'utf8')
     expect(limits).toContain(`${constant('DEFAULT_KEYLESS_DAILY')} pages a day per address`)
-    expect(limits).toContain('The account\'s credits: 1,000 a month')
+    expect(limits).toContain('The account\'s credits: 500 a month')
     const site = constant('DEFAULT_SITE_DAILY').toLocaleString('en-US')
     const accounts = constant('DEFAULT_ACCOUNTS_DAILY').toLocaleString('en-US')
     expect(limits).toContain(`Callers without an account share ${site} pages a day for the whole service; accounts have ${accounts} a day of their own, at most ${constant('DEFAULT_ACCOUNT_DAILY')} an account`)

@@ -1,7 +1,7 @@
 /**
  * Credits for accounts' keys on hosted Octocrawl (ROADMAP PH, decided 2026-10-11).
  *
- * Every account gets a monthly grant (1,000 credits by default, reset on the 1st, UTC, nothing rolled over), spent
+ * Every account gets a monthly grant (500 credits by default, reset on the 1st, UTC, nothing rolled over), spent
  * before credits it bought. A call reserves the most it could cost before it runs and settles at what its result
  * cost, so two instances can never spend more than the balance, and a call that read nothing costs nothing:
  *
@@ -27,7 +27,7 @@
  */
 import type { QuotaEntry } from './hostedApi.js'
 
-export const DEFAULT_MONTHLY_CREDITS = 1_000
+export const DEFAULT_MONTHLY_CREDITS = 500
 /** Where a person asks for more credits than the grant, until packs are sold (docs/launch/2026-10-18-hosted-business-plan.md). */
 export const MORE_CREDITS_ADDRESS = 'hello@octocrawl.dev'
 export const MORE_CREDITS_HINT = `for more credits, write to ${MORE_CREDITS_ADDRESS} with a line on what you are reading`
