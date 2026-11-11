@@ -271,11 +271,37 @@ export interface AuthOptions {
    * (account.ts, rememberCredits and carryCredits), so deleting cannot restart the month's grant. Each takes the
    * account's uid and its email address's key (creditCarryKey). */
   creditCarry?: { remember(uid: string, emailKey: string): Promise<void>; carry(uid: string, emailKey: string): Promise<void> }
+  /** One monthly grant a mailbox (account.ts, claimGrant and releaseGrant): taken at sign-in, let go when the account
+   * that has it is deleted. Each takes the account's uid and its mailbox's key (mailboxKey). */
+  creditGrant?: { claim(uid: string, mailboxKey: string): Promise<string>; release(uid: string, mailboxKey: string): Promise<void> }
 }
 
-/** The key a remembered month of credits is kept under: a keyed hash of the email address, never the address. */
+/**
+ * The inbox an address delivers to, as far as the address shows it: lower case, without a `+tag` (which Gmail, Outlook,
+ * iCloud, Fastmail and Proton deliver to the same inbox), and for Gmail without dots and with googlemail.com as
+ * gmail.com. Found 2026-11-11: one inbox could sign up again and again, a monthly grant each time.
+ */
+export function canonicalMailbox(email: string): string {
+  const address = email.trim().toLowerCase()
+  const at = address.lastIndexOf('@')
+  if (at <= 0) return address
+  let local = address.slice(0, at)
+  let domain = address.slice(at + 1)
+  if (domain === 'googlemail.com') domain = 'gmail.com'
+  const plus = local.indexOf('+')
+  if (plus > 0) local = local.slice(0, plus)
+  if (domain === 'gmail.com') local = local.replaceAll('.', '') || local
+  return `${local}@${domain}`
+}
+
+/** The key a remembered month of credits is kept under: a keyed hash of the mailbox, never the address. */
 export function creditCarryKey(secret: string, email: string): string {
-  return createHmac('sha256', secret).update(`credit-carry:${email.trim().toLowerCase()}`).digest('hex')
+  return createHmac('sha256', secret).update(`credit-carry:${canonicalMailbox(email)}`).digest('hex')
+}
+
+/** The key the mailbox's one monthly grant is claimed under (creditGrants/{key}): a keyed hash, never the address. */
+export function mailboxKey(secret: string, email: string): string {
+  return createHmac('sha256', secret).update(`credit-grant:${canonicalMailbox(email)}`).digest('hex')
 }
 
 export const SESSION_COOKIE = 'w2l_session'
@@ -441,6 +467,15 @@ export function createAuthRoutes(options: AuthOptions) {
         log({ event: 'w2l_auth', step: 'credit_carry', outcome: 'failed', reason: error instanceof Error ? error.message.slice(0, 200) : 'unknown' })
       })
     }
+    // After the carry, so that a mailbox's new account first goes on with what its deleted one left. A failure here
+    // never stops the sign-in: the account then has the grant until a later sign-in claims it.
+    if (options.creditGrant && user.email) {
+      const outcome = await options.creditGrant.claim(user.uid, mailboxKey(options.secret, user.email)).catch((error: unknown) => {
+        log({ event: 'w2l_auth', step: 'credit_grant', outcome: 'failed', reason: error instanceof Error ? error.message.slice(0, 200) : 'unknown' })
+        return null
+      })
+      if (outcome !== null) log({ event: 'w2l_auth', step: 'credit_grant', outcome })
+    }
     res.setHeader('set-cookie', [cookie(origin, SESSION_COOKIE, id, '/', SESSION_DAYS * 86_400), hintCookie(origin, true), ...extraCookies])
   }
 
@@ -490,6 +525,7 @@ export function createAuthRoutes(options: AuthOptions) {
       await options.accounts.forget(user.uid)
       // Before the balance goes: what is left of this month's free credits, under the address's key.
       if (options.creditCarry && user.email) await options.creditCarry.remember(user.uid, creditCarryKey(options.secret, user.email))
+      if (options.creditGrant && user.email) await options.creditGrant.release(user.uid, mailboxKey(options.secret, user.email))
       await options.eraseAccountData(user.uid)
     } catch (error) {
       log({ event: 'w2l_auth', step: 'delete', outcome: 'failed', reason: error instanceof Error ? error.message.slice(0, 200) : 'unknown' })

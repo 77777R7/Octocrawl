@@ -44,7 +44,20 @@ export const USAGE_DAYS = 30
 export const ACTIVITY_LIMIT = 1_000
 export const ACTIVITY_DAYS = 30
 
-export interface Balance { month: string; grant: number; purchased: number }
+/** `noMonthlyGrant`: the account shares its mailbox's grant with an earlier account (claimGrant), so it has no grant of
+ * its own in any month (packages/mcp/src/hostedCredits.ts, current). */
+export interface Balance { month: string; grant: number; purchased: number; noMonthlyGrant?: boolean }
+
+/** What is left of the account's free credits this month: a month it has not spent in yet has the whole grant, unless it
+ * shares its mailbox's grant (as hostedCredits.ts reckons it). */
+export function grantLeft(balance: Balance | null, month: string, monthlyGrant: number): number {
+  if (balance !== null && balance.month === month) return balance.grant
+  return balance?.noMonthlyGrant === true ? 0 : monthlyGrant
+}
+
+/** What claimGrant found: the mailbox had no account with its grant (`claimed`), this one has it already (`held`), or
+ * another account has it, and this one was marked to have none (`shared`). */
+export type GrantClaim = 'claimed' | 'held' | 'shared'
 /** `jobPages`: how many of the day's pages a hosted job read; they have no request line each (hostedCredits.ts). */
 export interface UsageDay { day: string; http: number; browser: number; notFound: number; map: number; unread: number; jobPages: number; credits: number }
 export interface KeyView { id: string; label: string; prefix: string; createdAt: string; enabled: boolean }
@@ -92,6 +105,15 @@ export interface AccountData {
   /** At sign-in: a new account (no balance yet) whose address has this month remembered starts with what was left,
    * and the record goes. Anything else is left as it is. */
   carryCredits(uid: string, emailKey: string, now?: Date): Promise<void>
+  /**
+   * At sign-in: one monthly grant a mailbox (`creditGrants/{key}`: the account that has it). The first account of a
+   * mailbox takes it; any other account of the same mailbox (auth.ts, mailboxKey: a `+tag`, Gmail's dots) gets
+   * `noMonthlyGrant` on its balance and nothing left this month, so new addresses for one inbox bring no new credits.
+   */
+  claimGrant(uid: string, mailboxKey: string, now?: Date): Promise<GrantClaim>
+  /** When the account that has its mailbox's grant is deleted: the grant is free for the mailbox's next account, which
+   * goes on with what the deleted one left this month (rememberCredits). */
+  releaseGrant(uid: string, mailboxKey: string): Promise<void>
 }
 
 /** The first moment of the next UTC month: when a remembered month stops counting. */
@@ -117,7 +139,24 @@ export class MemoryAccountData implements AccountData {
   readonly signInMethods = new Map<string, string[]>()
   readonly requestLines = new Map<string, RequestView[]>()
   readonly carried = new Map<string, { month: string; left: number }>()
+  /** Mailbox key → the account that has its grant. */
+  readonly grants = new Map<string, string>()
   async balance(uid: string) { return this.balances.get(uid) ?? null }
+  async claimGrant(uid: string, mailboxKey: string, now = new Date()): Promise<GrantClaim> {
+    const holder = this.grants.get(mailboxKey)
+    if (holder === undefined || holder === uid) {
+      if (holder === undefined) this.grants.set(mailboxKey, uid)
+      // An account that was another's alias and now has the grant (its holder was deleted) gets its months back.
+      const balance = this.balances.get(uid)
+      if (balance?.noMonthlyGrant) { const { noMonthlyGrant: _flag, ...rest } = balance; this.balances.set(uid, rest) }
+      return holder === undefined ? 'claimed' : 'held'
+    }
+    this.balances.set(uid, { purchased: 0, ...this.balances.get(uid), month: now.toISOString().slice(0, 7), grant: 0, noMonthlyGrant: true })
+    return 'shared'
+  }
+  async releaseGrant(uid: string, mailboxKey: string) {
+    if (this.grants.get(mailboxKey) === uid) this.grants.delete(mailboxKey)
+  }
   async usage(uid: string, since: string) {
     return [...this.usageDays.values()].filter(day => day.uid === uid && day.day >= since).map(({ uid: _uid, ...day }) => day).sort((a, b) => a.day.localeCompare(b.day))
   }
@@ -184,7 +223,7 @@ export class FirestoreAccountData implements AccountData {
     if (!response.ok) throw new Error(`credits read failed (${response.status})`)
     const doc = await response.json() as Doc
     const n = (value: Value | undefined) => { const v = Number(value?.integerValue ?? 0); return Number.isSafeInteger(v) && v >= 0 ? v : 0 }
-    return { month: doc.fields?.month?.stringValue ?? '', grant: n(doc.fields?.grant), purchased: n(doc.fields?.purchased) }
+    return { month: doc.fields?.month?.stringValue ?? '', grant: n(doc.fields?.grant), purchased: n(doc.fields?.purchased), ...(doc.fields?.noMonthlyGrant?.booleanValue === true ? { noMonthlyGrant: true } : {}) }
   }
   async usage(uid: string, since: string): Promise<UsageDay[]> {
     const n = (value: Value | undefined) => Number(value?.integerValue ?? 0) || 0
@@ -271,6 +310,56 @@ export class FirestoreAccountData implements AccountData {
     // 409: the account has a balance already, so it keeps its own.
     if (response.ok || response.status === 409) return
     throw new Error(`credit carry failed (${response.status})`)
+  }
+  async claimGrant(uid: string, mailboxKey: string, now = new Date()): Promise<GrantClaim> {
+    if (!EMAIL_KEY.test(mailboxKey)) throw new Error('mailbox key is malformed')
+    const name = `${this.resource}/creditGrants/${mailboxKey}`
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const read = await this.request(name)
+      if (read.status === 404) {
+        // Only if no account has it yet: two first sign-ins at once leave one holder, and the other reads it next round.
+        const claimed = await this.request(`${this.resource}:commit`, { method: 'POST', body: JSON.stringify({ writes: [
+          { update: { name, fields: { uid: { stringValue: uid }, claimedAt: { timestampValue: now.toISOString() } } }, currentDocument: { exists: false } },
+        ] }) })
+        if (claimed.ok) { await this.clearNoMonthlyGrant(uid); return 'claimed' }
+        if (claimed.status === 409) continue
+        throw new Error(`creditGrants write failed (${claimed.status})`)
+      }
+      if (!read.ok) throw new Error(`creditGrants read failed (${read.status})`)
+      if ((await read.json() as Doc).fields?.uid?.stringValue === uid) { await this.clearNoMonthlyGrant(uid); return 'held' }
+      // Only these fields: what the account bought stays, and the hosted API's writes keep the flag (updateMask there too).
+      const marked = await this.request(`${this.resource}:commit`, { method: 'POST', body: JSON.stringify({ writes: [{
+        update: { name: `${this.resource}/credits/${uid}`, fields: { month: { stringValue: now.toISOString().slice(0, 7) }, grant: { integerValue: '0' }, noMonthlyGrant: { booleanValue: true } } },
+        updateMask: { fieldPaths: ['month', 'grant', 'noMonthlyGrant'] },
+      }] }) })
+      if (!marked.ok) throw new Error(`credits write failed (${marked.status})`)
+      return 'shared'
+    }
+    throw new Error('creditGrants claim kept conflicting')
+  }
+  /** An account that was another's alias and now has its mailbox's grant (the holder was deleted) gets its months back:
+   * the flag goes, nothing else is written, and an account with no balance or no flag is not written at all. */
+  private async clearNoMonthlyGrant(uid: string): Promise<void> {
+    if ((await this.balance(uid))?.noMonthlyGrant !== true) return
+    // In the mask but not in the fields: Firestore deletes the field.
+    const response = await this.request(`${this.resource}:commit`, { method: 'POST', body: JSON.stringify({ writes: [{
+      update: { name: `${this.resource}/credits/${uid}`, fields: {} }, updateMask: { fieldPaths: ['noMonthlyGrant'] }, currentDocument: { exists: true },
+    }] }) })
+    if (!response.ok) throw new Error(`credits write failed (${response.status})`)
+  }
+  async releaseGrant(uid: string, mailboxKey: string): Promise<void> {
+    if (!EMAIL_KEY.test(mailboxKey)) throw new Error('mailbox key is malformed')
+    const name = `${this.resource}/creditGrants/${mailboxKey}`
+    const read = await this.request(name)
+    if (read.status === 404) return
+    if (!read.ok) throw new Error(`creditGrants read failed (${read.status})`)
+    const doc = await read.json() as Doc & { updateTime?: string }
+    if (doc.fields?.uid?.stringValue !== uid) return
+    const response = await this.request(`${this.resource}:commit`, { method: 'POST', body: JSON.stringify({ writes: [
+      { delete: name, currentDocument: { updateTime: doc.updateTime } },
+    ] }) })
+    // 409 or 400: another sign-in changed it meanwhile, so it is no longer this account's to let go.
+    if (!response.ok && response.status !== 409 && response.status !== 400) throw new Error(`creditGrants delete failed (${response.status})`)
   }
   async erase(uid: string, now = new Date()): Promise<void> {
     if (!/^[A-Za-z0-9_-]{8,128}$/.test(uid) || /^__.*__$/.test(uid)) throw new Error('account id is malformed')
@@ -455,7 +544,7 @@ export function createAccountRoutes(options: AccountRoutesOptions) {
       const since = new Date(at.getTime() - (USAGE_DAYS - 1) * 86_400_000).toISOString().slice(0, 10)
       const [balance, usage, keys, providers, connections] = await Promise.all([options.data.balance(session.uid), options.data.usage(session.uid, since), options.data.keys(session.uid), options.data.providers(session.uid), options.connections?.list(session.uid, at) ?? []])
       // A month the account has not spent in yet has its whole grant: the hosted API resets it on the first call.
-      const grant = balance === null || balance.month !== month ? monthly : balance.grant
+      const grant = grantLeft(balance, month, monthly)
       const resetsAt = new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + 1, 1)).toISOString()
       send(res, 200, {
         email: session.email,

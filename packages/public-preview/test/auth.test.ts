@@ -33,13 +33,13 @@ function fakeIdentity() {
   return { identity, calls, answer: (next: SignedIn | Error) => { idp = next }, linkAnswer: (next: SignedIn | Error) => { link = next } }
 }
 
-async function start(emailFinishPage?: () => Promise<string | null>, eraseAccountData?: (uid: string) => Promise<void>, now?: () => Date, creditCarry?: AuthOptions['creditCarry']) {
+async function start(emailFinishPage?: () => Promise<string | null>, eraseAccountData?: (uid: string) => Promise<void>, now?: () => Date, creditCarry?: AuthOptions['creditCarry'], creditGrant?: AuthOptions['creditGrant']) {
   const dir = await mkdtemp(join(tmpdir(), 'w2l-auth-')); dirs.push(dir)
   await writeFile(join(dir, '404.html'), '<title>Page not found</title>')
   const fake = fakeIdentity()
   const accounts = new MemoryAccountStore()
   const lines: LogLine[] = []
-  const auth = createAuthRoutes({ identity: fake.identity, accounts, secret: SECRET, log: line => lines.push(line), emailFinishPage, ...(eraseAccountData ? { eraseAccountData } : {}), ...(now ? { now } : {}), ...(creditCarry ? { creditCarry } : {}) })
+  const auth = createAuthRoutes({ identity: fake.identity, accounts, secret: SECRET, log: line => lines.push(line), emailFinishPage, ...(eraseAccountData ? { eraseAccountData } : {}), ...(now ? { now } : {}), ...(creditCarry ? { creditCarry } : {}), ...(creditGrant ? { creditGrant } : {}) })
   const server = createPreviewServer({ quota: { consume: async () => 'ok' }, staticDir: dir, amazonState: null, log: line => lines.push(line), visitorCookieSecret: SECRET, auth })
   servers.push(server)
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -462,6 +462,69 @@ describe('deleting an account and signing up again', () => {
     const noAddress = await deleteAccount(url, fake, { ...ADA, uid: 'github-user-0009', email: null as unknown as string })
     expect(noAddress.headers.get('location')).toBe('/signin/?deleted=1')
     expect(data.carried.size).toBe(0)
+  })
+})
+
+describe('one monthly grant a mailbox', () => {
+  const month = new Date().toISOString().slice(0, 7)
+  const setUp = async () => {
+    const data = new MemoryAccountData()
+    const started = await start(undefined, uid => data.erase(uid), undefined,
+      { remember: (uid, key) => data.rememberCredits(uid, key, 1_000), carry: (uid, key) => data.carryCredits(uid, key) },
+      { claim: (uid, key) => data.claimGrant(uid, key), release: (uid, key) => data.releaseGrant(uid, key) })
+    return { ...started, data }
+  }
+  const signInAs = async (url: string, fake: ReturnType<typeof fakeIdentity>, user: SignedIn, extraCookie = '') => {
+    fake.answer(user)
+    const begin = (await fetch(`${url}/auth/github`, { redirect: 'manual' })).headers.getSetCookie()[0]!.split(';')[0]!
+    return fetch(`${url}/__/auth/handler?code=x`, { redirect: 'manual', headers: { cookie: `${begin}${extraCookie}` } })
+  }
+  const FIRST = { uid: 'github-user-0001', email: 'ada.lovelace+octo@gmail.com', provider: 'github.com' as const, idToken: 'id-token-1' }
+
+  it('gives a second account of the same mailbox (a +tag, Gmail dots, googlemail.com) no monthly grant, now or later', async () => {
+    const { url, fake, data, lines } = await setUp()
+    await signInAs(url, fake, FIRST)
+    expect(data.balances.has(FIRST.uid)).toBe(false) // the first account's first call gets the whole grant
+    for (const [uid, email] of [['email-user-0002', 'AdaLovelace@googlemail.com'], ['email-user-0003', 'ada.love.lace+2@gmail.com']] as const) {
+      await signInAs(url, fake, { ...FIRST, uid, email, provider: 'github.com' })
+      expect(data.balances.get(uid)).toEqual({ month, grant: 0, purchased: 0, noMonthlyGrant: true })
+    }
+    expect(lines.filter(line => line.step === 'credit_grant').map(line => line.outcome)).toEqual(['claimed', 'shared', 'shared'])
+    // The first account signing in again keeps its grant; another mailbox gets its own.
+    await signInAs(url, fake, FIRST)
+    await signInAs(url, fake, { ...FIRST, uid: 'github-user-0004', email: 'ada@example.org' })
+    expect(data.balances.has(FIRST.uid)).toBe(false)
+    expect(data.balances.has('github-user-0004')).toBe(false)
+    // The keys never hold the address.
+    expect(JSON.stringify([...data.grants.entries()])).not.toContain('ada')
+  })
+
+  it('lets the mailbox\'s grant go with the account that held it, and carries what that account left of the month', async () => {
+    const { url, fake, data } = await setUp()
+    await signInAs(url, fake, FIRST)
+    data.balances.set(FIRST.uid, { month, grant: 0, purchased: 0 })
+    const session = `w2l_session=${cookies(await signInAs(url, fake, FIRST)).w2l_session}`
+    const started = await fetch(`${url}/auth/delete/start`, { method: 'POST', headers: { cookie: session, origin: url, 'content-type': 'application/json' }, body: JSON.stringify({ confirm: FIRST.email }) })
+    expect((await signInAs(url, fake, FIRST, `; w2l_delete=${cookies(started).w2l_delete}`)).headers.get('location')).toBe('/signin/?deleted=1')
+    expect(data.grants.size).toBe(0)
+    // An alias signs up after the delete: it holds the mailbox's grant from next month, and this month has what was left.
+    await signInAs(url, fake, { ...FIRST, uid: 'email-user-0005', email: 'adalovelace@gmail.com' })
+    expect(data.balances.get('email-user-0005')).toEqual({ month, grant: 0, purchased: 0 })
+    expect([...data.grants.values()]).toEqual(['email-user-0005'])
+  })
+
+  it('gives an alias its months back once it holds the grant, after the account that held it is deleted', async () => {
+    const { url, fake, data } = await setUp()
+    await signInAs(url, fake, FIRST)
+    const ALIAS = { ...FIRST, uid: 'email-user-0006', email: 'adalovelace+work@gmail.com' }
+    await signInAs(url, fake, ALIAS)
+    expect(data.balances.get(ALIAS.uid)?.noMonthlyGrant).toBe(true)
+    const session = `w2l_session=${cookies(await signInAs(url, fake, FIRST)).w2l_session}`
+    const started = await fetch(`${url}/auth/delete/start`, { method: 'POST', headers: { cookie: session, origin: url, 'content-type': 'application/json' }, body: JSON.stringify({ confirm: FIRST.email }) })
+    await signInAs(url, fake, FIRST, `; w2l_delete=${cookies(started).w2l_delete}`)
+    await signInAs(url, fake, ALIAS)
+    expect([...data.grants.values()]).toEqual([ALIAS.uid])
+    expect(data.balances.get(ALIAS.uid)).toEqual({ month, grant: 0, purchased: 0 })
   })
 })
 

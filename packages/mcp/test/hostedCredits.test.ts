@@ -58,6 +58,16 @@ describe('the in-memory ledger', () => {
     expect(store.balances.get('account-1')).toEqual({ month: '2026-10', grant: 1, purchased: 4 })
   })
 
+  it('gives an account that shares its mailbox\'s grant no grant in a new month, only what it bought', async () => {
+    const store = new MemoryCreditsStore(10)
+    store.balances.set('account-2', { month: '2026-09', grant: 0, purchased: 4, noMonthlyGrant: true })
+    expect(await store.balance('account-2', OCT)).toBe(4)
+    expect(await store.reserve('account-2', 5, [SITE], OCT)).toMatchObject({ ok: false, limited: 'credits', remaining: 4 })
+    const reserved = await store.reserve('account-2', 3, [SITE], OCT)
+    if (!reserved.ok) throw new Error('unreachable')
+    expect(store.balances.get('account-2')).toEqual({ month: '2026-10', grant: 0, purchased: 1, noMonthlyGrant: true })
+  })
+
   it('tells an account\'s balance without taking anything: this month\'s grant, then what a call took', async () => {
     const store = new MemoryCreditsStore(10)
     expect(await store.balance('account-1', OCT)).toBe(10)
