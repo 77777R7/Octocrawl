@@ -327,6 +327,24 @@ it('the Worker\'s address header counts only with the shared secret', async () =
   expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, { 'cf-connecting-ip': '203.0.113.4' })).status).toBe(429)
 })
 
+it('answers a scrape\'s or a map\'s record only to the caller that made it, and as not found to anyone else', async () => {
+  const keys = { oc_ann: { enabled: true, plan: 'free', dailyLimit: 5, browser: false }, oc_bob: { enabled: true, plan: 'free', dailyLimit: 5, browser: false } }
+  const { url } = await start({ keylessDaily: 5, keys })
+  const ann = { authorization: 'Bearer oc_ann' }
+  const bob = { authorization: 'Bearer oc_bob' }
+  const { scrapeId } = await (await post(url, '/v1/scrape', { url: `${origin}/page` }, ann)).json() as { scrapeId: string }
+  const { id: mapId } = await (await post(url, '/v1/map', { url: `${origin}/page` }, ann)).json() as { id: string }
+  for (const path of [`/v1/scrapes/${scrapeId}`, `/v1/maps/${mapId}`]) {
+    expect((await fetch(`${url}${path}`, { headers: ann })).status, path).toBe(200)
+    expect((await fetch(`${url}${path}`, { headers: bob })).status, path).toBe(404)
+    expect((await fetch(`${url}${path}`)).status, path).toBe(404)
+  }
+  // A keyless caller's record is its address's: the same address reads it, a key does not.
+  const keyless = await (await post(url, '/v1/scrape', { url: `${origin}/page` })).json() as { scrapeId: string }
+  expect((await fetch(`${url}/v1/scrapes/${keyless.scrapeId}`)).status).toBe(200)
+  expect((await fetch(`${url}/v1/scrapes/${keyless.scrapeId}`, { headers: ann })).status).toBe(404)
+})
+
 it('an IPv6 caller has one keyless day for its whole /64, which one host can rotate within', async () => {
   const { url } = await start({ keylessDaily: 1, proxySecret: 's'.repeat(32) })
   const from = (ip: string) => ({ 'x-w2l-proxy-secret': 's'.repeat(32), 'cf-connecting-ip': ip })
