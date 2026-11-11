@@ -105,6 +105,13 @@ beforeAll(async () => {
     // A list whose second page robots.txt disallows.
     if (url === '/open/1') return html(`<h1>Open 1</h1>${PROSE}<a class="next" href="/private/2">Next</a>`)
     if (url.startsWith('/private')) return html(`<h1>Private</h1>${PROSE}<p>Not for crawlers.</p>`)
+    // Lists that a jump to the end cannot read whole (see 'scrollToEnd on lists a jump to the end skips' below).
+    // 10 chapters of fixed height, each filled in by an IntersectionObserver once it is on screen: the page never grows.
+    if (url === '/chapters') return html(`<h1>Chapters</h1>${PROSE}${Array.from({ length: 10 }, (_, i) => `<section class="chapter" data-i="${i + 1}" style="height:1200px"><h2>Chapter ${i + 1}</h2></section>`).join('')}<script>const io = new IntersectionObserver((entries) => { for (const e of entries) { if (!e.isIntersecting || e.target.dataset.done) continue; e.target.dataset.done = '1'; setTimeout(() => { e.target.insertAdjacentHTML('beforeend', '<p class="body">Chapter ' + e.target.dataset.i + ' tide readings loaded.</p>') }, 100) } }); document.querySelectorAll('.chapter').forEach((s) => io.observe(s))</script>`)
+    // 1,000 rows in a 600 px box, only the rows in view (and 5 either side) in the DOM, as react-window draws them.
+    if (url === '/vlist') return html(`<h1>Readings</h1>${PROSE}<div id="box" style="height:600px;overflow:auto;position:relative"><div id="inner" style="height:30000px;position:relative"></div></div><script>const box = document.getElementById('box'); const inner = document.getElementById('inner'); const draw = () => { const first = Math.max(0, Math.floor(box.scrollTop / 30) - 5); const last = Math.min(999, Math.ceil((box.scrollTop + 600) / 30) + 5); let h = ''; for (let i = first; i <= last; i++) h += '<div class="vrow" style="position:absolute;top:' + (i * 30) + 'px;height:30px">Reading ' + (i + 1) + '</div>'; inner.innerHTML = h }; box.addEventListener('scroll', draw); draw()</script>`)
+    // A feed scrolled in the window that loads 50 posts more near its end, until 300, and keeps only the posts near the viewport in the DOM.
+    if (url === '/vfeed') return html(`<h1>Feed</h1>${PROSE}<div id="inner" style="position:relative"></div><script>let total = 50; const inner = document.getElementById('inner'); const draw = () => { inner.style.height = (total * 100) + 'px'; const top = inner.getBoundingClientRect().top + scrollY; const y = scrollY - top; const first = Math.max(0, Math.floor(y / 100) - 3); const last = Math.min(total - 1, Math.ceil((y + innerHeight) / 100) + 3); let h = ''; for (let i = first; i <= last; i++) h += '<article class="post" style="position:absolute;top:' + (i * 100) + 'px;height:100px">Post ' + (i + 1) + '</article>'; inner.innerHTML = h; if (y + innerHeight >= total * 100 - 200 && total < 300) setTimeout(() => { total = Math.min(300, total + 50); draw() }, 200) }; addEventListener('scroll', draw); draw()</script>`)
     res.writeHead(404); res.end()
   })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -298,4 +305,56 @@ describe('list steps, real browser', () => {
     const result = await run('/stuck', [{ type: 'loadMore', selector: '#nope' }])
     expect(result.actions?.failed).toMatchObject({ code: 'selector_not_found' })
   }, 60_000)
+})
+
+/**
+ * A known gap, not yet fixed: scrollToEnd jumps to the end of the page (or
+ * of the box) each round, so content that loads only while it is on screen
+ * and is never on screen at the end is not read. Each list is read once;
+ * the plain tests pin what scrollToEnd reads today, which shows the
+ * fixture works, and the `it.fails` tests state the whole list a read
+ * should return. When scrollToEnd reads these lists whole, the `it.fails`
+ * tests fail: turn them into plain tests and drop the pins they replace.
+ */
+describe('scrollToEnd on lists a jump to the end skips, real browser', () => {
+  const read = {} as { chapters: FetchResult; vlist: FetchResult; vfeed: FetchResult }
+  /** The numbers 1..count for which no `label n` line was read. */
+  const missing = (markdown: string | null | undefined, label: string, count: number): number[] =>
+    Array.from({ length: count }, (_, i) => i + 1).filter((n) => !new RegExp(`${label} ${n}\\b`).test(markdown ?? ''))
+
+  beforeAll(async () => {
+    read.chapters = await run('/chapters', [{ type: 'scrollToEnd', waitMs: 400 }])
+    read.vlist = await run('/vlist', [{ type: 'scrollToEnd', selector: '#box', itemSelector: '.vrow', waitMs: 400 }])
+    read.vfeed = await run('/vfeed', [{ type: 'scrollToEnd', itemSelector: '.post', waitMs: 400 }])
+  }, 180_000)
+
+  it('today: on chapters filled in as they come on screen, it reads only those on screen at the start and at the end, and says the list ended', () => {
+    expect(read.chapters.status).toBe('success')
+    expect(read.chapters.actions?.lists).toMatchObject([{ type: 'scrollToEnd', stoppedBy: 'end' }])
+    expect(read.chapters.markdown).toContain('Chapter 10 tide readings loaded.')
+  })
+
+  it.fails('reads every chapter of a page filled in as each comes on screen', () => {
+    expect(Array.from({ length: 10 }, (_, i) => i + 1).filter((n) => !read.chapters.markdown?.includes(`Chapter ${n} tide readings loaded.`))).toEqual([])
+  })
+
+  it('today: in a box that keeps only the rows in view, it reads only the last rows and says the list ended', () => {
+    expect(read.vlist.status).toBe('success')
+    expect(read.vlist.actions?.lists).toMatchObject([{ type: 'scrollToEnd', stoppedBy: 'end' }])
+    expect(read.vlist.markdown).toContain('Reading 1000')
+  })
+
+  it.fails('reads all 1,000 rows of a box that keeps only the rows in view', () => {
+    expect(missing(read.vlist.markdown, 'Reading', 1000)).toEqual([])
+  })
+
+  it('today: on a feed that keeps only the posts near the viewport, it loads all 300 but reads only the last', () => {
+    expect(read.vfeed.status).toBe('success')
+    expect(read.vfeed.actions?.lists).toMatchObject([{ type: 'scrollToEnd', stoppedBy: 'end' }])
+    expect(read.vfeed.markdown).toContain('Post 300')
+  })
+
+  it.fails('reads all 300 posts of a feed that keeps only the posts near the viewport', () => {
+    expect(missing(read.vfeed.markdown, 'Post', 300)).toEqual([])
+  })
 })
