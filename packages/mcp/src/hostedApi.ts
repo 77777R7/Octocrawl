@@ -766,7 +766,6 @@ class SlidingWindowLimiter {
   }
 }
 
-/** Deletes the scrape and map records and the saved files older than the TTL: hosted phase 1 retains nothing, and the task root is Cloud Run's memory. */
 /**
  * Who made each scrape and map record this instance keeps (found 2026-11-11: GET /v1/scrapes/:id and /v1/maps/:id answered
  * any caller that knew an id). The owner is the caller's quota identity (HostedCaller.id: the HMAC of its key or address, or
@@ -815,6 +814,7 @@ export function ownedRecordsEngine(engine: ApiEngine, owners: RecordOwners, call
   }
 }
 
+/** Deletes the scrape and map records and the saved files older than the TTL: hosted phase 1 retains nothing, and the task root is Cloud Run's memory. */
 export async function sweepTaskRoot(taskRoot: string, ttlMs = HOSTED_RECORD_TTL_MS, now = Date.now()): Promise<number> {
   let removed = 0
   for (const dir of ['scrapes', 'maps']) {
