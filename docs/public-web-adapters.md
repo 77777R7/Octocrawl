@@ -13,7 +13,7 @@ The registry currently contains:
 | Adapter | Status | Current coverage |
 |---|---|---|
 | `amazon-product@1.0.0` | beta adapter | `/dp` and `/gp/product` identity, physical/subscription offers, seller, stock, delivery context, variants, ratings, specifications and subject images; recommendation regions excluded |
-| `reddit-public@1.0.0` | beta adapter | public post/thread, comment parent graph, Subreddit identity and public profile identity |
+| `reddit-public@1.0.0` | beta adapter | public post/thread, comment parent graph, Subreddit identity with the posts its listing shows (`/r/X`, `/r/X/{hot,new,rising,controversial,top,best}`: title, author, score, comment count, time, permalink, link; old.reddit and the current site) and public profile identity |
 | `x-public@1.0.0` | beta adapter | public status/thread and public profile; search, history timelines and large reply discovery remain out of scope |
 | `generic@1.0.0` | generic | main-content Markdown with honest empty/block failures |
 

@@ -133,6 +133,44 @@ describe('public site adapter registry', () => {
     expect(comments.every(comment => comment.fields.body?.source === 'hydration')).toBe(true)
   })
 
+  it('lists a Reddit community listing\'s posts, on old.reddit and the current site, each once', () => {
+    // The attributes are those both sites carried for r/ClaudeCode's top posts on 2026-11-11, read in a person's Chrome.
+    const old = extractTf.extract(`<html><body><div class="content"><h1>ClaudeCode</h1><div id="siteTable">
+      <div class=" thing link " data-fullname="t3_1tb7edc" data-author="Apprehensive-Cut3711" data-timestamp="1778604685000" data-url="https://i.redd.it/izgrhw5tgq0h1.png" data-permalink="/r/ClaudeCode/comments/1tb7edc/inherited_a_repo/" data-comments-count="696" data-score="7423" data-promoted="false"><a class="title may-blank" href="https://i.redd.it/izgrhw5tgq0h1.png">Inherited a 3-month old repo from a Vibe Engineer</a></div>
+      <div class=" thing link " data-fullname="t3_ad1" data-promoted="true" data-permalink="/r/ClaudeCode/comments/ad1/ad/" data-score="1"><a class="title" href="https://ads.example/">An ad</a></div>
+      <div class=" thing link " data-fullname="t3_2abc" data-author="someone" data-timestamp="1778000000000" data-permalink="/r/ClaudeCode/comments/2abc/second/" data-comments-count="12" data-score="300"><a class="title" href="/r/ClaudeCode/comments/2abc/second/">Second post</a></div>
+    </div></div></body></html>`, { url: 'https://old.reddit.com/r/ClaudeCode/top/?t=all' })
+    expect(old.adapter.id).toBe('reddit-public')
+    const oldPosts = old.entities.filter(entity => entity.type === 'post')
+    expect(oldPosts.map(post => post.id)).toEqual(['1tb7edc', '2abc'])
+    expect(oldPosts[0]).toMatchObject({
+      fields: {
+        title: { normalized: 'Inherited a 3-month old repo from a Vibe Engineer' }, author: { normalized: 'Apprehensive-Cut3711' },
+        score: { normalized: '7423' }, commentCount: { normalized: '696' }, createdAt: { normalized: '2026-05-12T16:51:25.000Z' },
+        url: { normalized: 'https://old.reddit.com/r/ClaudeCode/comments/1tb7edc/inherited_a_repo/' }, link: { normalized: 'https://i.redd.it/izgrhw5tgq0h1.png' },
+      },
+      relationships: { community: 'ClaudeCode' },
+    })
+    expect(old.entities.find(entity => entity.type === 'community')).toMatchObject({ id: 'ClaudeCode', relationships: { posts: ['1tb7edc', '2abc'] } })
+    // A time no date can hold leaves the post without one; it does not stop the page.
+    const odd = extractTf.extract('<html><body><h1>ClaudeCode</h1><div class="thing" data-fullname="t3_a" data-timestamp="1e20"><a class="title" href="/x">T</a></div></body></html>', { url: 'https://old.reddit.com/r/ClaudeCode/' })
+    expect(odd.entities.find(entity => entity.type === 'post')?.fields).not.toHaveProperty('createdAt')
+    const current = extractTf.extract(`<html><body><main><h1>r/ClaudeCode</h1>
+      <shreddit-post id="t3_1tb7edc" permalink="/r/ClaudeCode/comments/1tb7edc/inherited_a_repo/" content-href="https://i.redd.it/izgrhw5tgq0h1.png" comment-count="696" created-timestamp="2026-05-12T16:51:25.387000+0000" post-title="Inherited a 3-month old repo from a Vibe Engineer" score="7415" author="Apprehensive-Cut3711"></shreddit-post>
+      <shreddit-post id="t3_1tb7edc" permalink="/r/ClaudeCode/comments/1tb7edc/inherited_a_repo/" post-title="Inherited a 3-month old repo from a Vibe Engineer" score="7415"></shreddit-post>
+      <shreddit-post id="t3_nameless" permalink="/r/ClaudeCode/comments/nameless/x/"></shreddit-post>
+    </main></body></html>`, { url: 'https://www.reddit.com/r/ClaudeCode/top/?t=all' })
+    const currentPosts = current.entities.filter(entity => entity.type === 'post')
+    expect(currentPosts.map(post => post.id)).toEqual(['1tb7edc'])
+    expect(currentPosts[0]).toMatchObject({
+      fields: {
+        title: { normalized: 'Inherited a 3-month old repo from a Vibe Engineer' }, author: { normalized: 'Apprehensive-Cut3711' }, score: { normalized: '7415' },
+        commentCount: { normalized: '696' }, createdAt: { normalized: '2026-05-12T16:51:25.387000+0000' },
+        url: { normalized: 'https://www.reddit.com/r/ClaudeCode/comments/1tb7edc/inherited_a_repo/' }, link: { normalized: 'https://i.redd.it/izgrhw5tgq0h1.png' },
+      },
+    })
+  })
+
   it('extracts Reddit community and profile identities from public URLs', () => {
     const community = extractTf.extract('<html><body><main><h1>Web scraping</h1><p>Public community listing with visible posts and descriptions.</p></main></body></html>', { url: 'https://www.reddit.com/r/webscraping/' })
     const profile = extractTf.extract('<html><body><main><h1>alice</h1><p>Public profile content and recent activity.</p></main></body></html>', { url: 'https://www.reddit.com/user/alice/' })
