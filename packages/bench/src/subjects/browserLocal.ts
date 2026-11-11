@@ -25,7 +25,8 @@ import {
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Download, type Page, type Request, type Response, type Route } from 'playwright'
 import { browserEngineFor, type BrowserEngineName } from './browserEngine.js'
 import { DETECTION_FLAGS_ID, launchInstalledChrome, type InstalledChromeTestSeams } from './installedChrome.js'
-import { HOSTED_CHROME_PROFILE_ID, launchHostedChrome, type HostedChromeLaunch } from './hostedChrome.js'
+import { HOSTED_CHROME_PROFILE_ID, hostedChromeProxy, launchHostedChrome, type HostedChromeLaunch } from './hostedChrome.js'
+import type { CompatAddressGuard } from '../compatGuard.js'
 import type { BrowserIdentityChoice } from './browserIdentity.js'
 import { solveChallenges, TASK_CONTRACT_UNMET, type CaptchaSolving, type SolveVerdict } from '../vendors/captchaSolver.js'
 import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLaunchOptions, defaultNetworkPolicy, EgressRoutes, pinnedBrowserHostRules, readCappedBody } from '../egress.js'
@@ -411,7 +412,18 @@ export class BrowserLocalSubject implements SubjectAdapter {
      * and left open when this subject is torn down. Null (the default): this subject launches and closes its own.
      */
     private readonly keeper: BrowserKeeper | null = null,
+    /**
+     * A hosted engine's plain browser (found 2026-11-11): its address guard (compatGuard.ts, `login: false`), the only
+     * proxy the launched Chromium has, as hosted_chrome's (hostedChrome.ts). The URL a fetch is given and its final URL
+     * were checked before; a redirect, a subresource, a WebSocket or a name that rebinds was not, and reached private
+     * addresses. Through the guard, every connection's address is checked before it is made. Null (the default): a local
+     * server's browser, which may reach the person's own network.
+     */
+    private readonly addressGuard: CompatAddressGuard | null = null,
   ) {
+    if (addressGuard !== null && (browserEngine !== 'playwright' || access != null || managedProfileDir !== null || browserAllowedHosts !== undefined || (networkPolicy?.egressProxy ?? null) !== null)) {
+      throw new Error("the address guard is the hosted plain browser's only route: stock Playwright, no login, no proxy and no host pinning")
+    }
     if ((browserEngine === 'hosted_chrome') !== (hostedChrome !== null)) throw new Error('hosted_chrome launches behind its address guard: the engine and its launch go together')
     if (robotsCache !== undefined && (access?.proxy || browserAllowedHosts !== undefined)) {
       throw new Error("a browser on a route of its own (a user's proxy, host pinning) reads robots.txt on that route, not from the run's cache")
@@ -2032,7 +2044,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
         // uses one, otherwise direct (a user's proxy is set per context).
         const engine = await browserEngineFor(this.browserEngine)
         if (engine.version !== undefined) this.engineVersion = engine.version
-        return engine.launch({ headless: !this.headed, timeout: 30_000, ...(args.length === 0 ? chromiumProxyLaunchOptions(this.envProxy) : { args }) })
+        const guarded = this.addressGuard === null ? null : { proxy: hostedChromeProxy(await this.addressGuard.proxyUrl()) }
+        return engine.launch({ headless: !this.headed, timeout: 30_000, ...(args.length !== 0 ? { args } : guarded ?? chromiumProxyLaunchOptions(this.envProxy)) })
       }
       // The keeper's browser is the process's: taken as it is, or launched for every subject at once, and never abandoned for one caller.
       if (this.keeper !== null) return this.keeper.get(launch)
@@ -2092,6 +2105,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
     if (this.keeper === null) await this.browser?.close().catch(() => {})
     this.browser = null
     this.browserPromise = null
+    // A keeper's browser goes on through this guard after this subject, so only a browser of its own takes the guard down.
+    if (this.keeper === null) await this.addressGuard?.close().catch(() => {})
     if (this.ownsRobotsCache) await this.robotsCache.teardown()
   }
 }

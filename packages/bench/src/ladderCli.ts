@@ -240,6 +240,11 @@ export function buildChannels(
      */
     compatAddressGuard?: boolean
     /**
+     * A hosted engine's plain browser: launched behind an address guard (compatGuard.ts) as hosted_chrome is, so every
+     * connection a page makes (a redirect, a subresource, a WebSocket) goes to an address the network policy allows.
+     */
+    browserAddressGuard?: boolean
+    /**
      * A local server that may launch the person's installed Google Chrome (ADR 0005 `installed_chrome`): an
      * `installed_chrome` rung after `browser_local`, built only in standard mode, for a request that chose access
      * enhanced, under a grant that names the capability. Never on the hosted preview.
@@ -279,7 +284,8 @@ export function buildChannels(
   const seams = opts.installedChromeSeams ?? {}
   const plainSolving: CaptchaSolving | null = solving !== null && installedChromeRung ? { ...solving, defersTo: { rung: 'installed_chrome', carries: installedChromeCarries(solving.solver, seams) } } : solving
   // The run's robots.txt cache serves every rung on its routes, by origin and User-Agent; a host-pinned browser reads its own.
-  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore, preview, undefined, opts.browserEngine ?? 'playwright', opts.browserIdentity ?? 'declared', {}, plainSolving, opts.browserAllowedHosts === undefined ? opts.robotsCache : undefined, null, opts.browserKeeper ?? null)
+  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore, preview, undefined, opts.browserEngine ?? 'playwright', opts.browserIdentity ?? 'declared', {}, plainSolving, opts.browserAllowedHosts === undefined ? opts.robotsCache : undefined, null, opts.browserKeeper ?? null,
+    opts.browserAddressGuard === true && opts.browserAllowedHosts === undefined && (opts.networkPolicy?.egressProxy ?? null) === null ? new CompatAddressGuard(opts.networkPolicy ?? defaultNetworkPolicy(), undefined, { login: false }) : null)
   const declared: IdentityBundle = preview ? identityBundleFrom(previewIdentity(modeIdentity(mode))) : identityForRoute(mode)
   const installedChrome = installedChromeRung
     ? new BrowserLocalSubject(mode, null, true, opts.networkPolicy, null, originScheduler, null, undefined, opts.onRenderedHtml, fileStore, false, undefined, 'installed_chrome', 'actual', seams, solving, opts.robotsCache)
