@@ -77,6 +77,43 @@ function stringValue(rec: Record<string, unknown>, ...keys: string[]): string | 
   return null
 }
 
+/**
+ * The posts a community listing shows (its hot, new or top page), each once, in page order: old.reddit's
+ * `div.thing[data-fullname^="t3_"]` rows (promoted ones left out) and the current site's `<shreddit-post>` elements,
+ * whose attributes carry the post. A post without a title is left out.
+ */
+function redditListingPosts(doc: Document, url: string | undefined, community: string): ExtractedEntity[] {
+  const absolute = (href: string | null): string | null => {
+    if (!href) return null
+    try { return new URL(href, url).href } catch { return null }
+  }
+  const posts = new Map<string, ExtractedEntity>()
+  const add = (id: string | null, values: Record<string, string | null>, source: EntityFieldSource, path: string): void => {
+    if (!id || posts.has(id) || !values.title) return
+    const fields = Object.fromEntries(Object.entries(values).flatMap(([key, value]) => value ? [[key, field(value, source, `${path}/${key}`)]] : []))
+    posts.set(id, { type: 'post', id, fields, relationships: { community } })
+  }
+  for (const el of qsa(doc, 'div.thing[data-fullname^="t3_"]')) {
+    if (el.getAttribute('data-promoted') === 'true') continue
+    const id = clean(el.getAttribute('data-fullname'))?.replace(/^t3_/, '') ?? null
+    const stamp = Number(el.getAttribute('data-timestamp'))
+    add(id, {
+      title: clean(textOf(qs(el, 'a.title') ?? el)), author: clean(el.getAttribute('data-author')), score: clean(el.getAttribute('data-score')),
+      commentCount: clean(el.getAttribute('data-comments-count')), createdAt: stamp > 0 && Number.isFinite(new Date(stamp).getTime()) ? new Date(stamp).toISOString() : null,
+      url: absolute(el.getAttribute('data-permalink')), link: absolute(qs(el, 'a.title')?.getAttribute('href') ?? null),
+    }, 'dom', `div.thing[data-fullname="t3_${id}"]`)
+  }
+  for (const el of qsa(doc, 'shreddit-post')) {
+    const id = clean(el.getAttribute('id'))?.replace(/^t3_/, '') ?? null
+    add(id, {
+      title: clean(el.getAttribute('post-title')), author: clean(el.getAttribute('author')), score: clean(el.getAttribute('score')),
+      commentCount: clean(el.getAttribute('comment-count')), createdAt: clean(el.getAttribute('created-timestamp')),
+      url: absolute(el.getAttribute('permalink')), link: absolute(el.getAttribute('content-href')),
+    }, 'dom', `shreddit-post[id="t3_${id}"]`)
+  }
+  return [...posts.values()]
+}
+
 function redditEntities(doc: Document, url: string | undefined): ExtractedEntity[] {
   const path = pathOf(url); const postMatch = path.match(/^\/r\/([^/]+)\/comments\/([a-z0-9]+)/i)
   const profileMatch = path.match(/^\/(?:user|u)\/([^/]+)/i); const communityMatch = path.match(/^\/r\/([^/]+)\/?(?:(?:hot|new|rising|controversial|top|best)\/?)?$/i)
@@ -129,7 +166,13 @@ function redditEntities(doc: Document, url: string | undefined): ExtractedEntity
     entities.push({ type: 'comment', id: candidate.id, fields, relationships: { parent: candidate.parent?.replace(/^t[13]_/, '') ?? null, thread: postId } })
   }
   const thread = entities.find(entity => entity.type === 'thread'); if (thread) thread.relationships = { ...thread.relationships, comments: commentIds }
-  if (!postMatch && communityMatch) { const name = communityMatch[1]!; if (clean(textOf(qs(doc, 'h1') ?? doc.body))?.replace(/\W/g, '').toLowerCase().includes(name.replace(/\W/g, '').toLowerCase())) entities.push({ type: 'community', id: name, fields: { name: field(name, 'dom', 'h1') }, relationships: {} }) }
+  if (!postMatch && communityMatch) {
+    const name = communityMatch[1]!
+    if (clean(textOf(qs(doc, 'h1') ?? doc.body))?.replace(/\W/g, '').toLowerCase().includes(name.replace(/\W/g, '').toLowerCase())) {
+      const posts = redditListingPosts(doc, url, name)
+      entities.push({ type: 'community', id: name, fields: { name: field(name, 'dom', 'h1') }, relationships: { posts: posts.flatMap(post => post.id === null ? [] : [post.id]) } }, ...posts)
+    }
+  }
   if (profileMatch) { const name = profileMatch[1]!; if (clean(textOf(qs(doc, 'h1') ?? doc.body))?.toLowerCase().includes(name.toLowerCase())) entities.push({ type: 'profile', id: name, fields: { username: field(name, 'dom', 'h1') }, relationships: {} }) }
   return entities
 }
