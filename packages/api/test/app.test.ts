@@ -754,6 +754,61 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     }
   })
 
+  it('a hosted engine takes a scrape\'s robots override from an account, for that URL alone, and never past a rule written for Octocrawl', async () => {
+    const requests: string[] = []
+    // One site tells every crawler to stay out; the other names Octocrawl in a group of its own.
+    const site = async (robots: string, tag: string) => {
+      const server = createServer((req, res) => {
+        requests.push(`${tag}${req.url ?? ''}`)
+        if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end(robots); return }
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+        res.end('<!doctype html><html><head><title>Thread</title></head><body><main><article><h1>Thread</h1><p>A person asked their agent to read this one public thread, which the host tells every crawler to stay out of; the decision to read it is theirs and is kept on the record.</p><p>The thread itself is ordinary prose, long enough for the extraction cascade to accept it as the main content of the page.</p></article></main></body></html>')
+      })
+      await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+      return { server, origin: `http://127.0.0.1:${(server.address() as AddressInfo).port}` }
+    }
+    const every = await site('User-agent: *\nDisallow: /', '')
+    const named = await site('User-agent: Octocrawl\nDisallow: /\n\nUser-agent: *\nAllow: /', 'named')
+    const origin = every.origin
+    const hostedRoot = await mkdtemp(join(tmpdir(), 'w2l-api-hosted-override-'))
+    const hosted = createApiEngine({ taskRoot: hostedRoot, channelsFor: httpOnlyChannels, hosted: true, allowRobotsOverride: false })
+    const robotsOverride = { reason: 'The person asked for this one thread.', recordedBy: 'person' }
+    try {
+      // Without an account there is no one to record the decision against: refused by name, nothing fetched.
+      await expect(hosted.scrape({ url: `${origin}/thread`, robotsOverride })).rejects.toMatchObject({ code: 'unsupported_parameter', details: { parameters: ['robotsOverride'] }, message: expect.stringContaining('needs an account') })
+      expect(requests).toEqual([])
+      const taken = await hosted.scrape({ url: `${origin}/thread`, robotsOverride, debug: false }, { account: 'uid-1' })
+      expect(taken).toMatchObject({
+        status: 'success',
+        warnings: [{ code: 'robots_overridden', message: expect.stringContaining('(rule /); it was fetched under an override recorded by person: The person asked for this one thread.') }],
+        evidenceRecord: { robotsDecision: { decision: 'disallowed', userOverride: true, overrideBasis: 'robots_override' } },
+      })
+      expect(requests).toEqual(['/robots.txt', '/thread'])
+      // A rule the site wrote for Octocrawl itself is its targeted opt-out: a hosted engine does not set it aside.
+      const optedOut = await hosted.scrape({ url: `${named.origin}/thread`, robotsOverride, debug: false }, { account: 'uid-1' })
+      expect(optedOut).toMatchObject({
+        status: 'failed', failureReason: 'policy_denied',
+        evidenceRecord: { robotsDecision: { decision: 'disallowed', userOverride: false, overrideBasis: null } },
+        agentHints: [expect.stringContaining('disallows this URL for Octocrawl by name (User-agent: octocrawl')],
+      })
+      expect(requests).toEqual(['/robots.txt', '/thread', 'named/robots.txt'])
+      // A scrape without one obeys, and a batch, a crawl and a map still take no override on a hosted engine.
+      expect(await hosted.scrape({ url: `${origin}/thread`, debug: false }, { account: 'uid-1' })).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
+      const app = createApp(hosted)
+      const post = (path: string, body: unknown) => app.request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      for (const [path, body, parameter] of [['/v1/batches', { urls: [`${origin}/thread`], robotsOverrides: [{ url: `${origin}/thread`, reason: 'r' }] }, 'robotsOverrides'], ['/v1/crawl', { url: origin, ignoreRobotsTxt: true }, 'ignoreRobotsTxt'], ['/v1/map', { url: origin, ignoreRobotsTxt: true }, 'ignoreRobotsTxt']] as const) {
+        const refused = await post(path, body)
+        expect(refused.status, path).toBe(400)
+        expect(await refused.json(), path).toMatchObject({ error: expect.stringContaining('a hosted server obeys robots.txt for every URL but the one a scrape names with a robotsOverride'), details: { parameters: [parameter] } })
+      }
+      expect(requests).toEqual(['/robots.txt', '/thread', 'named/robots.txt'])
+    } finally {
+      await hosted.close()
+      for (const { server } of [every, named]) await new Promise<void>(resolve => server.close(() => resolve()))
+      await rm(hostedRoot, { recursive: true, force: true })
+    }
+  })
+
   it('POST /v1/crawl is 202 and GET /v1/crawl/:id returns CrawlReport', async () => {
     const app = createApp(engine)
     const started = await app.request('/v1/crawl', {

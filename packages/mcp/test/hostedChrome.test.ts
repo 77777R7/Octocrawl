@@ -56,7 +56,7 @@ describe('the octocrawl-chrome service', () => {
       [{ url: 'https://shop.test/', options: { skipTlsVerification: true } }, /takes no skipTlsVerification/],
       [{ url: 'https://shop.test/', deadlineAt: 'soon' }, /deadlineAt/],
       [{ url: 'https://shop.test/', options: 'all' }, /options is an object/],
-      // robots.txt is obeyed on every hosted rung, and a ladder's own flags are no caller's: refused by name, not passed on.
+      // this rung obeys robots.txt on its own route, and a ladder's own flags are no caller's: refused by name, not passed on.
       [{ url: 'https://shop.test/', options: { robotsOverride: { reason: 'x', basis: 'user_named_url' } } }, /hosted_chrome takes no robotsOverride/],
       [{ url: 'https://shop.test/', options: { headersTimeoutFallback: true, waitFor: 10 } }, /takes no headersTimeoutFallback/],
       [{ url: 'https://shop.test/', options: { somethingElse: 1 } }, /takes no somethingElse/],

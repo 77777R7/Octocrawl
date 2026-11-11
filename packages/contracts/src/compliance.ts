@@ -438,6 +438,12 @@ export type RobotsOverrideBasis = 'robots_override' | 'user_named_url' | 'ignore
  */
 export interface AppliedRobotsOverride extends RobotsOverride {
   basis?: Exclude<RobotsOverrideBasis, 'robots_override'>
+  /**
+   * The override sets aside a rule robots.txt wrote for every crawler, never
+   * one it wrote for Octocrawl itself: a caller's recorded override on a
+   * hosted server, which fetches from the operator's addresses.
+   */
+  everyCrawlerRulesOnly?: true
 }
 
 /**

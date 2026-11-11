@@ -58,7 +58,7 @@ Where things stand on 2026-10-27:
 | S · Off Steel | Once L(1) is measured, Steel is no longer recommended and its arm leaves the weekly rerun. The adapter stays for people who bring their own Steel key. ADR 0005 and `docs/access.md` are revised. Nothing changes on hosted, which never ran Steel | The ADR 0005 revision and docs merged; the weekly rerun runs without a Steel arm |
 | H · Hosted parity, the mainline | (1) A parity board: the frozen task sets run every week through the hosted MCP and the local MCP, with Firecrawl as the reference (verified, false successes, p50 and p95, credits), and a CI check that every local MCP tool and scrape option has a hosted entry: supported, planned, or different on purpose with the reason. (2) Hosted access: `compatible_transport` first; then a real Chrome rung on Octocrawl's servers (headed Chrome under Xvfb on Cloud Run, from G4), with an egress chosen by a comparison of residential or ISP proxy providers; then CAPTCHA solving behind a default-off switch, after a legal review. (3) Actions and `waitFor` for keyed callers. (4) Monitors and delivery on hosted. (5) Identity-bound features (saved logins, the person's browser): decided 2026-11-04, such a call is forwarded to the server on the person's own computer, and hosted holds no login state ([the decision](#hosted-logins-2026-11-04)). (6) Limits and capacity: map and crawl limits, a browser pool, concurrency. (7) The json model fallback deploy (decided 2026-10-24). (8) What hosted adds beyond local: a cache and route memory shared across users, monitors that run while the computer is off, jobs at scale | On the parity board, in two windows, hosted verifies at least what the local default verifies on the frozen sets, with no more false successes; every local MCP tool and option has a hosted entry |
 
-Kept different on purpose: a hosted server obeys robots.txt for every URL ([Direction](#direction)), and hosted never drives the person's own Chrome (ADR 0005); hosted gets its own real-Chrome rung instead.
+Kept different on purpose: a hosted server obeys robots.txt for every URL but an account's recorded scrape override ([Direction](#direction)), and hosted never drives the person's own Chrome (ADR 0005); hosted gets its own real-Chrome rung instead.
 
 ## PA first (2026-10-09 to 2026-10-27)
 
@@ -167,7 +167,7 @@ robots.txt is read and recorded for every URL. As decided on 2026-10-05:
 
 - On a local server, a URL the user names (scrape, batch, a URL list) is fetched whatever robots.txt says.
 - The links a crawl or map discovers obey it, unless the user turns that off (`ignoreRobotsTxt`).
-- A hosted server obeys it for every URL.
+- A hosted server obeys it for every URL, except the one URL a scrape names with a `robotsOverride` giving the caller's reason, from an account (decided 2026-11-11). A rule robots.txt writes for Octocrawl itself still holds there, and batch, crawl and map on hosted still obey.
 - Crawl-delay and the back-off after a 429 apply throughout.
 
 The audience (widened on 2026-10-03) is developers who would otherwise use Firecrawl, and people who do not program who would otherwise use Octoparse. They paste URLs or describe a site and get a table or JSON whose every row traces back to its page. Researchers remain the users who need that trace most: graduate students, academic and policy researchers, data journalists, think-tank analysts. The guides keep serving them. Sales-lead scraping of personal data is out of scope: it values volume over evidence and carries personal-data risk.

@@ -308,7 +308,7 @@ export function hostedTools(browser: boolean, jobs = false, regexChecks = false)
     .map((tool) => HOSTED_JOB_TOOLS.has(tool.name) ? hostedJobTool(tool, browser) : ({
       ...tool,
       description: hostedDescription(tool, browser, jobs),
-      inputSchema: hostedInputSchema(tool.name, tool.inputSchema, browser, regexChecks),
+      inputSchema: hostedInputSchema(tool.name, tool.inputSchema, browser, regexChecks, jobs),
       annotations: { ...tool.annotations, readOnlyHint: true },
       _meta: { ...('_meta' in tool ? tool._meta : {}), ...HOSTED_INVOCATION[tool.name as keyof typeof HOSTED_INVOCATION] },
     }))
@@ -391,14 +391,15 @@ function hostedJobTool(tool: (typeof TOOLS)[number], browser: boolean) {
 }
 
 /**
- * The scrape options hosted Octocrawl serves (docs/mcp-client-ux-tasks.md W6): the rest it refuses (actions,
- * robotsOverride, lane, handoff, skipTlsVerification, access other than standard) or takes and cannot honour (mode
+ * The scrape options hosted Octocrawl serves (docs/mcp-client-ux-tasks.md W6; robotsOverride from 2026-11-11, an
+ * account's, for the one URL a scrape names): the rest it refuses (actions, lane, handoff, skipTlsVerification, access
+ * other than standard) or takes and cannot honour (mode
  * authed reads anonymously, as it holds no saved login; lockdown always misses, since nothing is cached; storeInCache,
  * maxAge and minAge do nothing for the same reason). Measured against createHostedApi on 2026-10-17;
  * hostedSchema.integration.test.ts calls every listed option, so a new local option reaches hosted only when added here.
  * markdownOffset is the MCP server's own (results.ts) and never reaches REST.
  */
-export const HOSTED_SCRAPE_KEYS: ReadonlySet<string> = new Set(['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'markdownOffset', 'onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'fastMode', 'blockAds', 'removeBase64Images', 'verify', 'integration'])
+export const HOSTED_SCRAPE_KEYS: ReadonlySet<string> = new Set(['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'markdownOffset', 'onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'fastMode', 'blockAds', 'removeBase64Images', 'verify', 'robotsOverride', 'integration'])
 /** A hosted MCP scrape's deadline when it names none: a local MCP scrape's. */
 export const HOSTED_MCP_SCRAPE_TIMEOUT_MS = MCP_SCRAPE_TIMEOUT_MS
 /**
@@ -409,7 +410,7 @@ export const HOSTED_MCP_SCRAPE_TIMEOUT_MS = MCP_SCRAPE_TIMEOUT_MS
 export const HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS = 180_000
 
 /** A hosted copy of a tool's input schema, with only what this connection can use. */
-function hostedInputSchema(name: string, schema: unknown, browser: boolean, regexChecks = false): unknown {
+function hostedInputSchema(name: string, schema: unknown, browser: boolean, regexChecks = false, account = false): unknown {
   if (name !== 'scrape' && name !== 'map') return schema
   if (name === 'map') {
     const copy = structuredClone(schema) as { properties: Record<string, Record<string, unknown>> }
@@ -425,6 +426,8 @@ function hostedInputSchema(name: string, schema: unknown, browser: boolean, rege
   const properties = copy.properties
   properties.timeout = { ...properties.timeout, maximum: HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS, description: `Deadline in milliseconds for the whole scrape. When it fires the result is partial with the content so far, or failed/timeout. Here by default ${HOSTED_MCP_SCRAPE_TIMEOUT_MS}, max ${HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS}; a longer one is lowered to it.` }
   properties.maxFileBytes = { ...properties.maxFileBytes, maximum: HOSTED_MAX_FILE_BYTES }
+  // A robots override is recorded against an account: a connection without one is not offered it.
+  if (!account) delete properties.robotsOverride
   if (!regexChecks) {
     const verify = properties.verify as { description: string; properties: { checks: { items: { properties: { type: { enum: string[] } } } } } }
     const checkType = verify.properties.checks.items.properties.type

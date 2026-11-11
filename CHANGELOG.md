@@ -37,6 +37,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **Hosted Octocrawl reads a page robots.txt disallows when your account says why.** Until now hosted refused every page a site's robots.txt disallowed, and a scrape there could not carry a `robotsOverride`. A hosted `scrape` from an account (an account's key or a sign-in) now takes `robotsOverride` with your reason for the one URL it names, and records it as a local server does: a `robots_overridden` warning naming the rule, the reason and who recorded it, and `robotsDecision.overrideBasis: "robots_override"` in the Evidence Record. A rule a site writes for Octocrawl itself (`User-agent: Octocrawl`) still holds, a call without an account is refused by name, and hosted batch, crawl and map still obey robots.txt. The hosted MCP `scrape` lists the option on a connection that lists crawl and batch jobs, an account's. Sites that block cloud addresses outright still answer hosted with a refusal.
+
 ## 0.8.12 — 2026-11-11
 
 The published packages at 0.8.12. A read no longer runs in silence. **On a terminal, `octocrawl scrape`, `map`, `crawl` and `batch` draw an octopus while they run, with the stage or the count, and wipe it when the answer is back**; **`octocrawl serve` shows what it is doing for each caller**; and **a plain `scrape` over MCP tells the client its stages as progress**, which Claude Code shows under the tool call. Apart from that: **a page that refuses your exit is reported as `access_denied`**, and **`octocrawl access-grant` writes the access grant of the recommended local route**.

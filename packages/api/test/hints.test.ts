@@ -45,7 +45,7 @@ describe('agent hints', () => {
   it('names the robots.txt rule and where it is set aside for a policy denial, and an unreachable robots.txt for what it is', () => {
     const disallowed = (detail: Record<string, unknown>) => result({ status: 'failed', failureReason: 'policy_denied', markdown: null, evidence: { finalUrl: URL_, httpStatus: null }, trace: [{ at: 1, lane: 'http', event: 'robots_disallowed', detail: { url: URL_, ...detail } }] })
     expect(hints(disallowed({ appliedRules: [{ pattern: '/report', allow: false }, { pattern: '/public', allow: true }] }))).toEqual([
-      "robots.txt of example.test disallows this URL for Octocrawl's identity (rule /report). A local Octocrawl server fetches a URL a scrape or batch names whatever robots.txt says, and a crawl or map started there with ignoreRobotsTxt fetches the links it disallows, each on the record; a hosted server obeys robots.txt for every URL",
+      "robots.txt of example.test disallows this URL for Octocrawl's identity (rule /report). A local Octocrawl server fetches a URL a scrape or batch names whatever robots.txt says, and a crawl or map started there with ignoreRobotsTxt fetches the links it disallows, each on the record; a hosted server obeys robots.txt for every URL but one a scrape names with a robotsOverride giving your reason, from an account",
     ])
     expect(hints(disallowed({ appliedRules: [] }))[0]).toContain('(rule unknown)')
     // A rule written for Octocrawl by name is the site owner's opt-out, and the hint says what still sets it aside.
@@ -55,7 +55,7 @@ describe('agent hints', () => {
     ] })
     expect(hints(targeted)).toEqual(["robots.txt of example.test disallows this URL for Octocrawl by name (User-agent: octocrawl; rule /): the site owner's opt-out, which a named URL and ignoreRobotsTxt do not set aside; only a robotsOverride with your recorded reason does, on a local server"])
     expect(hints(disallowed({ appliedRules: [], unreachable: 'server_error' }))).toEqual([
-      'robots.txt of example.test could not be read (server_error), which counts as a complete disallow; Octocrawl asks for it again after five minutes. A local Octocrawl server fetches a URL a scrape or batch names whatever robots.txt says, and a crawl or map started there with ignoreRobotsTxt fetches the links it disallows, each on the record; a hosted server obeys robots.txt for every URL',
+      'robots.txt of example.test could not be read (server_error), which counts as a complete disallow; Octocrawl asks for it again after five minutes. A local Octocrawl server fetches a URL a scrape or batch names whatever robots.txt says, and a crawl or map started there with ignoreRobotsTxt fetches the links it disallows, each on the record; a hosted server obeys robots.txt for every URL but one a scrape names with a robotsOverride giving your reason, from an account',
     ])
     // A timeout or a network failure is asked again sooner (robotsLookup.ts ROBOTS_NETWORK_FAILURE_TTL_MS).
     expect(hints(disallowed({ appliedRules: [], unreachable: 'timeout' }))[0]).toContain('could not be read (timeout), which counts as a complete disallow; Octocrawl asks for it again after half a minute.')

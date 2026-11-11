@@ -34,8 +34,9 @@ import { withRegexLedger, type RegexStats } from '@w2l/runtime'
 /**
  * What each page option is to the service, for every key of FetchOptions (a key added there fails to compile until it is
  * placed here): `read`, taken and passed to the lane; `refused`, refused by the rung (hostedChromeRefusal, the options a
- * Chrome read as measured takes none of); `ladder`, no caller's to send: robots.txt is obeyed on every hosted rung
- * (`robotsOverride`), and the ladder's own flags stay with it. The service refuses every key not `read`, by name.
+ * Chrome read as measured takes none of); `ladder`, no caller's to send: this rung obeys robots.txt on its own route,
+ * whatever override a hosted scrape's HTTP and browser rungs applied (`robotsOverride`), and the ladder's own flags stay
+ * with it. The service refuses every key not `read`, by name.
  */
 const FETCH_OPTION_ROLE: Record<keyof FetchOptions, 'read' | 'refused' | 'ladder'> = {
   onlyMainContent: 'read', waitFor: 'read', timeout: 'read', maxFileBytes: 'read', parsers: 'read', includeTags: 'read',
@@ -111,7 +112,7 @@ function readOf(body: unknown, now: number, regexChecks: boolean): HostedChromeR
   const refusal = hostedChromeRefusal(options as FetchOptions)
   if (refusal === null) {
     const outside = Object.keys(options).filter((key) => !HOSTED_CHROME_READ_OPTIONS.has(key))
-    if (outside.length > 0) return `hosted_chrome takes no ${outside.join(', ')}: robots.txt is obeyed on every hosted rung, and the rest is no caller's to send`
+    if (outside.length > 0) return `hosted_chrome takes no ${outside.join(', ')}: this rung obeys robots.txt on its own route, and the rest is no caller's to send`
   }
   // The hosted API's own check of a task contract, made again: the regular-expression checks only on a service whose
   // self-test passed (ADR 0006, amendment of 2026-10-29).
@@ -182,7 +183,7 @@ export function httpHostedChromeClient(serviceUrl: string, idToken: () => Promis
  * The options a read is sent with: the ones the service takes, and the options the rung refuses that ask for something,
  * which the service then refuses by name. One that asks for nothing (a hosted job's stored `skipTlsVerification: false`,
  * `mobile: false`, empty `headers` or `actions`) is not sent, as the service refuses any key it does not read. A ladder's
- * own flags, and a robots.txt override no hosted engine sets, are not sent.
+ * own flags, and a robots.txt override a hosted scrape's other rungs applied, are not sent.
  */
 function readOptions(options: FetchOptions | undefined): Partial<FetchOptions> {
   return Object.fromEntries(Object.entries(options ?? {}).filter(([key, value]) => {

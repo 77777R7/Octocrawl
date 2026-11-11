@@ -126,11 +126,12 @@ export function robotsOverrideWarning(decision: ComplianceRobotsDecision, overri
  * The override a lane applies to this verdict. A rule a robots.txt wrote for
  * Octocrawl itself (`User-agent: Octocrawl`) is the site owner's targeted
  * opt-out: a URL the request names and ignoreRobotsTxt do not set it aside,
- * only the caller's recorded robotsOverride for this URL does. A rule for
- * every crawler gives way to any override.
+ * only the caller's recorded robotsOverride for this URL does, and on a
+ * hosted server not even that (`everyCrawlerRulesOnly`). A rule for every
+ * crawler gives way to any override.
  */
 export function applicableOverride(override: AppliedRobotsOverride | undefined, decision: ComplianceRobotsDecision): AppliedRobotsOverride | undefined {
-  if (override?.basis !== undefined && isOctocrawlRobotsGroup(decision.matchedUserAgentGroup)) return undefined
+  if ((override?.basis !== undefined || override?.everyCrawlerRulesOnly === true) && isOctocrawlRobotsGroup(decision.matchedUserAgentGroup)) return undefined
   return override
 }
 
