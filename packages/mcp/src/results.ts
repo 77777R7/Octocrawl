@@ -68,7 +68,9 @@ export function withoutTelemetry(tool: string, result: unknown, args: unknown, c
  * duplicates, and the Evidence Record's request identity and egress are dropped here.
  * The verdict stays whole. The Evidence Record keeps its URLs, fetch time, HTTP status, robots decision, hashes,
  * extractor version, how the page was read, its verification and readiness, and every part that says the page is not
- * what was asked for (a redirect, field evidence, artifacts, page actions), and says `compact: true`. A read-on (`markdownOffset`) answers the verdict and the page alone: the first
+ * what was asked for (a redirect, field evidence, artifacts, page actions, a document whose status may not be its own,
+ * what a saved login put into the browser), and says `compact: true`. metadata keeps whether the page came from the
+ * cache, and usage its cost, null when unknown. A read-on (`markdownOffset`) answers the verdict and the page alone: the first
  * answer carried the record. `debug: true` answers the whole result, as before, and server.ts answers a scrape with a
  * verify contract whole too, since the contract may name any path of the delivered answer. REST and the SDK are not changed.
  */
@@ -77,12 +79,13 @@ export function compactScrape(result: unknown, args: unknown, tool = 'scrape'): 
   const rec = isObject(args) ? args : {}
   if (rec.debug === true) return result
   const out: Json = { ...result }
-  // usage keeps its counts (a cache hit reads 0 requests) and drops its timings and byte counts.
-  if (isObject(result.usage)) out.usage = pick(result.usage, ['requestCount', 'attemptCount', 'contentTokens', 'externalCostUsd'])
+  // usage keeps its counts (a cache hit reads 0 requests), its cost (null is unknown, not free) and whether the
+  // deadline cut it, and drops its timings and byte counts.
+  if (isObject(result.usage)) out.usage = { ...pick(result.usage, ['requestCount', 'attemptCount', 'contentTokens']), ...present(result.usage, ['externalCostUsd', 'externalCostChargedUsd', 'deadlineExceeded']) }
   // The verdict (VERDICT_KEYS) stays as it is, null or not: every client reads the same verdict (W8.2).
   if (out.requestedUrl === out.finalUrl) delete out.requestedUrl
   const metadata = isObject(result.metadata) ? result.metadata : undefined
-  if (typeof rec.markdownOffset === 'number') {
+  if (typeof rec.markdownOffset === 'number' && rec.markdownOffset > 0) {
     delete out.evidenceRecord
     delete out.document
     if (metadata !== undefined) out.metadata = metadata.scrapeId === undefined ? {} : { scrapeId: metadata.scrapeId }
@@ -93,7 +96,7 @@ export function compactScrape(result: unknown, args: unknown, tool = 'scrape'): 
   return out
 }
 
-const METADATA_KEPT = ['title', 'description', 'language', 'canonicalUrl', 'url', 'statusCode', 'contentType', 'error', 'scrapeId'] as const
+const METADATA_KEPT = ['title', 'description', 'language', 'canonicalUrl', 'url', 'statusCode', 'contentType', 'error', 'cacheState', 'cachedAt', 'scrapeId'] as const
 
 function compactRecord(record: Json): Json {
   const out: Json = pick(record, ['schemaVersion', 'requestedUrl', 'finalUrl', 'fetchedAt', 'httpStatus', 'status', 'reason', 'lane', 'rawSha256'])
@@ -108,7 +111,14 @@ function compactRecord(record: Json): Json {
   if (record.fieldEvidence !== null && record.fieldEvidence !== undefined) out.fieldEvidence = record.fieldEvidence
   if (Array.isArray(record.artifacts) && record.artifacts.length > 0) out.artifacts = record.artifacts
   if (Array.isArray(record.pageActions) && record.pageActions.length > 0) out.pageActions = record.pageActions
-  if (isObject(record.access)) out.access = pick(record.access, ['route', 'completion', 'allowance'])
+  if (isObject(record.access)) {
+    const access = record.access
+    out.access = pick(access, ['route', 'completion', 'allowance'])
+    // What a saved login put into the browser (docs/access.md): null or zeros says it did not reach the page.
+    if (access.sessionApplied !== undefined && (access.sessionApplied !== null || access.completion === 'authorized_session')) (out.access as Json).sessionApplied = access.sessionApplied
+  }
+  // A document whose status and headers may not be the page's own (PA B2) says so.
+  if (isObject(record.document) && record.document.responseMatch !== null && record.document.responseMatch !== undefined && record.document.responseMatch !== 'matched') out.document = { responseMatch: record.document.responseMatch }
   // The record's verdict stays whole, as the answer's does.
   if (record.verification !== undefined) out.verification = record.verification
   if (record.readiness !== undefined) out.readiness = record.readiness
@@ -122,6 +132,13 @@ function compactRecord(record: Json): Json {
 
 /** The record's parts an agent does not read; debug: true answers them. */
 const RECORD_DROPPED: ReadonlySet<string> = new Set(['redirectChain', 'robotsDecision', 'outputSha256', 'extractor', 'fieldEvidence', 'artifacts', 'pageActions', 'access', 'verification', 'readiness', 'contentEncoding', 'proxy', 'identity', 'document'])
+
+/** `keys` of `value` that are present, null included (a null that means unknown). */
+function present(value: Json, keys: readonly string[]): Json {
+  const out: Json = {}
+  for (const key of keys) if (value[key] !== undefined) out[key] = value[key]
+  return out
+}
 
 /** `keys` of `value` that are present and not null. */
 function pick(value: Json, keys: readonly string[]): Json {

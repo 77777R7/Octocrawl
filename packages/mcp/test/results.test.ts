@@ -394,6 +394,8 @@ describe('compactScrape: a scrape answered without what an agent does not read',
   it('keeps the verdict, the page and what a citation needs, and drops telemetry and duplicates', () => {
     const compact = compactScrape(full, {}) as Record<string, any>
     expect(compact.usage).toEqual({ contentTokens: 3 })
+    // A cost the record does not know stays null, not absent: unknown is not free.
+    expect((compactScrape({ ...full, usage: { ...full.usage, externalCostUsd: null, deadlineExceeded: true } }, {}) as Record<string, any>).usage).toEqual({ contentTokens: 3, externalCostUsd: null, deadlineExceeded: true })
     expect(compact.channelsTried).toEqual(['http'])
     expect(compact.snapshot).toEqual(full.snapshot)
     expect(compact.markdown).toBe(full.markdown)
@@ -428,7 +430,24 @@ describe('compactScrape: a scrape answered without what an agent does not read',
     expect(compact.evidenceRecord.readiness).toEqual(odd.evidenceRecord.readiness)
   })
 
+  it('keeps whether the page came from the cache, what a saved login put into the browser, and a status that may not be the page\'s', () => {
+    const cached = { ...full, metadata: { ...full.metadata, cacheState: 'hit', cachedAt: '2026-11-10T00:00:00.000Z' },
+      evidenceRecord: { ...full.evidenceRecord, access: { ...full.evidenceRecord.access, route: 'authed_browser', completion: 'authorized_session', sessionApplied: { cookies: 0, localStorageOrigins: 0 } },
+        document: { captureId: 'c', generation: null, responseMatch: 'mismatched' } } }
+    const compact = compactScrape(cached, {}) as Record<string, any>
+    expect(compact.metadata).toMatchObject({ cacheState: 'hit', cachedAt: '2026-11-10T00:00:00.000Z' })
+    expect(compact.evidenceRecord.access).toEqual({ route: 'authed_browser', completion: 'authorized_session', sessionApplied: { cookies: 0, localStorageOrigins: 0 } })
+    expect(compact.evidenceRecord.document).toEqual({ responseMatch: 'mismatched' })
+    // A read with the saved login that applied nothing says so with null; a read without one carries no such field.
+    const none = compactScrape({ ...cached, evidenceRecord: { ...cached.evidenceRecord, access: { ...cached.evidenceRecord.access, sessionApplied: null } } }, {}) as Record<string, any>
+    expect(none.evidenceRecord.access.sessionApplied).toBeNull()
+    expect((compactScrape(full, {}) as Record<string, any>).evidenceRecord.access).not.toHaveProperty('sessionApplied')
+    expect((compactScrape(full, {}) as Record<string, any>).evidenceRecord).not.toHaveProperty('document')
+  })
+
   it('answers a read-on (markdownOffset) with the verdict and the page alone: the first answer carried the record', () => {
+    // An offset of 0 is a first read, and carries the record.
+    expect(compactScrape(full, { markdownOffset: 0 })).toHaveProperty('evidenceRecord')
     const compact = compactScrape(full, { markdownOffset: 100 }) as Record<string, any>
     expect(compact).not.toHaveProperty('evidenceRecord')
     expect(compact).not.toHaveProperty('document')
