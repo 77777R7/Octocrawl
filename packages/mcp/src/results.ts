@@ -107,7 +107,8 @@ function compactRecord(record: Json): Json {
     out.robotsDecision = { decision: robots.decision, userOverride: robots.userOverride, ...(robots.overrideBasis === null || robots.overrideBasis === undefined ? {} : { overrideBasis: robots.overrideBasis }) }
   }
   if (isObject(record.outputSha256)) out.outputSha256 = pick(record.outputSha256, Object.keys(record.outputSha256))
-  if (isObject(record.extractor) && record.extractor.version !== undefined) out.extractor = { version: record.extractor.version }
+  // The extractor's version and, on hosted, the commit that produced the page's Markdown: which code made this answer.
+  if (isObject(record.extractor)) out.extractor = pick(record.extractor, ['version', 'commit'])
   if (record.fieldEvidence !== null && record.fieldEvidence !== undefined) out.fieldEvidence = record.fieldEvidence
   if (Array.isArray(record.artifacts) && record.artifacts.length > 0) out.artifacts = record.artifacts
   if (Array.isArray(record.pageActions) && record.pageActions.length > 0) out.pageActions = record.pageActions
