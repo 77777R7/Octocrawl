@@ -56,7 +56,7 @@ export interface McpServerOptions {
 const LOCAL_REPEATED_SCRAPES = new RepeatedScrapes()
 
 /** This server's own version: the `origin` of a call whose client declared no name and version. */
-export const MCP_VERSION = '0.8.12'
+export const MCP_VERSION = '0.8.13'
 
 /** Who this server is, in initialize's serverInfo; hosted Octocrawl's server card says the same (hostedApi.ts). */
 export const SERVER_IDENTITY = {
