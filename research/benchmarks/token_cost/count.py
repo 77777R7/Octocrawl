@@ -12,7 +12,7 @@ Arms (tokens to read the whole page):
   octocrawl_first the first scrape answer only
   octocrawl_md    the page's Markdown alone, all pages joined
 
-Retention: paragraphs and list items of 60+ characters in the Playwright snapshot (the page as the browser shows it,
+Retention (Octocrawl and Fetch MCP alike): paragraphs and list items of 60+ characters in the Playwright snapshot (the page as the browser shows it,
 navigation included) found in Octocrawl's Markdown after both are reduced to letters and digits. A snapshot paragraph
 the Markdown lacks is either chrome Octocrawl dropped on purpose or content it lost: low values are read by hand.
 """
@@ -81,6 +81,10 @@ def main():
         hay = squash(md or '')
         found = [p for p in paras if squash(p)[:120] in hay]
         row['retention'] = {'snapshot_paragraphs': len(paras), 'found_in_markdown': len(found), 'share': round(len(found) / len(paras), 3) if paras else None}
+        fhay = squash(fm or '')
+        ffound = [p for p in paras if squash(p)[:120] in fhay]
+        row['fetch_retention'] = {'found': len(ffound), 'share': round(len(ffound) / len(paras), 3) if paras else None}
+        row['fetch_missing_examples'] = [p[:140] for p in paras if p not in ffound][:5]
         row['missing_examples'] = [p[:140] for p in paras if p not in found][:5]
         rows.append(row)
 
@@ -101,20 +105,23 @@ def main():
             'max_page_ratio': round(max(per), 3),
         }
     shares = [x['retention']['share'] for x in rows if x['retention']['share'] is not None]
+    fshares = [x['fetch_retention']['share'] for x in rows if x['fetch_retention']['share'] is not None]
     out = {'run': {k: meta.get(k) for k in ('startedAt', 'endedAt', 'proxy', 'playwrightMcp', 'fetchMcp', 'node')}, 'tokenizer': 'tiktoken o200k_base ' + tiktoken.__version__,
-           'summary': summary, 'ratios': ratios, 'retention_median': statistics.median(shares) if shares else None, 'rows': rows}
+           'summary': summary, 'ratios': ratios, 'retention_median': statistics.median(shares) if shares else None, 'fetch_retention_median': statistics.median(fshares) if fshares else None,
+           'retention_paragraphs_total': sum(x['retention']['snapshot_paragraphs'] for x in rows), 'octocrawl_kept_total': sum(x['retention']['found_in_markdown'] for x in rows), 'fetch_kept_total': sum(x['fetch_retention']['found'] for x in rows), 'rows': rows}
     if '--json' in sys.argv:
         json.dump(out, open(sys.argv[sys.argv.index('--json') + 1], 'w'), indent=1, ensure_ascii=False)
-    print('| # | Page | Raw HTML | Rendered HTML | Fetch MCP | Playwright MCP | Octocrawl (all answers) | answers | Octocrawl Markdown | Kept |')
-    print('|---|---|---:|---:|---:|---:|---:|---:|---:|---:|')
+    print('| # | Page | Raw HTML | Rendered HTML | Fetch MCP | Fetch MCP kept | Playwright MCP | Octocrawl (all answers) | answers | Octocrawl Markdown | Octocrawl kept |')
+    print('|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
     for x in rows:
         t = x['tokens']; ret = x['retention']
         host = re.sub(r'^https?://', '', x['url'])[:60]
         fmt = lambda v: f'{v:,}' if v is not None else 'none'
         kept = f"{ret['found_in_markdown']}/{ret['snapshot_paragraphs']}" if ret['snapshot_paragraphs'] else 'n/a'
-        print(f"| {x['id']} | {host} | {fmt(t['raw_html'])} | {fmt(t['rendered_html'])} | {fmt(t['fetch_mcp']) if x['fetch_ok'] else 'failed'} | {fmt(t['playwright'])} | {fmt(t['octocrawl'])} | {x['octocrawl_answers']} | {fmt(t['octocrawl_md'])} | {kept} |")
+        fkept = f"{x['fetch_retention']['found']}/{ret['snapshot_paragraphs']}" if ret['snapshot_paragraphs'] else 'n/a'
+        print(f"| {x['id']} | {host} | {fmt(t['raw_html'])} | {fmt(t['rendered_html'])} | {fmt(t['fetch_mcp']) if x['fetch_ok'] else 'failed'} | {fkept} | {fmt(t['playwright'])} | {fmt(t['octocrawl'])} | {x['octocrawl_answers']} | {fmt(t['octocrawl_md'])} | {kept} |")
     print()
-    print(json.dumps({'summary': summary, 'ratios': ratios, 'retention_median': out['retention_median']}, indent=1))
+    print(json.dumps({k: out[k] for k in ('ratios', 'retention_median', 'fetch_retention_median', 'retention_paragraphs_total', 'octocrawl_kept_total', 'fetch_kept_total')}, indent=1))
 
 
 if __name__ == '__main__':
