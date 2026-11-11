@@ -327,6 +327,15 @@ it('the Worker\'s address header counts only with the shared secret', async () =
   expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, { 'cf-connecting-ip': '203.0.113.4' })).status).toBe(429)
 })
 
+it('an IPv6 caller has one keyless day for its whole /64, which one host can rotate within', async () => {
+  const { url } = await start({ keylessDaily: 1, proxySecret: 's'.repeat(32) })
+  const from = (ip: string) => ({ 'x-w2l-proxy-secret': 's'.repeat(32), 'cf-connecting-ip': ip })
+  expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, from('2001:db8:5:6:1::1'))).status).toBe(200)
+  expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, from('2001:db8:5:6:ffff:2::9'))).status).toBe(429)
+  // The next /64 is another network, with its own day.
+  expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, from('2001:db8:5:7::1'))).status).toBe(200)
+})
+
 it('the /mcp endpoint speaks Streamable HTTP, offers its tools read-only, scrape_product only to a key with the browser, and runs them through the same gate', async () => {
   const { url } = await start({ keylessDaily: 3, keys: { 'oc_live': { enabled: true, plan: 'free', dailyLimit: 3, browser: true } } })
   expect((await fetch(`${url}/mcp`, { method: 'GET' })).status).toBe(405)

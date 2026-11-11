@@ -24,7 +24,7 @@ import { createHistogram } from 'node:perf_hooks'
 import { getRequestListener } from '@hono/node-server'
 import { Hono, type Context } from 'hono'
 import { closeIdleOnlyWhenUnread, createApp, createApiEngine, hasFormat, type ApiEngine, type ApiEngineOptions, type BrowserTurn, type HostedChromeOperator } from '@w2l/api'
-import { API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, parseScrapeRequest, RequestError, VERIFY_REGEX_CHECK_TYPES, withOperatorContact, type NetworkPolicy, type ScrapeRun } from '@w2l/contracts'
+import { addressGroup, API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, parseScrapeRequest, RequestError, VERIFY_REGEX_CHECK_TYPES, withOperatorContact, type NetworkPolicy, type ScrapeRun } from '@w2l/contracts'
 import type { RegexStats } from '@w2l/runtime'
 import { W2L } from '@w2l/sdk'
 import { createMcpServer, MCP_VERSION, SERVER_IDENTITY } from './server.js'
@@ -825,13 +825,14 @@ function sameSecret(presented: string | undefined, secret: string): boolean {
   return typeof presented === 'string' && timingSafeEqual(createHash('sha256').update(presented).digest(), createHash('sha256').update(secret).digest())
 }
 
-/** The address the Worker reports once it proved itself, else the socket's. Raw addresses are hashed before use. */
+/** The address the Worker reports once it proved itself, else the socket's, as addressGroup counts it. Raw addresses are hashed before use. */
 export function clientAddress(req: IncomingMessage, proxySecret: string | undefined): string {
   const presented = req.headers[PROXY_SECRET_HEADER]
   const reported = req.headers['cf-connecting-ip']
-  if (proxySecret && sameSecret(typeof presented === 'string' ? presented : undefined, proxySecret) && typeof reported === 'string' && isIP(reported.trim())) return reported.trim()
+  // An IPv6 address counts by its /64 (addressGroup): one host can rotate within it, and would have a day per address.
+  if (proxySecret && sameSecret(typeof presented === 'string' ? presented : undefined, proxySecret) && typeof reported === 'string' && isIP(reported.trim())) return addressGroup(reported.trim())
   const socket = req.socket?.remoteAddress ?? ''
-  return isIP(socket) ? socket : 'unknown'
+  return isIP(socket) ? addressGroup(socket) : 'unknown'
 }
 
 const LOCAL_HINT = 'run Octocrawl on your computer for this: npx octocrawl serve, then npx -y @octocrawl/mcp (https://octocrawl.dev/docs/connect-mcp/?utm_source=hosted&utm_medium=hint)'

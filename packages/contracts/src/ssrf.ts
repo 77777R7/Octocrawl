@@ -296,3 +296,20 @@ function cidrContains(cidr: string, address: string): boolean {
 function stripBrackets(host: string): string {
   return host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host
 }
+
+/**
+ * A client's address as a quota counts it (the public preview's per-address previews, the hosted API's keyless day): an
+ * IPv4 address, or an IPv4-mapped IPv6 one, as IPv4; any other IPv6 address by its /64, since one host or home is usually
+ * handed a whole /64 and can rotate within it; anything else (`unknown`) as it is.
+ */
+export function addressGroup(address: string): string {
+  const text = stripBrackets(address.trim().toLowerCase())
+  if (parseV4(text) !== null) return text
+  const v6 = parseV6(text)
+  if (v6 === null) return text
+  if (v6 >> 32n === 0xffffn) {
+    const v4 = Number(v6 & 0xffffffffn)
+    return [24, 16, 8, 0].map((shift) => (v4 >>> shift) & 255).join('.')
+  }
+  return `${[48n, 32n, 16n, 0n].map((shift) => ((v6 >> (64n + shift)) & 0xffffn).toString(16)).join(':')}::/64`
+}

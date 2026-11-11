@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createHmac, createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { isIP } from 'node:net'
+import { addressGroup } from '@w2l/contracts'
 import { basename, dirname, extname, relative, resolve, sep } from 'node:path'
 import { ADDRESS_DAILY_PREVIEWS, VISITOR_DAILY_PREVIEWS, type PreviewQuota, type QuotaDecision, type QuotaStatus } from './quota.js'
 import { AmazonGateBusyError, type AmazonOriginGate, type AmazonOriginPermit } from './amazonGate.js'
@@ -183,25 +184,6 @@ function setSourceCookie(req: IncomingMessage, res: ServerResponse, pathname: st
   const secure = !/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host ?? '')
   const existing = res.getHeader('set-cookie')
   res.setHeader('set-cookie', [...(Array.isArray(existing) ? existing : typeof existing === 'string' ? [existing] : []), sourceCookie(landingSource(req, pathname, search, ownHost), secure)])
-}
-
-/** The client's address as the address quota counts it: an IPv4 address (an IPv4-mapped IPv6 one included) as it is, an
- * IPv6 address by its /64, since one host or home is usually handed a whole /64 and can rotate within it. */
-export function clientAddressGroup(address: string): string {
-  const lower = address.toLowerCase()
-  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(lower)
-  if (mapped && isIP(mapped[1]!) === 4) return mapped[1]!
-  if (isIP(lower) !== 6) return lower
-  const [head, tail] = lower.includes('::') ? lower.split('::') as [string, string] : [lower, null]
-  const groups = (part: string) => part === '' ? [] : part.split(':').flatMap(group => {
-    if (!group.includes('.')) return [group]
-    const [a, b, c, d] = group.split('.').map(Number) as [number, number, number, number]
-    return [((a << 8) | b).toString(16), ((c << 8) | d).toString(16)]
-  })
-  const front = groups(head)
-  const back = tail === null ? [] : groups(tail)
-  const full = [...front, ...Array<string>(8 - front.length - back.length).fill('0'), ...back]
-  return `${full.slice(0, 4).map(group => group.replace(/^0+(?=.)/, '')).join(':')}::/64`
 }
 
 function visitorKey(req: IncomingMessage, secret: string | undefined): string {
@@ -404,7 +386,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       if (options.enabled === false) { sendJson(res, 200, { enabled: false }); return }
       if (!options.quota.status) { sendJson(res, 501, { error: 'quota_status_unavailable' }); return }
       const key = visitorKey(req, options.visitorCookieSecret)
-      const address = clientAddressGroup(visitorAddress(req))
+      const address = addressGroup(visitorAddress(req))
       // One instant for the day the store counts, the cache and the reset time.
       const now = Date.now()
       const resetsAt = nextUtcMidnight(new Date(now))
@@ -468,7 +450,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
         const abort = new AbortController()
         res.once('close', () => { if (!res.writableEnded) abort.abort(new DOMException('Client disconnected', 'AbortError')) })
         let quota: QuotaDecision
-        try { quota = await options.quota.consume(visitorKey(req, options.visitorCookieSecret), undefined, { signal: abort.signal, deadlineAt }, clientAddressGroup(visitorAddress(req))) }
+        try { quota = await options.quota.consume(visitorKey(req, options.visitorCookieSecret), undefined, { signal: abort.signal, deadlineAt }, addressGroup(visitorAddress(req))) }
         catch (error) {
           const interrupted = abort.signal.aborted || Date.now() >= deadlineAt || error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
           if (interrupted) refuse(200, 'timeout', 'The site did not answer within the time limit.')
@@ -608,7 +590,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       if (target.amazonAsin !== null && !evaluation && options.quota.check) {
         let available: QuotaDecision
         try {
-          available = await options.quota.check(visitorKey(req, options.visitorCookieSecret), undefined, { signal: abort.signal, deadlineAt }, clientAddressGroup(visitorAddress(req)))
+          available = await options.quota.check(visitorKey(req, options.visitorCookieSecret), undefined, { signal: abort.signal, deadlineAt }, addressGroup(visitorAddress(req)))
         } catch (error) {
           const interrupted = abort.signal.aborted || Date.now() >= deadlineAt
             || error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
@@ -638,7 +620,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
         // still subject to this origin gate, even though it bypasses quota.
         if (target.amazonAsin !== null) permit = await options.amazonGate!.acquire(abort.signal, deadlineAt)
         let quota
-        try { quota = evaluation ? 'ok' : await options.quota.consume(visitorKey(req, options.visitorCookieSecret), undefined, { signal: abort.signal, deadlineAt }, clientAddressGroup(visitorAddress(req))) }
+        try { quota = evaluation ? 'ok' : await options.quota.consume(visitorKey(req, options.visitorCookieSecret), undefined, { signal: abort.signal, deadlineAt }, addressGroup(visitorAddress(req))) }
         catch (error) {
           const interrupted = abort.signal.aborted || Date.now() >= deadlineAt
             || error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
