@@ -4,7 +4,7 @@ import { RegexLedger, type RegexStats } from '@w2l/runtime'
 import { W2L, W2LError } from '@w2l/sdk'
 import type { PostCalls } from './inFlight.js'
 import { serverInstructions } from './instructions.js'
-import { shapeResult, withoutCampaign, withoutTelemetry } from './results.js'
+import { compactScrape, shapeResult, withoutCampaign, withoutTelemetry } from './results.js'
 export { withoutCampaign } from './results.js'
 import { callTool, TOOLS, type ToolProgress } from './tools.js'
 import { RepeatedScrapes, withRepeatedScrapesHint } from './repeatedScrapes.js'
@@ -147,7 +147,10 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
       // One ledger for the call's re-judgements of a scrape, so they scan its text once and their cost is told once.
       const ledger = contract === undefined ? undefined : new RegexLedger()
       const offset = (request.params.arguments as Record<string, unknown> | undefined)?.markdownOffset
-      const { value, images } = shapeResult(request.params.name, options.minimalResults === true ? withoutTelemetry(request.params.name, result, request.params.arguments, contract, { keepScrapeId, ledger }) : result, contract, ledger, typeof offset === 'number' ? offset : undefined)
+      // A scrape is answered without what an agent does not read (compactScrape). debug: true answers it whole, and so
+      // does a scrape with a verify contract, which may name any path of the delivered answer (ADR 0006).
+      const minimized = options.minimalResults === true ? withoutTelemetry(request.params.name, result, request.params.arguments, contract, { keepScrapeId, ledger }) : result
+      const { value, images } = shapeResult(request.params.name, contract === undefined ? compactScrape(minimized, request.params.arguments, request.params.name) : minimized, contract, ledger, typeof offset === 'number' ? offset : undefined)
       if (ledger !== undefined) {
         ledger.close()
         if (ledger.stats.scans > 0 || ledger.stats.memoHits > 0) { try { options.onRegexChecks?.(ledger.stats) } catch { /* the observer's own fault */ } }

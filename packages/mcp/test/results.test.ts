@@ -12,7 +12,7 @@ import { createApiEngine, createApp, type ApiEngine } from '@w2l/api'
 import { decodeStepCursor, RegexLedger } from '@w2l/runtime'
 import { W2L } from '@w2l/sdk'
 import { createMcpServer } from '../src/server.js'
-import { RESULT_TEXT_MAX, shapeResult, withoutTelemetry } from '../src/results.js'
+import { compactScrape, RESULT_TEXT_MAX, shapeResult, withoutTelemetry } from '../src/results.js'
 import { TOOLS } from '../src/tools.js'
 
 /**
@@ -362,6 +362,85 @@ describe('MCP result budget', () => {
     expect(result.content.filter((block) => block.type === 'image')).toEqual([{ type: 'image', data: base64, mimeType: 'image/png' }])
     // Deprecated for one release (D11): the JSON still carries the base64.
     expect((result.structuredContent!.screenshot as { base64: string; sha256: string }).sha256).toBe('a'.repeat(64))
+  })
+})
+
+describe('compactScrape: a scrape answered without what an agent does not read', () => {
+  // research/benchmarks/2026-11-11-token-cost-docs-aa4c873b.md: on 20 docs pages the answer's envelope (usage, a second
+  // copy of the hashes, the request's identity and egress, metadata's og duplicates) was a fifth of the first answers.
+  const full = {
+    status: 'success', failureReason: null, blockReason: null, verification: { status: 'not_requested' }, readiness: { state: 'ready', basis: [] },
+    truncated: false, truncatedAt: null, requestedUrl: 'https://example.com/a', finalUrl: 'https://example.com/a', lane: 'http', formats: ['markdown'],
+    snapshot: { rawBodySha256: 'raw', artifacts: [], httpStatus: 200, contentType: 'text/html' }, budgetExceeded: null,
+    document: { title: 'Tides', pageType: 'article' },
+    metadata: { title: 'Tides | Example', description: 'About tides.', language: 'en', keywords: null, robots: 'index', favicon: 'https://example.com/f.png', canonicalUrl: null,
+      ogTitle: 'Tides', ogDescription: 'About tides.', ogUrl: 'https://example.com/a', ogImage: 'https://example.com/i.png', ogSiteName: 'Example', scrapeId: 'id-1',
+      sourceURL: 'https://example.com/a', url: 'https://example.com/a', statusCode: 200, contentType: 'text/html', proxyUsed: 'operator', timezone: null, concurrencyLimited: false, concurrencyQueueDurationMs: 0 },
+    usage: { wallMs: 12, contentTokens: 3, timings: { totalMs: 12 } }, channelsTried: ['http'],
+    evidenceRecord: {
+      schemaVersion: 'w2l.evidence/1', requestedUrl: 'https://example.com/a', finalUrl: 'https://example.com/a', redirectChain: { urls: ['https://example.com/a'], complete: true },
+      fetchedAt: '2026-11-11T00:00:00.000Z', httpStatus: 200, status: 'success', reason: null, lane: 'http',
+      robotsDecision: { decision: 'allowed', robotsUrl: 'https://example.com/robots.txt', robotsSha256: 'r', unreachable: null, crawlDelayMs: null, userOverride: false, overrideBasis: null },
+      rawSha256: 'raw', contentEncoding: 'identity', outputSha256: { markdown: 'md', json: null }, extractor: { name: 'extract-tf', version: 'extract-tf/48', commit: null },
+      fieldEvidence: null, artifacts: [], proxy: '127.0.0.1:7890',
+      identity: { userAgent: 'Mozilla/5.0', mode: 'standard', contact: null, device: 'desktop', requestHeaders: [] }, pageActions: null,
+      access: { route: 'http', executor: 'undici', executorVersion: null, profile: null, externalCostUsd: 0, completion: 'unattended', egress: { proxy: '127.0.0.1:7890', source: 'environment', switchedFrom: null, exit: null, kind: null }, session: null, sessionApplied: null, allowance: null, paidCalls: null, grant: null },
+      verification: { status: 'not_requested', verifier: null, contractSha256: null, reason: null, failed: [], undecided: [] }, readiness: { state: 'ready', basis: [] },
+      document: { captureId: 'c', generation: null, responseMatch: null },
+    },
+    markdown: '# Tides\n\nThe sea rises twice a day.',
+  }
+
+  it('keeps the verdict, the page and what a citation needs, and drops telemetry and duplicates', () => {
+    const compact = compactScrape(full, {}) as Record<string, any>
+    expect(compact.usage).toEqual({ contentTokens: 3 })
+    expect(compact.channelsTried).toEqual(['http'])
+    expect(compact.snapshot).toEqual(full.snapshot)
+    expect(compact.markdown).toBe(full.markdown)
+    expect(compact.status).toBe('success')
+    expect(compact.finalUrl).toBe('https://example.com/a')
+    expect(compact.metadata).toEqual({ title: 'Tides | Example', description: 'About tides.', language: 'en', url: 'https://example.com/a', statusCode: 200, contentType: 'text/html', scrapeId: 'id-1' })
+    expect(compact.evidenceRecord).toEqual({
+      schemaVersion: 'w2l.evidence/1', requestedUrl: 'https://example.com/a', finalUrl: 'https://example.com/a', fetchedAt: '2026-11-11T00:00:00.000Z', httpStatus: 200,
+      status: 'success', lane: 'http', robotsDecision: { decision: 'allowed', userOverride: false }, rawSha256: 'raw', outputSha256: { markdown: 'md' },
+      extractor: { version: 'extract-tf/48' }, access: { route: 'http', completion: 'unattended' },
+      verification: full.evidenceRecord.verification, readiness: full.evidenceRecord.readiness, compact: true,
+    })
+    // The verdict stays as it is, null or not.
+    expect(compact).toMatchObject({ failureReason: null, blockReason: null, verification: { status: 'not_requested' }, readiness: { state: 'ready', basis: [] }, truncated: false, truncatedAt: null })
+    expect(JSON.stringify(compact).length).toBeLessThan(JSON.stringify(full).length * 0.6)
+  })
+
+  it('keeps what says the page is not what was asked for: a redirect, a check, a person\'s Chrome, field evidence', () => {
+    const odd = { ...full, readiness: { state: 'not_served', basis: ['redirected_off_page'] }, verification: { status: 'failed', failed: ['markdownIncludes'] },
+      evidenceRecord: { ...full.evidenceRecord, redirectChain: { urls: ['https://example.com/a', 'https://example.com/'], complete: true }, fieldEvidence: { title: { source: 'dom' } },
+        robotsDecision: { ...full.evidenceRecord.robotsDecision, decision: 'overridden', userOverride: true, overrideBasis: 'user_url' },
+        access: { ...full.evidenceRecord.access, route: 'user_browser', completion: 'handed_to_person', allowance: { basis: 'clicked', allowedAt: '2026-11-11T00:00:00.000Z' } },
+        verification: { status: 'failed', verifier: 'v1', contractSha256: 'c', reason: null, failed: ['markdownIncludes'], undecided: [] }, readiness: { state: 'not_served', basis: ['redirected_off_page'] } } }
+    const compact = compactScrape(odd, {}) as Record<string, any>
+    expect(compact.readiness).toEqual(odd.readiness)
+    expect(compact.verification).toEqual(odd.verification)
+    expect(compact.evidenceRecord.redirectChain).toEqual(odd.evidenceRecord.redirectChain)
+    expect(compact.evidenceRecord.fieldEvidence).toEqual({ title: { source: 'dom' } })
+    expect(compact.evidenceRecord.robotsDecision).toEqual({ decision: 'overridden', userOverride: true, overrideBasis: 'user_url' })
+    expect(compact.evidenceRecord.access).toEqual({ route: 'user_browser', completion: 'handed_to_person', allowance: { basis: 'clicked', allowedAt: '2026-11-11T00:00:00.000Z' } })
+    expect(compact.evidenceRecord.verification).toEqual(odd.evidenceRecord.verification)
+    expect(compact.evidenceRecord.readiness).toEqual(odd.evidenceRecord.readiness)
+  })
+
+  it('answers a read-on (markdownOffset) with the verdict and the page alone: the first answer carried the record', () => {
+    const compact = compactScrape(full, { markdownOffset: 100 }) as Record<string, any>
+    expect(compact).not.toHaveProperty('evidenceRecord')
+    expect(compact).not.toHaveProperty('document')
+    expect(compact.metadata).toEqual({ scrapeId: 'id-1' })
+    expect(compact.markdown).toBe(full.markdown)
+    expect(compact.finalUrl).toBe('https://example.com/a')
+  })
+
+  it('answers the whole result when the caller asks for it with debug, and leaves other tools alone', () => {
+    expect(compactScrape(full, { debug: true })).toBe(full)
+    const map = { id: 'map-1', status: 'completed', links: [] }
+    expect(compactScrape(map, {}, 'map')).toBe(map)
   })
 })
 
