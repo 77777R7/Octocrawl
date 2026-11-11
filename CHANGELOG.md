@@ -37,6 +37,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **A page a site adapter confirms nothing on comes with its Markdown.** A scrape that names no `formats` and answers compact (the CLI, the MCP `scrape`) returned only the adapter's JSON for a host an adapter matches. On a page the adapter does not cover, such as a subreddit's rules page, that JSON is empty (`adapter_unavailable`), so the answer said `success` with nothing to read. Such an answer now carries the page's Markdown beside the JSON, as one whose adapter could not vouch for the page already did.
 - **Hosted Octocrawl reads a page robots.txt disallows when your account says why.** Until now hosted refused every page a site's robots.txt disallowed, and a scrape there could not carry a `robotsOverride`. A hosted `scrape` from an account (an account's key or a sign-in) now takes `robotsOverride` with your reason for the one URL it names, and records it as a local server does: a `robots_overridden` warning naming the rule, the reason and who recorded it, and `robotsDecision.overrideBasis: "robots_override"` in the Evidence Record. A rule a site writes for Octocrawl itself (`User-agent: Octocrawl`) still holds, a call without an account is refused by name, and hosted batch, crawl and map still obey robots.txt. The hosted MCP `scrape` lists the option on a connection that lists crawl and batch jobs, an account's. Sites that block cloud addresses outright still answer hosted with a refusal.
 
 ## 0.8.12 — 2026-11-11
