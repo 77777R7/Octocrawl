@@ -138,6 +138,14 @@ describe('public site adapter registry', () => {
     const profile = extractTf.extract('<html><body><main><h1>alice</h1><p>Public profile content and recent activity.</p></main></body></html>', { url: 'https://www.reddit.com/user/alice/' })
     expect(community.entities).toContainEqual(expect.objectContaining({ type: 'community', id: 'webscraping' }))
     expect(profile.entities).toContainEqual(expect.objectContaining({ type: 'profile', id: 'alice' }))
+    const sorted = extractTf.extract('<html><body><main><h1>Web scraping</h1><p>Top posts of the community.</p></main></body></html>', { url: 'https://old.reddit.com/r/webscraping/top/?t=all' })
+    expect(sorted.entities).toContainEqual(expect.objectContaining({ type: 'community', id: 'webscraping' }))
+    // A community's other pages (its rules, wiki or submit form) are not its listing: the community's name is no account
+    // of them, so the adapter confirms nothing and the answer keeps the page's Markdown (old.reddit.com, 2026-11-11).
+    for (const path of ['about/rules', 'wiki/index', 'submit']) {
+      const page = extractTf.extract('<html><body><main><h1>Web scraping</h1><h2>Rules for r/webscraping</h2><p>1. Stay on topic.</p></main></body></html>', { url: `https://old.reddit.com/r/webscraping/${path}` })
+      expect([path, page.adapter.id, page.entities]).toEqual([path, 'reddit-public', []])
+    }
   })
 
   it('binds an X post to the status URL and ignores other hydration records', () => {

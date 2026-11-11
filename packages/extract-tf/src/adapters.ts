@@ -79,7 +79,7 @@ function stringValue(rec: Record<string, unknown>, ...keys: string[]): string | 
 
 function redditEntities(doc: Document, url: string | undefined): ExtractedEntity[] {
   const path = pathOf(url); const postMatch = path.match(/^\/r\/([^/]+)\/comments\/([a-z0-9]+)/i)
-  const profileMatch = path.match(/^\/(?:user|u)\/([^/]+)/i); const communityMatch = path.match(/^\/r\/([^/]+)/i)
+  const profileMatch = path.match(/^\/(?:user|u)\/([^/]+)/i); const communityMatch = path.match(/^\/r\/([^/]+)\/?(?:(?:hot|new|rising|controversial|top|best)\/?)?$/i)
   const entities: ExtractedEntity[] = []; const hydration = parseHydration(doc); const postId = postMatch?.[2] ?? null
   const postRecord = postId === null ? null : hydration.flatMap(root => findRecords(root, rec => {
     const id = stringValue(rec, 'id', 'postId', 'name')

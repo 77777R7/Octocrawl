@@ -364,6 +364,15 @@ describe('structured JSON extraction', () => {
     expect(bad.json?.status).toBe('incomplete')
     expect(bad.json?.issues[0]?.code).toBe('subject_unverified')
     expect(bad.markdown).toBe(result.markdown)
+    // An adapter that matched the host and confirmed nothing on the page (a subreddit's rules page, 2026-11-11): its JSON is
+    // empty, so the page's Markdown comes beside it rather than a success with nothing to read.
+    const empty = await prepareScrapeResponse({
+      ...response,
+      document: { ...response.document!, entities: [] },
+    }, { url: result.requestedUrl, debug: false }, {}, null, performance.now()) as CompactScrapeResponse
+    expect(empty.formats).toEqual(['markdown', 'json'])
+    expect(empty.json?.issues[0]?.code).toBe('adapter_unavailable')
+    expect(empty.markdown).toBe(result.markdown)
   })
   it('does not publish entities or custom fields when adapter identity is unverified', async () => {
     const unverified: FetchResult = {

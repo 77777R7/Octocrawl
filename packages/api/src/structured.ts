@@ -1628,12 +1628,13 @@ function requestedFormats(req: ScrapeRequest, result?: ScrapeRun): readonly Scra
   // MCP marks its compact request with debug=false. Keep REST/SDK legacy
   // defaults, while returning adapter JSON on the simple MCP path. An adapter
   // that could not vouch for the page (its validation failed: an X home
-  // timeline is no profile or post) gives an incomplete JSON with nothing in
-  // it, so the page's Markdown comes beside it, as it does for a contract that
-  // checks Markdown.
+  // timeline is no profile or post) or confirmed nothing on it (a subreddit's
+  // rules page, which the Reddit adapter matches by host) gives an incomplete
+  // JSON with nothing in it, so the page's Markdown comes beside it, as it
+  // does for a contract that checks Markdown.
   if (req.debug === false) {
     const adapterJson = result?.document?.adapter.id !== undefined && result.document.adapter.id !== 'generic'
-    if (adapterJson) return checksMarkdown(req) || result.document?.adapterValidation?.valid === false ? ['json', 'markdown'] : ['json']
+    if (adapterJson) return checksMarkdown(req) || result.document?.adapterValidation?.valid === false || result.document?.entities.length === 0 ? ['json', 'markdown'] : ['json']
     return ['markdown']
   }
   return ['markdown', 'links']
