@@ -44,6 +44,12 @@ export const MAX_CONNECTIONS = 10
 const METADATA_MAX_BYTES = 5 * 1024
 const METADATA_TIMEOUT_MS = 3_000
 const METADATA_CACHE_MS = 86_400_000
+/**
+ * Client metadata documents one address may have this page fetch in an hour (found 2026-11-11). /oauth/authorize fetches a
+ * client_id's https document for anyone, before sign-in; the fetch is guarded (public addresses, 5 KB, 3 s, no redirects),
+ * but without a limit one address could have the site fetch address after address for it. A cached document is not counted.
+ */
+const METADATA_FETCHES_PER_HOUR = 20
 const REGISTRATIONS_PER_HOUR = 10
 const NAME_MAX = 100
 const REDIRECTS_MAX = 10
@@ -499,11 +505,12 @@ export function createOAuthRoutes(options: OAuthOptions) {
   const metadata = options.clientMetadata ?? createClientMetadataFetcher()
   const documents = new Map<string, { at: number; client: Client }>()
   const registrations = new Map<string, number[]>()
+  const metadataFetches = new Map<string, number[]>()
   const digest = (kind: 'oca' | 'ocr' | 'code' | 'consent', value: string) => createHmac('sha256', options.secret).update(`${kind}:${value}`).digest('hex')
   const random = (bytes = 32) => randomBytes(bytes).toString('base64url')
 
   /** The client a client_id names: a metadata document (read once a day at most) or a registration still in use. */
-  async function resolveClient(id: string): Promise<Client | null> {
+  async function resolveClient(id: string, visitor: string): Promise<Client | null> {
     if (DCR_ID.test(id)) {
       const registered = await options.store.client(id)
       return registered === null || registered.expiresAt <= now() ? null : { id, name: registered.name, redirectUris: registered.redirectUris, registered: true }
@@ -514,6 +521,15 @@ export function createOAuthRoutes(options: OAuthOptions) {
     if (url.pathname === '/' || url.hash || url.username || url.password) return null
     const cached = documents.get(id)
     if (cached && now() - cached.at < METADATA_CACHE_MS) return cached.client
+    const at = now()
+    const recent = (metadataFetches.get(visitor) ?? []).filter(time => time > at - 3_600_000)
+    if (recent.length >= METADATA_FETCHES_PER_HOUR) {
+      log({ event: 'w2l_oauth', step: 'client_metadata', outcome: 'rate_limited' })
+      return null
+    }
+    while (metadataFetches.size >= 10_000) metadataFetches.delete(metadataFetches.keys().next().value as string)
+    metadataFetches.delete(visitor)
+    metadataFetches.set(visitor, [...recent, at])
     let document: unknown
     try { document = await metadata(id) } catch (error) {
       log({ event: 'w2l_oauth', step: 'client_metadata', outcome: 'unreadable', reason: error instanceof Error ? error.message.slice(0, 200) : 'unknown' })
@@ -555,8 +571,8 @@ export function createOAuthRoutes(options: OAuthOptions) {
    * site an open redirector (RFC 9700 §4.11.2). Past the callback's check, the page links to it with the error, so the
    * person can take the error back to the app.
    */
-  async function checkRequest(params: URLSearchParams, res: ServerResponse, origin: string): Promise<Request | null> {
-    const client = await resolveClient(params.get('client_id') ?? '')
+  async function checkRequest(params: URLSearchParams, res: ServerResponse, origin: string, visitor: string): Promise<Request | null> {
+    const client = await resolveClient(params.get('client_id') ?? '', visitor)
     if (client === null) { errorPage(res, 400, 'This app cannot connect', 'Octocrawl does not know this app, or could not read its description. Go back to the app and try again.'); return null }
     const redirectUri = params.get('redirect_uri') ?? ''
     if (!redirectMatches(client.redirectUris, redirectUri)) { errorPage(res, 400, 'This app cannot connect', 'The app asked to send you back to an address it has not registered, so Octocrawl will not send you there.'); return null }
@@ -611,9 +627,9 @@ export function createOAuthRoutes(options: OAuthOptions) {
     res.writeHead(200, PAGE_HEADERS).end(page(`Connect ${request.client.name}`, body))
   }
 
-  async function authorize(req: IncomingMessage, res: ServerResponse, url: URL, origin: string, sameOrigin: boolean) {
+  async function authorize(req: IncomingMessage, res: ServerResponse, url: URL, origin: string, sameOrigin: boolean, visitor: string) {
     if (req.method === 'GET') {
-      const request = await checkRequest(url.searchParams, res, origin)
+      const request = await checkRequest(url.searchParams, res, origin, visitor)
       if (request === null) return
       const session = await options.current(req)
       if (session === null) { res.writeHead(303, { ...NO_STORE, location: `/signin/?next=${encodeURIComponent(`${url.pathname}${url.search}`)}` }).end(); return }
@@ -630,7 +646,7 @@ export function createOAuthRoutes(options: OAuthOptions) {
     const session = await options.current(req)
     if (session === null) { errorPage(res, 401, 'You are signed out', 'Go back to the app and connect again: Octocrawl will ask you to sign in.'); return }
     // The form's request is checked again as a new one: a page left open, or edited, gets nothing it was not shown.
-    const request = await checkRequest(form, res, origin)
+    const request = await checkRequest(form, res, origin, visitor)
     if (request === null) return
     const handle = form.get('handle') ?? ''
     const at = handle.lastIndexOf('.')
@@ -819,7 +835,7 @@ export function createOAuthRoutes(options: OAuthOptions) {
   /**
    * Answers the authorization server's addresses and returns true, or returns false for any other path. `origin` is the
    * site's public origin, the issuer; `sameOrigin` says whether a POST came from this site's pages; `visitor` is the
-   * address registrations are counted by.
+   * address registrations and client document fetches are counted by.
    */
   async function handle(req: IncomingMessage, res: ServerResponse, url: URL, origin: string, sameOrigin: boolean, visitor: string): Promise<boolean> {
     const path = url.pathname
@@ -837,7 +853,7 @@ export function createOAuthRoutes(options: OAuthOptions) {
       })
       return true
     }
-    if (path === '/oauth/authorize') await authorize(req, res, url, origin, sameOrigin)
+    if (path === '/oauth/authorize') await authorize(req, res, url, origin, sameOrigin, visitor)
     else if (path === '/oauth/token') await token(req, res)
     else if (path === '/oauth/revoke') await revoke(req, res)
     else await register(req, res, visitor)

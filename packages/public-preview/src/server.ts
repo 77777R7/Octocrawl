@@ -482,7 +482,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       // endpoint must not be sent elsewhere, and the issuer it checks is the public origin either way.
       if (options.oauth && (pathname.startsWith('/oauth/') || pathname === '/.well-known/oauth-authorization-server')) {
         try {
-          if (await options.oauth.handle(req, res, requestUrl, requestOrigin(req, publicOrigin), postFromSite(req, siteHost(req, publicOrigin)), visitorAddress(req))) return
+          if (await options.oauth.handle(req, res, requestUrl, requestOrigin(req, publicOrigin), postFromSite(req, siteHost(req, publicOrigin)), addressGroup(visitorAddress(req)))) return
         } catch (error) {
           log({ event: 'w2l_oauth_error', message: error instanceof Error ? error.message : String(error) })
           if (!res.headersSent) res.writeHead(503, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' }).end(JSON.stringify({ error: 'temporarily_unavailable' }))
