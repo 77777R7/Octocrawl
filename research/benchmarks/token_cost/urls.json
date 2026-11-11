@@ -1,0 +1,26 @@
+{
+  "frozen": "2026-11-11",
+  "why": "Documentation pages a coding agent reads (the docs wedge), across static, server-rendered and client-rendered sites. Chosen before any arm ran; none is replaced or dropped after a failure.",
+  "urls": [
+    "https://docs.python.org/3/library/asyncio-task.html",
+    "https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch",
+    "https://react.dev/reference/react/useEffect",
+    "https://nextjs.org/docs/app/getting-started/layouts-and-pages",
+    "https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_basics.html",
+    "https://code.claude.com/docs/en/best-practices",
+    "https://docs.stripe.com/payments/accept-a-payment",
+    "https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions",
+    "https://kubernetes.io/docs/concepts/workloads/pods/",
+    "https://www.postgresql.org/docs/current/sql-select.html",
+    "https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html",
+    "https://tailwindcss.com/docs/flex",
+    "https://supabase.com/docs/guides/auth",
+    "https://fastapi.tiangolo.com/tutorial/first-steps/",
+    "https://docs.djangoproject.com/en/5.2/topics/db/queries/",
+    "https://developers.cloudflare.com/workers/runtime-apis/fetch/",
+    "https://vercel.com/docs/functions",
+    "https://playwright.dev/docs/locators",
+    "https://docs.astral.sh/uv/concepts/projects/init/",
+    "https://docs.anthropic.com/en/docs/build-with-claude/tool-use/overview"
+  ]
+}
