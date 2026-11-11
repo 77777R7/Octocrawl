@@ -430,6 +430,11 @@ describe('compactScrape: a scrape answered without what an agent does not read',
     expect(compact.evidenceRecord.readiness).toEqual(odd.evidenceRecord.readiness)
   })
 
+  it('keeps the commit that produced the Markdown when the record names one, as hosted does', () => {
+    const hosted = { ...full, evidenceRecord: { ...full.evidenceRecord, extractor: { name: 'extract-tf', version: 'extract-tf/48', commit: '03c1927e52ef79fd55cc47bc96e961190f6a0606' } } }
+    expect((compactScrape(hosted, {}) as Record<string, any>).evidenceRecord.extractor).toEqual({ version: 'extract-tf/48', commit: '03c1927e52ef79fd55cc47bc96e961190f6a0606' })
+  })
+
   it('keeps whether the page came from the cache, what a saved login put into the browser, and a status that may not be the page\'s', () => {
     const cached = { ...full, metadata: { ...full.metadata, cacheState: 'hit', cachedAt: '2026-11-10T00:00:00.000Z' },
       evidenceRecord: { ...full.evidenceRecord, access: { ...full.evidenceRecord.access, route: 'authed_browser', completion: 'authorized_session', sessionApplied: { cookies: 0, localStorageOrigins: 0 } },
