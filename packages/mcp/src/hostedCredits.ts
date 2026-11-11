@@ -200,10 +200,17 @@ export function secondsToNextGrant(now: Date): number {
   return Math.max(1, Math.ceil((Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1) - now.getTime()) / 1000))
 }
 
+/**
+ * A balance as `credits/{uid}` keeps it. `noMonthlyGrant`: the account shares its mailbox's grant with an earlier account
+ * (packages/public-preview/src/account.ts, claimGrant), so it gets no grant of its own in any month, only what it bought;
+ * the site sets it at sign-in, and every write here keeps it (updateMask).
+ */
+interface StoredBalance { month: string; grant: number; purchased: number; noMonthlyGrant?: boolean }
+
 /** The balance an account has this month: a grant from an earlier month is replaced by this month's. */
-function current(balance: { month: string; grant: number; purchased: number } | null, month: string, monthlyGrant: number): { grant: number; purchased: number } {
+function current(balance: StoredBalance | null, month: string, monthlyGrant: number): { grant: number; purchased: number } {
   if (balance === null) return { grant: monthlyGrant, purchased: 0 }
-  return { grant: balance.month === month ? balance.grant : monthlyGrant, purchased: balance.purchased }
+  return { grant: balance.month === month ? balance.grant : balance.noMonthlyGrant === true ? 0 : monthlyGrant, purchased: balance.purchased }
 }
 
 /** Splits a charge between the grant and bought credits, the grant first. */
@@ -219,7 +226,7 @@ function giveBack(refund: number, reservation: Reservation): { toGrant: number; 
 }
 
 export class MemoryCreditsStore implements CreditsStore {
-  readonly balances = new Map<string, { month: string; grant: number; purchased: number }>()
+  readonly balances = new Map<string, StoredBalance>()
   readonly site = new Map<string, number>()
   readonly usage = new Map<string, Partial<Record<UsageKind, number>> & { credits: number }>()
   readonly requests = new Map<string, RequestLine[]>()
@@ -232,7 +239,8 @@ export class MemoryCreditsStore implements CreditsStore {
     if (full) return { ok: false, limited: 'quota', id: full.id, limit: full.limit }
     if (have.grant + have.purchased < amount) return { ok: false, limited: 'credits', remaining: have.grant + have.purchased }
     const { fromGrant, fromPurchased } = take(amount, have)
-    const left = { month, grant: have.grant - fromGrant, purchased: have.purchased - fromPurchased }
+    const shared = this.balances.get(uid)?.noMonthlyGrant === true ? { noMonthlyGrant: true } : {}
+    const left = { month, grant: have.grant - fromGrant, purchased: have.purchased - fromPurchased, ...shared }
     this.balances.set(uid, left)
     for (const quota of quotas) this.site.set(quota.id, (this.site.get(quota.id) ?? 0) + (quota.amount ?? 1))
     return { ok: true, reservation: { uid, month, fromGrant, fromPurchased, remaining: left.grant + left.purchased, ...(id === undefined ? {} : { id }) }, counts: quotas.map((quota) => this.site.get(quota.id)!) }
@@ -247,7 +255,7 @@ export class MemoryCreditsStore implements CreditsStore {
     this.topUps.add(id)
     const month = utcMonth(now)
     const have = current(this.balances.get(uid) ?? null, month, this.monthlyGrant)
-    this.balances.set(uid, { month, grant: have.grant, purchased: have.purchased + amount })
+    this.balances.set(uid, { ...this.balances.get(uid), month, grant: have.grant, purchased: have.purchased + amount })
     return { added: true, remaining: have.grant + have.purchased + amount }
   }
   async settle(reservation: Reservation, used: number, kind: UsageKind, now = new Date(), note?: RequestNote, perKind?: Partial<Record<UsageKind, number>>): Promise<{ remaining: number }> {
@@ -281,7 +289,7 @@ export class MemoryCreditsStore implements CreditsStore {
 
 // ---- Firestore: `credits/{uid}` holds the balance, `hostedQuotas/{day}-accounts` every account's starts and `hostedQuotas/{day}-account-{uid}` the account's (a job's slice: `{day}-jobs` and `{day}-jobs-account-{uid}`), `creditUsage/{uid}-{day}` the day's use ----
 
-interface Value { integerValue?: string; stringValue?: string; timestampValue?: string }
+interface Value { integerValue?: string; stringValue?: string; timestampValue?: string; booleanValue?: boolean }
 interface FirestoreDoc { name: string; fields?: Record<string, Value>; updateTime?: string }
 interface CommitResponse { writeResults?: Array<{ transformResults?: Value[] }> }
 
@@ -328,7 +336,7 @@ export class FirestoreCreditsStore implements CreditsStore {
   async balance(uid: string, now = new Date()): Promise<number> {
     if (!validAccountId(uid)) throw new Error('account id is malformed')
     const doc = await this.read(`credits/${uid}`, await this.token())
-    const balance = doc === null ? null : { month: doc.fields?.month?.stringValue ?? '', grant: integer(doc.fields?.grant, 'grant'), purchased: integer(doc.fields?.purchased, 'purchased') }
+    const balance = doc === null ? null : storedBalance(doc)
     const have = current(balance, utcMonth(now), this.monthlyGrant)
     return have.grant + have.purchased
   }
@@ -362,11 +370,7 @@ export class FirestoreCreditsStore implements CreditsStore {
       const counts = quotaDocs.map((doc) => doc === null ? 0 : integer(doc.fields?.count, 'quota count'))
       const full = quotas.findIndex((quota, index) => counts[index]! + (quota.amount ?? 1) > quota.limit)
       if (full >= 0) return { ok: false, limited: 'quota', id: quotas[full]!.id, limit: quotas[full]!.limit }
-      const balance = balanceDoc === null ? null : {
-        month: balanceDoc.fields?.month?.stringValue ?? '',
-        grant: integer(balanceDoc.fields?.grant, 'grant'),
-        purchased: integer(balanceDoc.fields?.purchased, 'purchased'),
-      }
+      const balance = balanceDoc === null ? null : storedBalance(balanceDoc)
       const have = current(balance, month, this.monthlyGrant)
       if (have.grant + have.purchased < amount) return { ok: false, limited: 'credits', remaining: have.grant + have.purchased }
       const { fromGrant, fromPurchased } = take(amount, have)
@@ -504,6 +508,13 @@ export class FirestoreCreditsStore implements CreditsStore {
     }
     throw new Error(`credits commit failed (${response.status})`)
   }
+}
+
+/** `credits/{uid}` as a balance; a field a writer has not set yet counts as zero (integer), a missing flag as false. */
+function storedBalance(doc: FirestoreDoc): StoredBalance {
+  const balance: StoredBalance = { month: doc.fields?.month?.stringValue ?? '', grant: integer(doc.fields?.grant, 'grant'), purchased: integer(doc.fields?.purchased, 'purchased') }
+  if (doc.fields?.noMonthlyGrant?.booleanValue === true) balance.noMonthlyGrant = true
+  return balance
 }
 
 function integer(value: Value | undefined, name: string): number {

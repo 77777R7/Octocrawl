@@ -8,7 +8,7 @@ import { firestoreQuotaFromEnv } from './quota.js'
 import { firestoreAmazonGateFromEnv } from './amazonGate.js'
 import { validateAmazonPublicState } from './previewUrl.js'
 import { createAuthRoutes, FirestoreAccountStore, IdentityToolkit } from './auth.js'
-import { createAccountRoutes, FirestoreAccountData } from './account.js'
+import { createAccountRoutes, FirestoreAccountData, grantLeft } from './account.js'
 import { accountConnections, createOAuthRoutes, FirestoreOAuthStore } from './oauth.js'
 import { startupTimings } from './startup.js'
 
@@ -49,6 +49,7 @@ const auth = firebaseApiKey && accountData
     eraseAccountData: uid => accountData.erase(uid),
     // Deleting an account and signing up again with the same address goes on with the month's free credits.
     creditCarry: { remember: (uid, key) => accountData.rememberCredits(uid, key, monthlyCredits), carry: (uid, key) => accountData.carryCredits(uid, key) },
+    creditGrant: { claim: (uid, key) => accountData.claimGrant(uid, key), release: (uid, key) => accountData.releaseGrant(uid, key) },
   })
   : undefined
 // MCP clients' OAuth records (oauth.ts): its routes below, and the connections the account page lists.
@@ -72,7 +73,7 @@ const oauth = auth === undefined || oauthStore === undefined || accountData === 
   // As the dashboard shows it (account.ts, /api/account): a month not spent in yet has its whole grant.
   creditsLeft: async (uid) => {
     const balance = await accountData.balance(uid)
-    const grant = balance === null || balance.month !== new Date().toISOString().slice(0, 7) ? monthlyCredits : balance.grant
+    const grant = grantLeft(balance, new Date().toISOString().slice(0, 7), monthlyCredits)
     return grant + (balance?.purchased ?? 0)
   },
 })

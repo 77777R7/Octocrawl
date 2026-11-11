@@ -242,6 +242,7 @@ The key is printed once. Keep it somewhere ignored by git, such as `.w2l/hosted/
 A key that names an account (`uid` on its `hostedApiKeys` document) spends that account's credits instead of a daily limit. Decided 2026-10-11 (ROADMAP PH); `packages/mcp/src/hostedCredits.ts` holds the rules.
 
 - **The grant.** Every account gets `W2L_MONTHLY_CREDITS` (500) credits each month. The grant resets at 00:00 UTC on the 1st and nothing rolls over. It is spent before bought credits.
+- **One grant a mailbox** (2026-11-11). The site's sign-in claims `creditGrants/{HMAC of the mailbox}` (`uid`, `claimedAt`) for the first account of a mailbox (lower case, no `+tag`, Gmail without dots and googlemail.com as gmail.com: `canonicalMailbox` in packages/public-preview/src/auth.ts). Any other account of that mailbox gets `noMonthlyGrant: true`, this month's `grant` 0 on `credits/{uid}`; `current()` then gives it no grant in any month, only what it bought, and every write here keeps the flag (`updateMask`). Deleting the holder lets the claim go, and an alias that then holds it loses the flag. Not covered: accounts without an email address, catch-all domains, and an account made before this change, which holds no claim until it next signs in on the site (so one new alias of its mailbox can still take a grant); on 2026-11-11 there were 18 accounts, no two of one mailbox.
 - **What a call costs**, settled from its result:
 
   | Result | Credits |

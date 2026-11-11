@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createPreviewServer } from '../src/server.js'
 import { createAuthRoutes, MemoryAccountStore, type IdentityProvider } from '../src/auth.js'
-import { accountQuotaIds, createAccountRoutes, FirestoreAccountData, hostedJobPath, MAX_ACTIVE_KEYS, MemoryAccountData, playgroundRequest, type AccountRoutesOptions } from '../src/account.js'
+import { accountQuotaIds, createAccountRoutes, FirestoreAccountData, grantLeft, hostedJobPath, MAX_ACTIVE_KEYS, MemoryAccountData, playgroundRequest, type AccountRoutesOptions } from '../src/account.js'
 import { accountConnections, MemoryOAuthStore, type GrantRecord } from '../src/oauth.js'
 import { hostedNetworkPolicy } from '@w2l/contracts'
 // The hosted API itself, so the Playground's signed header is checked by the code that serves it.
@@ -260,6 +260,64 @@ describe('the account page\'s data', () => {
     commitStatus = 500
     await expect(data.carryCredits('account-0002', key, NOW)).rejects.toThrow(/credit carry failed/)
     await expect(data.carryCredits('account-0002', 'not-a-key', NOW)).rejects.toThrow(/malformed/)
+  })
+
+  it('claims a mailbox\'s grant once, marks any other account of it, reads the mark, and lets the grant go only for its holder', async () => {
+    const root = 'projects/octocrawl-test/databases/(default)/documents'
+    const key = 'b'.repeat(64)
+    const NOW = new Date('2026-10-20T12:00:00Z')
+    let holder: string | null = null
+    const statuses: number[] = []
+    const commits: unknown[] = []
+    const fetcher = (async (input: string | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.startsWith('http://metadata.google.internal/')) return Response.json({ access_token: 'token' })
+      if (url.endsWith(':commit')) { commits.push(JSON.parse(String(init!.body))); return new Response('{}', { status: statuses.shift() ?? 200 }) }
+      if (url.endsWith(`/creditGrants/${key}`)) return holder ? Response.json({ name: `${root}/creditGrants/${key}`, fields: { uid: { stringValue: holder } }, updateTime: 't1' }) : new Response('{}', { status: 404 })
+      if (url.endsWith('/credits/account-0001')) return new Response('{}', { status: 404 })
+      if (url.endsWith('/credits/account-0003')) return Response.json({ name: `${root}/credits/account-0003`, fields: { month: { stringValue: '2026-10' }, grant: { integerValue: '0' }, noMonthlyGrant: { booleanValue: true } } })
+      if (url.endsWith('/credits/account-0009')) return new Response('{}', { status: 404 })
+      if (url.endsWith('/credits/account-0002')) return Response.json({ name: `${root}/credits/account-0002`, fields: { month: { stringValue: '2026-09' }, grant: { integerValue: '0' }, purchased: { integerValue: '4' }, noMonthlyGrant: { booleanValue: true } } })
+      throw new Error(`unexpected ${url}`)
+    }) as typeof fetch
+    const data = new FirestoreAccountData('octocrawl-test', fetcher)
+    expect(await data.claimGrant('account-0001', key, NOW)).toBe('claimed')
+    expect(commits.at(-1)).toEqual({ writes: [{ update: { name: `${root}/creditGrants/${key}`, fields: { uid: { stringValue: 'account-0001' }, claimedAt: { timestampValue: NOW.toISOString() } } }, currentDocument: { exists: false } }] })
+    // Two first sign-ins at once: the one that lost the create reads the winner next round.
+    statuses.push(409)
+    let reads = 0
+    const racing = new FirestoreAccountData('octocrawl-test', (async (input: string | URL, init?: RequestInit) => {
+      if (String(input).endsWith(`/creditGrants/${key}`) && reads++ === 1) holder = 'account-0001'
+      return fetcher(input, init)
+    }) as typeof fetch)
+    holder = null
+    expect(await racing.claimGrant('account-0009', key, NOW)).toBe('shared')
+    holder = 'account-0001'
+    expect(await data.claimGrant('account-0001', key, NOW)).toBe('held')
+    const before = commits.length
+    expect(await data.claimGrant('account-0002', key, NOW)).toBe('shared')
+    // Only the month, the grant and the mark: what the account bought stays.
+    expect(commits.slice(before)).toEqual([{ writes: [{
+      update: { name: `${root}/credits/account-0002`, fields: { month: { stringValue: '2026-10' }, grant: { integerValue: '0' }, noMonthlyGrant: { booleanValue: true } } },
+      updateMask: { fieldPaths: ['month', 'grant', 'noMonthlyGrant'] },
+    }] }])
+    // A new month gives the marked account nothing, as the dashboard and the hosted API reckon it.
+    const marked = await data.balance('account-0002')
+    expect(marked).toEqual({ month: '2026-09', grant: 0, purchased: 4, noMonthlyGrant: true })
+    expect(grantLeft(marked, '2026-10', 500)).toBe(0)
+    expect(grantLeft({ month: '2026-09', grant: 0, purchased: 0 }, '2026-10', 500)).toBe(500)
+    // Letting go: only the holder's delete deletes, on the update time it read.
+    const kept = commits.length
+    await data.releaseGrant('account-0002', key)
+    expect(commits).toHaveLength(kept)
+    await data.releaseGrant('account-0001', key)
+    expect(commits.at(-1)).toEqual({ writes: [{ delete: `${root}/creditGrants/${key}`, currentDocument: { updateTime: 't1' } }] })
+    // A former alias that now holds the grant loses the flag, and only the flag; an account without it is not written.
+    holder = 'account-0003'
+    const clearing = commits.length
+    expect(await data.claimGrant('account-0003', key, NOW)).toBe('held')
+    expect(commits.slice(clearing)).toEqual([{ writes: [{ update: { name: `${root}/credits/account-0003`, fields: {} }, updateMask: { fieldPaths: ['noMonthlyGrant'] }, currentDocument: { exists: true } }] }])
+    await expect(data.claimGrant('account-0001', 'not-a-key', NOW)).rejects.toThrow(/malformed/)
   })
 
   it('makes a key the hosted API will find, shows it once, lists it by prefix, and revokes only the account\'s own keys', async () => {
