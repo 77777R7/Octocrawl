@@ -228,6 +228,24 @@ describe('connecting a client', () => {
     expect(fetched).toEqual(['https://other.example/client.json', 'https://other.example/client.json'])
   })
 
+  it('fetches at most so many client documents an hour for one address, signed in or not, and serves a cached one regardless', async () => {
+    const { url, fetched, lines } = await start()
+    const from = (address: string) => ({ 'x-forwarded-for': address })
+    // Anyone can make this page fetch an address of their choosing; one address may make it fetch only a few an hour.
+    for (let i = 0; i < 25; i++) {
+      await fetch(`${url}/oauth/authorize?${authorizeQuery({ client_id: `https://other.example/client-${i}.json`, redirect_uri: 'https://other.example/cb' })}`, { redirect: 'manual', headers: from('198.51.100.7') })
+    }
+    expect(fetched).toHaveLength(20)
+    expect(lines.filter(line => line.step === 'client_metadata' && line.outcome === 'rate_limited')).toHaveLength(5)
+    // Another address has its own hour, and a document already read is answered from the cache without a fetch.
+    await fetch(`${url}/oauth/authorize?${authorizeQuery({ client_id: CHATGPT, redirect_uri: CALLBACK })}`, { redirect: 'manual', headers: from('198.51.100.8') })
+    expect(fetched.at(-1)).toBe(CHATGPT)
+    const before = fetched.length
+    const cached = await fetch(`${url}/oauth/authorize?${authorizeQuery({ client_id: CHATGPT, redirect_uri: CALLBACK })}`, { redirect: 'manual', headers: from('198.51.100.7') })
+    expect(cached.status).not.toBe(400)
+    expect(fetched).toHaveLength(before)
+  })
+
   it('sends the visitor back with access_denied when they cancel, and issues nothing', async () => {
     const { url, store, signIn } = await start()
     const answer = await consent(url, await signIn(), authorizeQuery(), 'deny')

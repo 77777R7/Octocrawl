@@ -15,6 +15,7 @@
  * one atomic commit, the public preview's pattern, so an exhausted day is
  * never over-served by two instances.
  */
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http'
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { BlockList, isIP } from 'node:net'
@@ -24,7 +25,7 @@ import { createHistogram } from 'node:perf_hooks'
 import { getRequestListener } from '@hono/node-server'
 import { Hono, type Context } from 'hono'
 import { closeIdleOnlyWhenUnread, createApp, createApiEngine, hasFormat, type ApiEngine, type ApiEngineOptions, type BrowserTurn, type HostedChromeOperator } from '@w2l/api'
-import { API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, parseScrapeRequest, RequestError, VERIFY_REGEX_CHECK_TYPES, withOperatorContact, type NetworkPolicy, type ScrapeRun } from '@w2l/contracts'
+import { addressGroup, API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, parseScrapeRequest, RequestError, VERIFY_REGEX_CHECK_TYPES, withOperatorContact, type NetworkPolicy, type ScrapeRun } from '@w2l/contracts'
 import type { RegexStats } from '@w2l/runtime'
 import { W2L } from '@w2l/sdk'
 import { createMcpServer, MCP_VERSION, SERVER_IDENTITY } from './server.js'
@@ -765,6 +766,54 @@ class SlidingWindowLimiter {
   }
 }
 
+/**
+ * Who made each scrape and map record this instance keeps (found 2026-11-11: GET /v1/scrapes/:id and /v1/maps/:id answered
+ * any caller that knew an id). The owner is the caller's quota identity (HostedCaller.id: the HMAC of its key or address, or
+ * `playground:<uid>`), kept as long as the record (HOSTED_RECORD_TTL_MS) and on the same instance, whose disk holds it.
+ */
+export class RecordOwners {
+  private readonly owners = new Map<string, { owner: string; until: number }>()
+  constructor(private readonly ttlMs = HOSTED_RECORD_TTL_MS, private readonly max = 50_000) {}
+  remember(id: string, owner: string, now = Date.now()): void {
+    if (this.owners.size >= this.max) {
+      for (const [key, entry] of this.owners) if (entry.until <= now) this.owners.delete(key)
+      // Still full: the oldest go first (a Map keeps insertion order); their records are the next to be swept anyway.
+      for (const key of this.owners.keys()) { if (this.owners.size < this.max) break; this.owners.delete(key) }
+    }
+    this.owners.set(id, { owner, until: now + this.ttlMs })
+  }
+  /** Whether `owner` made the record: false for another caller, for none, and for a record whose time is up. */
+  owns(id: string, owner: string | undefined, now = Date.now()): boolean {
+    const entry = this.owners.get(id)
+    return owner !== undefined && entry !== undefined && entry.until > now && entry.owner === owner
+  }
+}
+
+/**
+ * The hosted engine as the gate and the inner app use it: a scrape or map remembers its caller (`caller()`, the gate's
+ * AsyncLocalStorage), and a record is read only by that caller; anyone else is answered as for a record that does not exist.
+ */
+export function ownedRecordsEngine(engine: ApiEngine, owners: RecordOwners, caller: () => string | undefined): ApiEngine {
+  return {
+    ...engine,
+    async scrape(req, context, hooks) {
+      const result = await engine.scrape(req, context, hooks)
+      const id = (result as { scrapeId?: unknown; metadata?: { scrapeId?: unknown } }).scrapeId ?? (result as { metadata?: { scrapeId?: unknown } }).metadata?.scrapeId
+      const owner = caller()
+      if (typeof id === 'string' && owner !== undefined) owners.remember(id, owner)
+      return result
+    },
+    async map(req, context) {
+      const result = await engine.map(req, context)
+      const owner = caller()
+      if (typeof result.id === 'string' && owner !== undefined) owners.remember(result.id, owner)
+      return result
+    },
+    async getScrape(scrapeId) { return owners.owns(scrapeId, caller()) ? engine.getScrape(scrapeId) : null },
+    async getMap(id) { return owners.owns(id, caller()) ? engine.getMap(id) : null },
+  }
+}
+
 /** Deletes the scrape and map records and the saved files older than the TTL: hosted phase 1 retains nothing, and the task root is Cloud Run's memory. */
 export async function sweepTaskRoot(taskRoot: string, ttlMs = HOSTED_RECORD_TTL_MS, now = Date.now()): Promise<number> {
   let removed = 0
@@ -825,13 +874,14 @@ function sameSecret(presented: string | undefined, secret: string): boolean {
   return typeof presented === 'string' && timingSafeEqual(createHash('sha256').update(presented).digest(), createHash('sha256').update(secret).digest())
 }
 
-/** The address the Worker reports once it proved itself, else the socket's. Raw addresses are hashed before use. */
+/** The address the Worker reports once it proved itself, else the socket's, as addressGroup counts it. Raw addresses are hashed before use. */
 export function clientAddress(req: IncomingMessage, proxySecret: string | undefined): string {
   const presented = req.headers[PROXY_SECRET_HEADER]
   const reported = req.headers['cf-connecting-ip']
-  if (proxySecret && sameSecret(typeof presented === 'string' ? presented : undefined, proxySecret) && typeof reported === 'string' && isIP(reported.trim())) return reported.trim()
+  // An IPv6 address counts by its /64 (addressGroup): one host can rotate within it, and would have a day per address.
+  if (proxySecret && sameSecret(typeof presented === 'string' ? presented : undefined, proxySecret) && typeof reported === 'string' && isIP(reported.trim())) return addressGroup(reported.trim())
   const socket = req.socket?.remoteAddress ?? ''
-  return isIP(socket) ? socket : 'unknown'
+  return isIP(socket) ? addressGroup(socket) : 'unknown'
 }
 
 const LOCAL_HINT = 'run Octocrawl on your computer for this: npx octocrawl serve, then npx -y @octocrawl/mcp (https://octocrawl.dev/docs/connect-mcp/?utm_source=hosted&utm_medium=hint)'
@@ -886,7 +936,10 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     return new RequestError(`${wait ? 'waitFor' : 'a screenshot'} ${BROWSER_LANE_REFUSALS[lacks]}`, 'invalid_request', { parameters: [wait ? 'waitFor' : 'formats'] }, [`leave out ${wait ? 'waitFor' : 'the screenshot format'} to read this page over HTTP alone`, ...(lacks === 'keyless' ? [signInHint] : []), LOCAL_HINT])
   }
   const policy = hostedPolicy(config.networkPolicy ?? hostedNetworkPolicy(), env)
-  const engine = createApiEngine({
+  // Who made each record, as the gate names the caller of the request in hand (callerOfRecord, set once it is known).
+  const recordOwners = new RecordOwners()
+  const callerOfRecord = new AsyncLocalStorage<string>()
+  const engine = ownedRecordsEngine(createApiEngine({
     taskRoot: config.taskRoot,
     networkPolicy: policy,
     hosted: true,
@@ -909,7 +962,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     // The regular-expression checks, when the operator switched them on and the self-test passed (ADR 0006, amendment of 2026-10-29).
     hostedRegexChecks: config.regexChecks === true,
     onRegexChecks: (stats, about) => log(regexChecksLine(config.hashKey, stats, about)),
-  })
+  }), recordOwners, () => callerOfRecord.getStore())
   const inner = createApp(engine, { exposeInternalErrors: false, jobStreams: false })
   // A process-local secret lets the MCP handler hand the gate a keyless caller's identity; no outside request can present it.
   const internalSecret = randomBytes(32).toString('hex')
@@ -1041,6 +1094,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     if (caller === 'oauth_ended') return refuse(c, 401, 'unauthorized', 'this connection was disconnected or its sign-in expired: sign in again', [])
     if (caller === 'unknown_key') return refuse(c, 401, 'unauthorized', 'this key is not one Octocrawl issued, or it was revoked', ['send no Authorization header to use the keyless allowance, or ask for a key at https://octocrawl.dev/docs/connect-mcp/?utm_source=hosted&utm_medium=hint'])
     c.set('caller', caller)
+    // The rest of this request (the inner app, the engine and its records) knows its caller; each request has its own async context.
+    callerOfRecord.enterWith(caller.id)
     if (jobRoute) {
       // A job spends an account's credits over many pages: keyless callers and keys without an account have none to spend.
       if (caller.kind !== 'key' || caller.uid === undefined) return refuse(c, 403, 'jobs_need_account', 'hosted batch and crawl jobs need an account\'s key', [signInHint, 'or run it on your computer: npx octocrawl serve'])
