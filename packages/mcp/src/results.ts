@@ -61,6 +61,92 @@ export function withoutTelemetry(tool: string, result: unknown, args: unknown, c
   return tool === 'scrape' && contract !== undefined ? resultProjection(result, contract, 'mcp_result_minimized', options.ledger).deliver(minimized) : minimized
 }
 
+/**
+ * A scrape as the MCP server answers it by default: the verdict, the page and what a citation needs, without what an
+ * agent does not read. On 20 documentation pages the envelope was a fifth of the first answers' tokens
+ * (research/benchmarks/2026-11-11-token-cost-docs-aa4c873b.md): usage's timings, metadata's Open Graph and fetch
+ * duplicates, and the Evidence Record's request identity and egress are dropped here.
+ * The verdict stays whole. The Evidence Record keeps its URLs, fetch time, HTTP status, robots decision, hashes,
+ * extractor version, how the page was read, its verification and readiness, and every part that says the page is not
+ * what was asked for (a redirect, field evidence, artifacts, page actions, a document whose status may not be its own,
+ * what a saved login put into the browser), and says `compact: true`. metadata keeps whether the page came from the
+ * cache, and usage its cost, null when unknown. A read-on (`markdownOffset`) answers the verdict and the page alone: the first
+ * answer carried the record. `debug: true` answers the whole result, as before, and server.ts answers a scrape with a
+ * verify contract whole too, since the contract may name any path of the delivered answer. REST and the SDK are not changed.
+ */
+export function compactScrape(result: unknown, args: unknown, tool = 'scrape'): unknown {
+  if (tool !== 'scrape' || !isObject(result)) return result
+  const rec = isObject(args) ? args : {}
+  if (rec.debug === true) return result
+  const out: Json = { ...result }
+  // usage keeps its counts (a cache hit reads 0 requests), its cost (null is unknown, not free) and whether the
+  // deadline cut it, and drops its timings and byte counts.
+  if (isObject(result.usage)) out.usage = { ...pick(result.usage, ['requestCount', 'attemptCount', 'contentTokens']), ...present(result.usage, ['externalCostUsd', 'externalCostChargedUsd', 'deadlineExceeded']) }
+  // The verdict (VERDICT_KEYS) stays as it is, null or not: every client reads the same verdict (W8.2).
+  if (out.requestedUrl === out.finalUrl) delete out.requestedUrl
+  const metadata = isObject(result.metadata) ? result.metadata : undefined
+  if (typeof rec.markdownOffset === 'number' && rec.markdownOffset > 0) {
+    delete out.evidenceRecord
+    delete out.document
+    if (metadata !== undefined) out.metadata = metadata.scrapeId === undefined ? {} : { scrapeId: metadata.scrapeId }
+    return out
+  }
+  if (metadata !== undefined) out.metadata = pick(metadata, METADATA_KEPT)
+  if (isObject(result.evidenceRecord)) out.evidenceRecord = compactRecord(result.evidenceRecord)
+  return out
+}
+
+const METADATA_KEPT = ['title', 'description', 'language', 'canonicalUrl', 'url', 'statusCode', 'contentType', 'error', 'cacheState', 'cachedAt', 'scrapeId'] as const
+
+function compactRecord(record: Json): Json {
+  const out: Json = pick(record, ['schemaVersion', 'requestedUrl', 'finalUrl', 'fetchedAt', 'httpStatus', 'status', 'reason', 'lane', 'rawSha256'])
+  const chain = record.redirectChain
+  if (isObject(chain) && ((Array.isArray(chain.urls) && chain.urls.length > 1) || chain.complete === false)) out.redirectChain = chain
+  if (isObject(record.robotsDecision)) {
+    const robots = record.robotsDecision
+    out.robotsDecision = { decision: robots.decision, userOverride: robots.userOverride, ...(robots.overrideBasis === null || robots.overrideBasis === undefined ? {} : { overrideBasis: robots.overrideBasis }) }
+  }
+  if (isObject(record.outputSha256)) out.outputSha256 = pick(record.outputSha256, Object.keys(record.outputSha256))
+  if (isObject(record.extractor) && record.extractor.version !== undefined) out.extractor = { version: record.extractor.version }
+  if (record.fieldEvidence !== null && record.fieldEvidence !== undefined) out.fieldEvidence = record.fieldEvidence
+  if (Array.isArray(record.artifacts) && record.artifacts.length > 0) out.artifacts = record.artifacts
+  if (Array.isArray(record.pageActions) && record.pageActions.length > 0) out.pageActions = record.pageActions
+  if (isObject(record.access)) {
+    const access = record.access
+    out.access = pick(access, ['route', 'completion', 'allowance'])
+    // What a saved login put into the browser (docs/access.md): null or zeros says it did not reach the page.
+    if (access.sessionApplied !== undefined && (access.sessionApplied !== null || access.completion === 'authorized_session')) (out.access as Json).sessionApplied = access.sessionApplied
+  }
+  // A document whose status and headers may not be the page's own (PA B2) says so.
+  if (isObject(record.document) && record.document.responseMatch !== null && record.document.responseMatch !== undefined && record.document.responseMatch !== 'matched') out.document = { responseMatch: record.document.responseMatch }
+  // The record's verdict stays whole, as the answer's does.
+  if (record.verification !== undefined) out.verification = record.verification
+  if (record.readiness !== undefined) out.readiness = record.readiness
+  for (const [key, value] of Object.entries(record)) {
+    // A field the record gains later is kept until it is judged here, so nothing new is dropped unseen.
+    if (!(key in out) && !RECORD_DROPPED.has(key) && value !== null && value !== undefined) out[key] = value
+  }
+  out.compact = true
+  return out
+}
+
+/** The record's parts an agent does not read; debug: true answers them. */
+const RECORD_DROPPED: ReadonlySet<string> = new Set(['redirectChain', 'robotsDecision', 'outputSha256', 'extractor', 'fieldEvidence', 'artifacts', 'pageActions', 'access', 'verification', 'readiness', 'contentEncoding', 'proxy', 'identity', 'document'])
+
+/** `keys` of `value` that are present, null included (a null that means unknown). */
+function present(value: Json, keys: readonly string[]): Json {
+  const out: Json = {}
+  for (const key of keys) if (value[key] !== undefined) out[key] = value[key]
+  return out
+}
+
+/** `keys` of `value` that are present and not null. */
+function pick(value: Json, keys: readonly string[]): Json {
+  const out: Json = {}
+  for (const key of keys) if (value[key] !== null && value[key] !== undefined) out[key] = value[key]
+  return out
+}
+
 const JOB_ITEM_TOOLS: ReadonlySet<string> = new Set(['get_batch_items', 'get_batch_errors', 'get_crawl_pages', 'get_crawl_errors'])
 
 /** The links in a text without their utm_* parameters, which a model has no use for (REST keeps them); prose is left alone. */
