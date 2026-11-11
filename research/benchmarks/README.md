@@ -37,3 +37,14 @@ Frozen HTML (HF `opendatalab/WebMainBench`), so only Octocrawl's extractor and M
   authors' html2text conversion (their table's "Html+MD" mode, a converter per page as theirs).
 - `run_545.py` runs the toolkit's fine-grained metrics on the 545-page subset with the LLM splitting off, for
   Octocrawl's Markdown as delivered and without link targets and images.
+
+## Tokens an agent receives for one page (`token_cost/`)
+
+Live pages, read by every arm in one run: a plain GET's HTML, the rendered DOM, the reference Fetch MCP server, Playwright
+MCP (its answer and the snapshot file it names) and Octocrawl's local MCP `scrape`, each read to the end of the page.
+
+- `urls.json` is the frozen page set (20 documentation pages); change it only in a commit of its own, before a run.
+- `run.mjs --out <dir>` saves every arm's text per page (start the local API first; `--proxy`, `--playwright-mcp`,
+  `--fetch-mcp`, `--fetch-allow-private-ips` for a fake-IP proxy).
+- `count.py <dir>` counts tokens with tiktoken `o200k_base` and checks which of the page's paragraphs each Markdown arm
+  kept; it prints the record's table.
