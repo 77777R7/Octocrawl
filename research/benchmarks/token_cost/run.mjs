@@ -8,7 +8,7 @@
 //                  answer then start_index pages while it says the content was cut, as an agent reads the whole page
 //   octocrawl_mcp  every text block of Octocrawl's local MCP scrape answers with default options: the first answer, then
 //                  the same scrape with markdownOffset while the answer says it was cut, as an agent reads the whole page
-// Usage: node research/benchmarks/token_cost/run.mjs --out <dir> [--proxy http://127.0.0.1:7890] [--playwright-mcp 0.0.83] [--fetch-mcp 2026.10.24]
+// Usage: node research/benchmarks/token_cost/run.mjs --out <dir> [--proxy http://127.0.0.1:7890] [--playwright-mcp 0.0.83] [--fetch-mcp 2026.10.24] [--fetch-allow-private-ips]
 // Octocrawl's MCP talks to the local API at W2L_API_URL (default http://127.0.0.1:8787): start it first (npm run api).
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
@@ -49,12 +49,15 @@ async function snapshotFile(t) {
   for (const base of [pwDir, process.cwd()]) { const p = resolve(base, m[1]); try { await access(p); return p } catch {} }
   try { const p = resolve(pwDir, m[1].split('/').pop()); await access(p); return p } catch { return null }
 }
-const fetchMcp = await connect('uvx', [`mcp-server-fetch==${fetchVersion}`, ...(proxy ? [`--proxy-url=${proxy}`] : [])], {})
+// --fetch-allow-private-ips: a proxy with fake-IP DNS (Clash) resolves every host to 198.18.0.0/15, which the Fetch MCP
+// server refuses as a private address; the flag lets it fetch through such a proxy. Say in the record when it was used.
+const fetchPrivate = process.argv.includes('--fetch-allow-private-ips')
+const fetchMcp = await connect('uvx', [`mcp-server-fetch==${fetchVersion}`, ...(proxy ? [`--proxy-url=${proxy}`] : []), ...(fetchPrivate ? ['--allow-private-ips'] : [])], {})
 const octocrawl = await connect(process.execPath, [join(here, '../../../packages/mcp/dist/stdio.js')], {})
 const octoTools = (await octocrawl.listTools()).tools.map((t) => t.name)
 if (!octoTools.includes('scrape')) throw new Error(`Octocrawl MCP has no scrape tool: ${octoTools.join(', ')}`)
 
-const meta = { startedAt: new Date().toISOString(), proxy: proxy ?? null, playwrightMcp: pwVersion, fetchMcp: fetchVersion, node: process.version, urls: [] }
+const meta = { startedAt: new Date().toISOString(), proxy: proxy ?? null, playwrightMcp: pwVersion, fetchMcp: fetchVersion, fetchAllowPrivateIps: fetchPrivate, node: process.version, urls: [] }
 for (const [i, url] of urls.entries()) {
   const id = String(i + 1).padStart(2, '0')
   const dir = join(out, id)
