@@ -44,7 +44,7 @@ What it does not do:
 
 It is checked on 10 public reports, six of them the seed user's PDFs: [manifest](../research/pdf-corpus/manifest.v1.json), `node research/pdf-corpus/run.mjs`, runs in [research/pdf-corpus/runs/](../research/pdf-corpus/runs/).
 
-Scrape, batch and crawl take Firecrawl's `parsers` to choose how a PDF is read (REST, SDK, MCP and `/fc`); other files are unaffected:
+Scrape, batch and crawl take Firecrawl's `parsers` to choose how a PDF is read (REST, SDK, CLI and `/fc`); other files are unaffected. The MCP tools do not take `parsers`, so over MCP a PDF is read as when it is absent:
 
 - Absent: every PDF's text layer, with the defaults above and page markers.
 - `[]`: no PDF text. The file is saved as received and the result is `success` with `markdown: null` and a `pdf_not_parsed` file warning, as for a spreadsheet.
