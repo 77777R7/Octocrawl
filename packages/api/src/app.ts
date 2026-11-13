@@ -3,7 +3,7 @@ import { streamSSE } from 'hono/streaming'
 import type { WSEvents } from 'hono/ws'
 import { createNodeWebSocket, type NodeWebSocket } from '@hono/node-ws'
 import { createHash } from 'node:crypto'
-import { InvalidCursorError } from '@w2l/runtime'
+import { InvalidCursorError, StoreRefusal } from '@w2l/runtime'
 import { CrawlStateError, HandoffUnavailableError, LoginsUnavailableError, SessionsUnavailableError, TaskNotFoundError, type ApiEngine } from './engine.js'
 import { ChromeLoginError } from './chromeLogin.js'
 import { bearerTokenMatcher } from './auth.js'
@@ -509,13 +509,13 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     if (enabled !== undefined && typeof enabled !== 'boolean') return fail(c,'invalid_request','enabled must be boolean')
     if (revision.revision !== 1) return fail(c, 'invalid_request', 'new monitor requires revision 1')
     try { return c.json(engine.configureMonitor(revision, enabled !== false), 201) }
-    catch { return fail(c, 'conflict', 'monitor configuration conflict') }
+    catch (error) { if (!(error instanceof StoreRefusal)) throw error; return fail(c, 'conflict', 'monitor configuration conflict') }
   })
   app.post('/v1/monitors/:id/revisions', async (c) => {
     const body = await c.req.json()
     const revision = parseMonitorRevision({ ...body, monitorId: c.req.param('id'), createdAt: Date.now() })
     try { return c.json(engine.configureMonitor(revision), 201) }
-    catch { return fail(c, 'conflict', 'revision conflict; identity is immutable') }
+    catch (error) { if (!(error instanceof StoreRefusal)) throw error; return fail(c, 'conflict', 'revision conflict; identity is immutable') }
   })
   app.get('/v1/monitors', (c) => c.json(engine.listMonitors()))
   app.get('/v1/monitors/:id', (c) => {
@@ -530,7 +530,7 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     const body = await c.req.json() as {triggerKey?:unknown}
     if (!body || typeof body !== 'object' || Array.isArray(body) || (body.triggerKey !== undefined && (typeof body.triggerKey !== 'string' || !body.triggerKey.trim() || body.triggerKey.length > 200))) return fail(c,'invalid_request','invalid triggerKey')
     try { return c.json(engine.enqueueMonitorRun(c.req.param('id'),body.triggerKey as string | undefined),202) }
-    catch (error) { return fail(c,'conflict',error instanceof Error ? error.message : 'run cannot be queued') }
+    catch (error) { if (!(error instanceof StoreRefusal)) throw error; return fail(c, 'conflict', error.message) }
   })
   app.post('/v1/monitors/:id/run', async (c) => {
     const body = await c.req.json() as { triggerKey?: unknown }
@@ -541,11 +541,11 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
 
   app.post('/v1/monitors/:id/runs/:runId/cancel', (c) => {
     try { return c.json(engine.cancelMonitorRun(c.req.param('id'), c.req.param('runId'))) }
-    catch { return fail(c, 'not_found', 'monitor run not found') }
+    catch (error) { if (!(error instanceof StoreRefusal)) throw error; return fail(c, 'not_found', 'monitor run not found') }
   })
   for (const action of ['pause', 'resume'] as const) app.post(`/v1/monitors/:id/${action}`, (c) => {
     try { return c.json(engine.setMonitorEnabled(c.req.param('id'), action === 'resume')) }
-    catch { return fail(c, 'not_found', 'monitor not found') }
+    catch (error) { if (!(error instanceof StoreRefusal)) throw error; return fail(c, 'not_found', 'monitor not found') }
   })
   app.post('/v1/delivery/destinations', async (c) => {
     try { return c.json(engine.createDeliveryDestination(await c.req.json()), 201) }
@@ -555,7 +555,7 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   app.get('/v1/delivery/destinations', (c) => c.json(engine.listDeliveryDestinations({ monitorId: c.req.query('monitorId'), jobId: c.req.query('jobId') })))
   for (const action of ['pause', 'resume'] as const) app.post(`/v1/delivery/destinations/:id/${action}`, (c) => {
     try { return c.json(engine.setDeliveryDestinationEnabled(c.req.param('id'), action === 'resume')) }
-    catch { return fail(c, 'not_found', 'destination not found') }
+    catch (error) { if (!(error instanceof StoreRefusal)) throw error; return fail(c, 'not_found', 'destination not found') }
   })
   app.get('/v1/deliveries', (c) => {
     const state = c.req.query('state')
@@ -575,7 +575,7 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
   })
   app.post('/v1/deliveries/:id/retry', (c) => {
     try { return c.json(engine.retryDelivery(c.req.param('id'))) }
-    catch (error) { return fail(c, 'conflict', error instanceof Error ? error.message : 'retry conflict') }
+    catch (error) { if (!(error instanceof StoreRefusal)) throw error; return fail(c, 'conflict', error.message) }
   })
 
   /** The person's saved logins, as `octocrawl login` keeps them: imported from their Chrome, listed without cookies, forgotten. A server on their machine alone. */

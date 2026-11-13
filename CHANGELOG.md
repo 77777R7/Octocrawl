@@ -38,6 +38,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **A Monitor or Delivery route whose store fails answers 500, not "not found".** Seven routes (create a Monitor, add a revision, queue, cancel, pause or resume a run, pause or resume a delivery destination, retry a delivery) answered every error as 404 or 409, so a locked or unreadable database reached the caller as `monitor not found` or a conflict, and the server logged nothing. The stores now name their own refusals, which keep their 404 and 409; any other error is a 500 `internal_error`, logged like the other routes' 500s.
+
 ## 0.8.13 — 2026-11-12
 
 The published packages at 0.8.13. **An MCP `scrape` answers without what an agent does not read**: on 20 documentation pages, reading each to its end took 219,014 tokens instead of 244,783, with the same Markdown (`research/benchmarks/`). Apart from that: **a subreddit's listing page answers with its posts**, **a page a site adapter confirms nothing on comes with its Markdown**, **hosted Octocrawl reads a page robots.txt disallows when your account says why**, and **a free account gets 500 credits a month, one grant a mailbox**.

@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import Database from 'better-sqlite3'
 import { configureControlDatabase } from './sqliteSetup.js'
+import { StoreRefusal } from './storeRefusal.js'
 import { isLoopbackAddress, WEBHOOK_EVENTS, webhookHeaderRefusal, type DeliveryAttempt, type DeliveryDestination, type DeliveryDestinationInput, type DeliveryDestinationKind, type DeliveryPage, type DeliveryPageQuery, type DeliveryQuery, type DeliveryState, type WebhookDelivery, type WebhookEvent, type WebhookEventEnvelope, type WebhookPayload, type WebhookPayloadFormat } from '@w2l/contracts'
 
 /** Columns added to delivery_destinations after its first schema, each created when missing. */
@@ -214,8 +215,8 @@ export class DeliveryStore {
     return (rows as DestinationRow[]).map(destinationFrom)
   }
   setDestinationEnabled(id: string, enabled: boolean, _now = Date.now()): DeliveryDestination {
-    if (typeof enabled !== 'boolean') throw new Error('enabled must be boolean')
-    if (!this.db.prepare('UPDATE delivery_destinations SET enabled=? WHERE id=?').run(enabled ? 1 : 0, id).changes) throw new Error('destination not found')
+    if (typeof enabled !== 'boolean') throw new StoreRefusal('enabled must be boolean')
+    if (!this.db.prepare('UPDATE delivery_destinations SET enabled=? WHERE id=?').run(enabled ? 1 : 0, id).changes) throw new StoreRefusal('destination not found')
     return this.getDestination(id)!
   }
   /** Use this only when no monitor commit transaction is involved (e.g. explicit replay). */
@@ -310,7 +311,7 @@ export class DeliveryStore {
   replayDeadLetter(id: string, now = Date.now()): WebhookDelivery {
     return this.db.transaction(() => {
       const delivery = this.getDelivery(id)
-      if (!delivery || delivery.state !== 'dead_letter') throw new Error('delivery not found or not dead-lettered')
+      if (!delivery || delivery.state !== 'dead_letter') throw new StoreRefusal('delivery not found or not dead-lettered')
       const notBefore = deliveryOriginNotBefore(this.db, this.getDestination(delivery.destinationId)!.url)
       this.db.prepare("UPDATE webhook_deliveries SET state='pending',next_attempt_at=MAX(next_attempt_at,?),lease_until=NULL,max_attempts=attempt_count+1 WHERE id=? AND state='dead_letter'").run(Math.max(now, notBefore), id)
       return this.getDelivery(id)!
