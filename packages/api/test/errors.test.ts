@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createApp } from '../src/app.js'
 import type { ApiEngine } from '../src/engine.js'
+import { StoreRefusal } from '@w2l/runtime'
 
 // Request errors are decided before any site is fetched, so a stub engine is enough.
 const engine = {
@@ -8,7 +9,7 @@ const engine = {
   getCrawl: async () => null,
   getCrawlWithSteps: async () => null,
   getCrawlStatusPage: async () => null,
-  retryDelivery: () => { throw new Error('delivery not found or not dead-lettered') },
+  retryDelivery: () => { throw new StoreRefusal('delivery not found or not dead-lettered') },
 } as unknown as ApiEngine
 
 const url = 'https://example.com/'
@@ -52,6 +53,39 @@ describe('REST error codes', () => {
       })
       expect(log).toHaveBeenCalledTimes(2)
       expect(String(log.mock.calls[1]?.[0])).toContain('SQLITE_IOERR')
+    } finally {
+      log.mockRestore()
+    }
+  })
+
+  // The monitor and delivery routes answer a store's own refusal (no such monitor, a run already queued) as 404 or 409,
+  // but a store that fails (a locked or unreadable SQLite file) is a 500, not "monitor not found".
+  it('answers a monitor or delivery route whose store fails as a 500, not as a refusal', async () => {
+    const broken = () => { throw new Error('SQLITE_BUSY: database is locked') }
+    const failing = createApp({
+      configureMonitor: broken, enqueueMonitorRun: broken, cancelMonitorRun: broken, setMonitorEnabled: broken,
+      setDeliveryDestinationEnabled: broken, retryDelivery: broken,
+    } as unknown as ApiEngine)
+    const revision = {
+      revision: 2, url: 'https://example.com/', ruleVersion: 'example/v1', intervalMs: 86_400_000, staleAfterMs: 172_800_000,
+      config: { adapter: 'markdown-sections/v1', workspaceId: 'w1', entityKey: 'example:home', viewKey: 'public', expectedTitle: 'Example Domain', schemaVersion: 'example/v1', conditionalRequests: true, captureMode: 'http', fields: [{ name: 'body', heading: 'Example Domain', type: 'text', required: true }] },
+    }
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      for (const [path, init] of [
+        ['/v1/monitors', post({ preset: 'firecrawl-introduction' })],
+        ['/v1/monitors/m1/revisions', post(revision)],
+        ['/v1/monitors/m1/runs', post({})],
+        ['/v1/monitors/m1/runs/r1/cancel', { method: 'POST' }],
+        ['/v1/monitors/m1/pause', { method: 'POST' }],
+        ['/v1/monitors/m1/resume', { method: 'POST' }],
+        ['/v1/delivery/destinations/d1/pause', { method: 'POST' }],
+        ['/v1/delivery/destinations/d1/resume', { method: 'POST' }],
+        ['/v1/deliveries/d1/retry', { method: 'POST' }],
+      ] as const) {
+        expect([path, await call(failing, path, init)]).toEqual([path, { status: 500, body: { error: 'internal error', code: 'internal_error' } }])
+      }
+      expect(log).toHaveBeenCalledTimes(9)
     } finally {
       log.mockRestore()
     }

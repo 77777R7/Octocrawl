@@ -8,6 +8,7 @@ import type {
 } from '@w2l/contracts'
 import { DOCUMENT_RULE_VERSION, FIRECRAWL_INTRO_URL, parseMonitorRevision, monitorIdentity, type TransportRepresentation } from '@w2l/contracts'
 import { fieldComparable } from './configuredAssessment.js'
+import { StoreRefusal } from './storeRefusal.js'
 import { createDeliveryTables, enqueueEventDeliveries, registerDeliveryDestination } from './deliveryStore.js'
 import type { WebhookEventEnvelope, DeliveryDestinationInput, DeliveryDestination } from '@w2l/contracts'
 
@@ -109,18 +110,18 @@ export class MonitorStore {
 
   createOrGetRevision(revision: MonitorRevision, initialEnabled = true): MonitorRevision {
     if (revision.config) revision = parseMonitorRevision(revision)
-    else if (revision.url !== FIRECRAWL_INTRO_URL || revision.ruleVersion !== DOCUMENT_RULE_VERSION) throw new Error('unsupported monitor adapter')
-    if (![revision.revision, revision.intervalMs, revision.staleAfterMs].every((n) => Number.isSafeInteger(n) && n > 0)) throw new Error('invalid revision or interval')
+    else if (revision.url !== FIRECRAWL_INTRO_URL || revision.ruleVersion !== DOCUMENT_RULE_VERSION) throw new StoreRefusal('unsupported monitor adapter')
+    if (![revision.revision, revision.intervalMs, revision.staleAfterMs].every((n) => Number.isSafeInteger(n) && n > 0)) throw new StoreRefusal('invalid revision or interval')
     return this.db.transaction(() => {
       const existing = this.db.prepare('SELECT * FROM monitor_revisions WHERE monitor_id = ? AND revision = ?').get(revision.monitorId, revision.revision) as Record<string, unknown> | undefined
       if (existing) {
-        if (existing.url !== revision.url || existing.rule_version !== revision.ruleVersion || existing.interval_ms !== revision.intervalMs || existing.stale_after_ms !== revision.staleAfterMs || existing.config_json !== (revision.config ? JSON.stringify(revision.config) : null)) throw new Error('revision is immutable')
+        if (existing.url !== revision.url || existing.rule_version !== revision.ruleVersion || existing.interval_ms !== revision.intervalMs || existing.stale_after_ms !== revision.staleAfterMs || existing.config_json !== (revision.config ? JSON.stringify(revision.config) : null)) throw new StoreRefusal('revision is immutable')
         return { ...revision, createdAt: Number(existing.created_at) }
       }
       const current = this.db.prepare('SELECT * FROM monitors WHERE id=?').get(revision.monitorId) as MonitorRow | undefined
-      if (revision.revision !== (current?.revision ?? 0) + 1) throw new Error('revision must be sequential')
-      if (current && JSON.stringify(monitorIdentity(this.getRevision(revision.monitorId))) !== JSON.stringify(monitorIdentity(revision))) throw new Error('identity change requires a new monitor')
-      if (this.db.prepare("SELECT id FROM monitor_runs WHERE monitor_id=? AND state IN ('running','waiting_retry','queued','committing')").get(revision.monitorId)) throw new Error('cannot revise active monitor')
+      if (revision.revision !== (current?.revision ?? 0) + 1) throw new StoreRefusal('revision must be sequential')
+      if (current && JSON.stringify(monitorIdentity(this.getRevision(revision.monitorId))) !== JSON.stringify(monitorIdentity(revision))) throw new StoreRefusal('identity change requires a new monitor')
+      if (this.db.prepare("SELECT id FROM monitor_runs WHERE monitor_id=? AND state IN ('running','waiting_retry','queued','committing')").get(revision.monitorId)) throw new StoreRefusal('cannot revise active monitor')
       const now = revision.createdAt
       if (!current) {
         this.db.prepare(`INSERT INTO monitors (id, enabled, control_epoch, revision, url, rule_version, interval_ms, stale_after_ms, created_at, updated_at, next_run_at) VALUES (?,?,1,?,?,?,?,?,?,?,?)`)
@@ -137,11 +138,11 @@ export class MonitorStore {
 
   /** A manual MCP run is durable before the HTTP response is sent. The scheduler claims it later. */
   enqueueRun(monitorId: string, triggerKey = `manual:${crypto.randomUUID()}`, now = Date.now()): MonitorRun {
-    if (!triggerKey.trim() || triggerKey.length > 200) throw new Error('invalid trigger key')
+    if (!triggerKey.trim() || triggerKey.length > 200) throw new StoreRefusal('invalid trigger key')
     return this.db.transaction(() => {
       const monitor = this.db.prepare('SELECT * FROM monitors WHERE id=?').get(monitorId) as MonitorRow | undefined
-      if (!monitor) throw new Error('monitor not found')
-      if (!monitor.enabled) throw new Error('monitor paused')
+      if (!monitor) throw new StoreRefusal('monitor not found')
+      if (!monitor.enabled) throw new StoreRefusal('monitor paused')
       const storedKey = JSON.stringify([monitorId, triggerKey])
       const existing = this.db.prepare('SELECT * FROM monitor_runs WHERE monitor_id=? AND trigger_key IN (?,?)').get(monitorId, storedKey, triggerKey) as RunRow | undefined
       if (existing) return runFrom(existing)
@@ -282,7 +283,7 @@ export class MonitorStore {
   cancel(monitorId: string, runId: string, now = Date.now()): MonitorView {
     this.db.transaction(() => {
       const run = this.getRun(runId)
-      if (!run || run.monitorId !== monitorId) throw new Error('run not found')
+      if (!run || run.monitorId !== monitorId) throw new StoreRefusal('run not found')
       if (['queued','running','waiting_retry','committing'].includes(run.state)) {
         this.finishRun(runId, 'cancelled', 'unknown', 'cannot_verify', now, 'cancelled by user')
       }
@@ -293,7 +294,7 @@ export class MonitorStore {
   setEnabled(monitorId: string, enabled: boolean, now = Date.now()): MonitorView {
     this.db.transaction(() => {
       const monitor = this.db.prepare('SELECT enabled FROM monitors WHERE id=?').get(monitorId) as {enabled:number} | undefined
-      if (!monitor) throw new Error('monitor not found')
+      if (!monitor) throw new StoreRefusal('monitor not found')
       if ((monitor.enabled === 1) === enabled) return
       const active = this.db.prepare("SELECT id FROM monitor_runs WHERE monitor_id=? AND state IN ('queued','running','waiting_retry','committing')").all(monitorId) as {id:string}[]
       if (!enabled) for (const run of active) this.cancel(monitorId, run.id, now)
@@ -440,7 +441,7 @@ export class MonitorStore {
 
   view(monitorId: string, now: number): MonitorView {
     const row = this.db.prepare('SELECT * FROM monitors WHERE id=?').get(monitorId) as MonitorRow
-    if (!row) throw new Error('monitor not found')
+    if (!row) throw new StoreRefusal('monitor not found')
     const revision = this.getRevision(monitorId,row.revision)
     const runs = (this.db.prepare('SELECT * FROM monitor_runs WHERE monitor_id=? ORDER BY created_at DESC').all(monitorId) as RunRow[]).map(runFrom)
     const events = (this.db.prepare('SELECT * FROM monitor_events WHERE monitor_id=? ORDER BY observed_at DESC').all(monitorId) as EventRow[]).map(eventFrom)

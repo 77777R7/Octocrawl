@@ -471,6 +471,7 @@ describe('@w2l/runtime public surface', () => {
       'SHELL_TEXT_MAX',
       'SIGNALS_TO_SLOW',
       'SqliteTaskStore',
+      'StoreRefusal',
       'VERIFIER_VERSION',
       'WebhookInbox',
       'assessConfiguredDocument',
