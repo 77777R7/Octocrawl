@@ -112,6 +112,10 @@ beforeAll(async () => {
     if (url === '/vlist') return html(`<h1>Readings</h1>${PROSE}<div id="box" style="height:600px;overflow:auto;position:relative"><div id="inner" style="height:30000px;position:relative"></div></div><script>const box = document.getElementById('box'); const inner = document.getElementById('inner'); const draw = () => { const first = Math.max(0, Math.floor(box.scrollTop / 30) - 5); const last = Math.min(999, Math.ceil((box.scrollTop + 600) / 30) + 5); let h = ''; for (let i = first; i <= last; i++) h += '<div class="vrow" style="position:absolute;top:' + (i * 30) + 'px;height:30px">Reading ' + (i + 1) + '</div>'; inner.innerHTML = h }; box.addEventListener('scroll', draw); draw()</script>`)
     // A feed scrolled in the window that loads 50 posts more near its end, until 300, and keeps only the posts near the viewport in the DOM.
     if (url === '/vfeed') return html(`<h1>Feed</h1>${PROSE}<div id="inner" style="position:relative"></div><script>let total = 50; const inner = document.getElementById('inner'); const draw = () => { inner.style.height = (total * 100) + 'px'; const top = inner.getBoundingClientRect().top + scrollY; const y = scrollY - top; const first = Math.max(0, Math.floor(y / 100) - 3); const last = Math.min(total - 1, Math.ceil((y + innerHeight) / 100) + 3); let h = ''; for (let i = first; i <= last; i++) h += '<article class="post" style="position:absolute;top:' + (i * 100) + 'px;height:100px">Post ' + (i + 1) + '</article>'; inner.innerHTML = h; if (y + innerHeight >= total * 100 - 200 && total < 300) setTimeout(() => { total = Math.min(300, total + 50); draw() }, 200) }; addEventListener('scroll', draw); draw()</script>`)
+    // A data grid of 10 rows by 12 years drawn with ARIA roles, as Eurostat's is (T055): a 600 px box scrolled to its right
+    // end on load, the row labels always drawn, and only the year columns in view in the DOM. It says how many columns it
+    // has (aria-colcount 13: the label and 12 years).
+    if (url === '/hgrid') return html(`<h1>Readings by year</h1>${PROSE}<div id="gbox" style="width:600px;overflow-x:auto"><div role="grid" aria-rowcount="11" aria-colcount="13" id="grid" style="position:relative;width:1800px;height:330px"></div></div><script>const box = document.getElementById('gbox'); const grid = document.getElementById('grid'); const years = Array.from({ length: 12 }, (_, i) => 2015 + i); const draw = () => { const left = box.scrollLeft; const shown = years.filter((y, i) => 120 + (i + 1) * 140 > left && 120 + i * 140 < left + 600); const cell = (role, col, x, text) => '<div role="' + role + '" aria-colindex="' + col + '" style="position:absolute;left:' + x + 'px;width:140px">' + text + '</div>'; let h = '<div role="row" aria-rowindex="1" style="position:absolute;top:0;height:30px">' + cell('columnheader', 1, 0, 'Station'); for (const y of shown) h += cell('columnheader', y - 2013, 120 + (y - 2015) * 140, String(y)); h += '</div>'; for (let r = 1; r <= 10; r++) { h += '<div role="row" aria-rowindex="' + (r + 1) + '" style="position:absolute;top:' + (r * 30) + 'px;height:30px">' + cell('rowheader', 1, 0, 'Station ' + r); for (const y of shown) h += cell('gridcell', y - 2013, 120 + (y - 2015) * 140, 'r' + r + '-' + y); h += '</div>' } grid.innerHTML = h }; box.addEventListener('scroll', draw); box.scrollLeft = 1200; draw()</script>`)
     res.writeHead(404); res.end()
   })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -356,5 +360,35 @@ describe('scrollToEnd on lists a jump to the end skips, real browser', () => {
 
   it.fails('reads all 300 posts of a feed that keeps only the posts near the viewport', () => {
     expect(missing(read.vfeed.markdown, 'Post', 300)).toEqual([])
+  })
+})
+
+/**
+ * A known gap, not yet fixed (research/parity/runs/2026-11-12-t055-scrolltoend-grid-51d725c7.md): a grid that draws only
+ * the columns in view is read with those columns alone: scrollToEnd moves only down, and scroll's direction is up or
+ * down (packages/contracts/src/actions.ts). The read says nothing of the columns it left out though the grid declares
+ * them (aria-colcount). The plain test pins today's read; the `it.fails` test states what a read should do: give every
+ * column, or say it did not. When it does, turn the `it.fails` test into a plain one and drop the pin.
+ */
+describe('a grid that draws only the columns in view, real browser', () => {
+  let read: FetchResult
+  const years = Array.from({ length: 12 }, (_, i) => 2015 + i)
+  /** The years of which no row's cell was read. */
+  const missingYears = (markdown: string | null | undefined): number[] => years.filter((y) => !(markdown ?? '').includes(`r1-${y}`))
+
+  beforeAll(async () => {
+    read = await run('/hgrid', [{ type: 'scrollToEnd', itemSelector: '[role="row"]', waitMs: 400 }])
+  }, 60_000)
+
+  it('today: it reads the years in view as a table, says the list ended and warns of nothing', () => {
+    expect(read.status).toBe('success')
+    expect(read.actions?.lists).toMatchObject([{ type: 'scrollToEnd', stoppedBy: 'end', items: 11 }])
+    expect(read.markdown).toContain('| Station 10 |')
+    expect(missingYears(read.markdown)).toEqual([2015, 2016, 2017, 2018, 2019, 2020, 2021])
+    expect(read.warnings ?? []).toEqual([])
+  })
+
+  it.fails('reads every year column of the grid, or warns that it did not', () => {
+    expect(missingYears(read.markdown).length === 0 || (read.warnings ?? []).length > 0).toBe(true)
   })
 })
