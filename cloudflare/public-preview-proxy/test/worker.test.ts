@@ -45,4 +45,19 @@ describe('public preview proxy worker', () => {
     expect(headers.get('x-w2l-proxy-secret')).toBe('test-secret')
     expect(init.redirect).toBe('manual')
   })
+
+  it('answers with the paused notice itself and never calls the service while PAUSED is set, still redirecting other hosts', async () => {
+    const fetchStub = vi.fn(async () => new Response('ok'))
+    vi.stubGlobal('fetch', fetchStub)
+    const paused = { ...env, PAUSED: '1' }
+    const response = await worker.fetch(new Request('https://octocrawl.dev/docs/api?tab=scrape'), paused)
+    expect(response.status).toBe(503)
+    expect(response.headers.get('content-type')).toContain('text/html')
+    expect(response.headers.get('retry-after')).toBe('86400')
+    expect(await response.text()).toContain('Octocrawl is paused')
+    const redirect = await worker.fetch(new Request('https://octocrawl.app/x'), paused)
+    expect(redirect.status).toBe(301)
+    expect(redirect.headers.get('location')).toBe('https://octocrawl.dev/x')
+    expect(fetchStub).not.toHaveBeenCalled()
+  })
 })

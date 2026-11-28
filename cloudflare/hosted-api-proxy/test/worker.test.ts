@@ -41,6 +41,20 @@ describe('hosted api proxy worker', () => {
     expect(new Headers((fetchStub.mock.calls[0] as [URL, RequestInit])[1].headers).get('x-forwarded-host')).toBe('mcp.octocrawl.dev')
   })
 
+  it('answers 503 service_paused itself and never calls the service while PAUSED is set', async () => {
+    const fetchStub = vi.fn(async () => new Response('ok'))
+    vi.stubGlobal('fetch', fetchStub)
+    const paused = { ...env, PAUSED: '1' }
+    for (const url of ['https://mcp.octocrawl.dev/mcp', 'https://api.octocrawl.dev/v1/scrape']) {
+      const response = await worker.fetch(new Request(url, { method: 'POST', body: '{}' }), paused)
+      expect(response.status).toBe(503)
+      expect(response.headers.get('retry-after')).toBe('86400')
+      expect(await response.json()).toMatchObject({ code: 'service_paused' })
+    }
+    expect((await worker.fetch(new Request('https://api.octocrawl.dev/health'), paused)).status).toBe(503)
+    expect(fetchStub).not.toHaveBeenCalled()
+  })
+
   it('redirects plain http to https and keeps a protocol-relative path on the origin host', async () => {
     const redirect = await worker.fetch(new Request('http://api.octocrawl.dev/health'), env)
     expect(redirect.status).toBe(301)
