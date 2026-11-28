@@ -14,3 +14,7 @@ routes = [
 [vars]
 ORIGIN_URL = "https://w2l-public-preview-307354954747.asia-southeast1.run.app"
 PRIMARY_HOST = "octocrawl.dev"
+# The site is paused (2026-11-28): the Worker answers every page with a short notice (503) and does not call the
+# service. To resume, remove this line and deploy, after giving the service its public access back
+# (docs/hosted-api.md, "Pausing").
+PAUSED = "1"

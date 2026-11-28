@@ -4,12 +4,24 @@
 // it is this Worker with the PROXY_SECRET it shares with the service (W2L_PROXY_SECRET); without the secret the
 // service does not believe CF-Connecting-IP (packages/mcp/src/hostedApi.ts, clientAddress). Nothing is redirected
 // between hosts: API clients and MCP clients do not follow redirects well, and each host serves the same process.
+//
+// While PAUSED is set (wrangler.toml), the Worker answers every request itself and the service is never called, so the
+// hosts keep explaining themselves after the service's public access is removed (docs/hosted-api.md, "Pausing").
+const PAUSED_BODY = JSON.stringify({
+  error: 'Octocrawl\'s hosted API and MCP server are paused for now, so this request did not run. The open-source server still works on your own computer.',
+  code: 'service_paused',
+  agentHints: ['run Octocrawl locally instead: npx octocrawl serve', 'source and updates: https://github.com/77777R7/Octocrawl'],
+})
+
 export default {
   async fetch(request, env) {
     const incoming = new URL(request.url)
     if (incoming.protocol === 'http:') {
       incoming.protocol = 'https:'
       return Response.redirect(incoming.toString(), 301)
+    }
+    if (env.PAUSED) {
+      return new Response(PAUSED_BODY, { status: 503, headers: { 'content-type': 'application/json; charset=utf-8', 'retry-after': '86400', 'cache-control': 'no-store' } })
     }
     // Set the path on ORIGIN_URL rather than resolving it against ORIGIN_URL: a path starting with `//` would resolve
     // as protocol-relative and send the request, PROXY_SECRET included, to another host.

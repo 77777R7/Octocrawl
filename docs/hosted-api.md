@@ -103,6 +103,16 @@ claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp && claud
 
 To roll back, `gcloud run services update-traffic octocrawl-api --to-tags=<previous tag>=100`.
 
+### Pausing
+
+To take the hosted service and the site offline without deleting anything, in this order:
+
+1. Set `PAUSED = "1"` under `[vars]` in `cloudflare/hosted-api-proxy/wrangler.toml` and `cloudflare/public-preview-proxy/wrangler.toml` and run `npx wrangler deploy` in each directory. The Workers then answer every request themselves and never call Cloud Run: `503` with code `service_paused` on `api.octocrawl.dev` and `mcp.octocrawl.dev`, and a short notice page (`503`) on `octocrawl.dev`.
+2. Remove public access from the two public services, because their run.app addresses, tag URLs included, stay callable otherwise: `gcloud run services remove-iam-policy-binding <service> --region=asia-southeast1 --member=allUsers --role=roles/run.invoker --project="$W2L_PROJECT_ID"` for `octocrawl-api` and `w2l-public-preview`.
+3. Pause the job queue, so no slice wakes the worker: `gcloud tasks queues pause octocrawl-jobs --location=asia-southeast1 --project="$W2L_PROJECT_ID"`.
+
+To resume, undo the steps in reverse: `gcloud tasks queues resume`, `gcloud run services add-iam-policy-binding` with the same member and role, then remove the `PAUSED` line from both files and deploy both Workers.
+
 ## Batch and crawl jobs
 
 Hosted batch (1–1,000 URLs) and crawl (at most 500 pages) jobs (ROADMAP PH stage H1, [plan](launch/2026-10-19-h1-hosted-jobs-plan.md), [task list](h1-hosted-jobs-tasks.md)) run for accounts' keys only, a slice at a time: the API (`hostedJobRoutes.ts`) writes the job to Firestore (`hostedJobs`) and queues its first slice on Cloud Tasks; the worker service `octocrawl-jobs` (`hostedJobWorker.ts`, on the same image) runs each slice and writes its pages to GCS. Both services turn jobs on when all five variables are set (`hostedJobsCloud.ts`):

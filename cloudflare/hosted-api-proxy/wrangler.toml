@@ -15,3 +15,7 @@ routes = [
 [vars]
 # The run.app address of the `octocrawl-api` service: `gcloud run services describe octocrawl-api --format='value(status.url)'`.
 ORIGIN_URL = "https://octocrawl-api-307354954747.asia-southeast1.run.app"
+# The hosted service is paused (2026-11-28): the Worker answers 503 `service_paused` itself and does not call the
+# service. To resume, remove this line and deploy, after giving the service its public access back
+# (docs/hosted-api.md, "Pausing").
+PAUSED = "1"
